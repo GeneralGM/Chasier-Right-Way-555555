@@ -1,0 +1,353 @@
+// POS-only persistent state: employees, customers, live tables, invoices, shifts.
+// Lives in its own localStorage key so it does not conflict with the inventory DB.
+import { useCallback, useEffect, useState } from "react";
+import { round2, clamp0 } from "./format";
+
+export type EmployeeRole = "كاشير" | "كابتن صالة";
+export interface Employee {
+  id: string;
+  name: string;
+  role: EmployeeRole;
+  pinHash: string;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  address: string;
+  orderCount: number;
+  createdAt: number;
+}
+
+export type ZoneId =
+  | "close"
+  | "open"
+  | "takeaway"
+  | "others"
+  | "small"
+  | "large"
+  | "kids";
+export interface Zone {
+  id: ZoneId;
+  label: string;
+  prefix: string;
+  count: number;
+}
+export const ZONES: Zone[] = [
+  { id: "close", label: "صالة مغلقة", prefix: "C", count: 70 },
+  { id: "open", label: "صالة مفتوحة", prefix: "O", count: 70 },
+  { id: "takeaway", label: "Take-away", prefix: "T", count: 0 },
+  { id: "others", label: "Others", prefix: "X", count: 20 },
+  { id: "small", label: "القاعة الصغيرة", prefix: "ص", count: 30 },
+  { id: "large", label: "القاعة الكبيرة", prefix: "ك", count: 50 },
+  { id: "kids", label: "منطقة الأطفال", prefix: "K", count: 20 },
+];
+export const PAGE_SIZE = 20;
+
+export type TableState = "empty" | "active" | "printed";
+
+export interface OrderItem {
+  id: string; // line id
+  mealId: string;
+  name: string;
+  qty: number;
+  unitPrice: number; // base meal price
+  extras: { label: string; price: number }[]; // chosen modifier options
+  modifiersSummary?: string;
+}
+export interface ActiveOrder {
+  tableCode: string; // e.g. "O12"
+  zone: ZoneId;
+  items: OrderItem[];
+  state: TableState;
+  discountPct: number;
+  taxPct: number; // 14 for dine-in, 0 for takeaway
+  customerName?: string;
+  customerAddress?: string;
+  openedAt: number;
+  inventoryDeducted?: boolean; // NEW: tracks whether inventory has been committed for this order
+}
+
+export interface Invoice {
+  id: string;
+  type: "dinein" | "takeaway";
+  tableCode?: string;
+  zone?: ZoneId;
+  customerName?: string;
+  customerAddress?: string;
+  cashierId?: string;
+  cashierName?: string;
+  items: OrderItem[];
+  subtotal: number;
+  discountPct: number;
+  discountValue: number;
+  taxPct: number;
+  taxValue: number;
+  total: number;
+  createdAt: number;
+}
+
+export interface ShiftState {
+  cashierId: string;
+  cashierName: string;
+  openedAt: number;
+  closedAt?: number; // NEW: when the shift was closed
+}
+
+interface PosDB {
+  employees: Employee[];
+  customers: Customer[];
+  orders: Record<string, ActiveOrder>;
+  invoices: Invoice[];
+  shift: ShiftState | null; // الشيفت الحالي (اللي شغال دلوقتي)
+  shifts: ShiftState[]; // سجل الشيفتات (الأرشيف)
+}
+const KEY = "rest-pos-db-v1";
+
+async function sha256(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(s),
+  );
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+export const hashPin = sha256;
+
+function defaultDB(): PosDB {
+  return {
+    employees: [],
+    customers: [],
+    orders: {},
+    invoices: [],
+    shift: null,
+    shifts: [],
+  };
+}
+function load(): PosDB {
+  if (typeof window === "undefined") return defaultDB();
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) {
+      const d = defaultDB();
+      localStorage.setItem(KEY, JSON.stringify(d));
+      return d;
+    }
+    const p = JSON.parse(raw);
+    return {
+      employees: Array.isArray(p.employees) ? p.employees : [],
+      customers: Array.isArray(p.customers) ? p.customers : [],
+      orders: p.orders && typeof p.orders === "object" ? p.orders : {},
+      invoices: Array.isArray(p.invoices) ? p.invoices : [],
+      shift: p.shift || null,
+      shifts: Array.isArray(p.shifts) ? p.shifts : [], // FIXED: now properly persists shifts archive
+    };
+  } catch {
+    return defaultDB();
+  }
+}
+function save(db: PosDB) {
+  localStorage.setItem(KEY, JSON.stringify(db));
+  window.dispatchEvent(new Event("pos-update"));
+}
+
+export function usePosDB() {
+  const [db, setDb] = useState<PosDB>(() =>
+    typeof window !== "undefined" ? load() : defaultDB(),
+  );
+  useEffect(() => {
+    const r = () => setDb(load());
+    r();
+    window.addEventListener("pos-update", r);
+    window.addEventListener("storage", r);
+    return () => {
+      window.removeEventListener("pos-update", r);
+      window.removeEventListener("storage", r);
+    };
+  }, []);
+
+  // -------- Employees --------
+  const addEmployee = useCallback(
+    async (name: string, role: EmployeeRole, pin: string) => {
+      const cur = load();
+      cur.employees.push({
+        id: crypto.randomUUID(),
+        name: name.trim(),
+        role,
+        pinHash: await sha256(pin),
+      });
+      save(cur);
+    },
+    [],
+  );
+  const updateEmployee = useCallback(
+    async (
+      id: string,
+      patch: Partial<Pick<Employee, "name" | "role">> & { newPin?: string },
+    ) => {
+      const cur = load();
+      const e = cur.employees.find((x) => x.id === id);
+      if (!e) return;
+      if (patch.name !== undefined) e.name = patch.name.trim();
+      if (patch.role !== undefined) e.role = patch.role;
+      if (patch.newPin) e.pinHash = await sha256(patch.newPin);
+      save(cur);
+    },
+    [],
+  );
+  const deleteEmployee = useCallback((id: string) => {
+    const cur = load();
+    cur.employees = cur.employees.filter((e) => e.id !== id);
+    save(cur);
+  }, []);
+  const verifyEmployeePin = useCallback(async (id: string, pin: string) => {
+    const cur = load();
+    const e = cur.employees.find((x) => x.id === id);
+    if (!e) return false;
+    return (await sha256(pin)) === e.pinHash;
+  }, []);
+  const findByPin = useCallback(async (pin: string, role?: EmployeeRole) => {
+    const cur = load();
+    const h = await sha256(pin);
+    return (
+      cur.employees.find(
+        (e) => e.pinHash === h && (!role || e.role === role),
+      ) || null
+    );
+  }, []);
+
+  // -------- Customers --------
+  const addCustomer = useCallback((name: string, address: string) => {
+    const cur = load();
+    cur.customers.push({
+      id: crypto.randomUUID(),
+      name: name.trim(),
+      address: address.trim(),
+      orderCount: 0,
+      createdAt: Date.now(),
+    });
+    save(cur);
+  }, []);
+  const incCustomerOrders = useCallback((id: string) => {
+    const cur = load();
+    const c = cur.customers.find((x) => x.id === id);
+    if (c) {
+      c.orderCount += 1;
+      save(cur);
+    }
+  }, []);
+
+  // -------- Orders / Tables --------
+  const upsertOrder = useCallback((order: ActiveOrder) => {
+    const cur = load();
+    cur.orders[order.tableCode] = order;
+    save(cur);
+  }, []);
+  const clearOrder = useCallback((tableCode: string) => {
+    const cur = load();
+    delete cur.orders[tableCode];
+    save(cur);
+  }, []);
+  const transferItems = useCallback(
+    (from: string, to: string, lineIds: string[], targetZone: ZoneId) => {
+      const cur = load();
+      const src = cur.orders[from];
+      if (!src) return { ok: false as const, error: "الطاولة المصدر فارغة" };
+      const moving = src.items.filter((i) => lineIds.includes(i.id));
+      if (moving.length === 0)
+        return { ok: false as const, error: "لم يتم اختيار أصناف" };
+      src.items = src.items.filter((i) => !lineIds.includes(i.id));
+      const dst: ActiveOrder = cur.orders[to] || {
+        tableCode: to,
+        zone: targetZone,
+        items: [],
+        state: "active",
+        discountPct: 0,
+        taxPct: 14,
+        openedAt: Date.now(),
+      };
+      dst.items.push(...moving);
+      dst.state = "active";
+      cur.orders[to] = dst;
+      if (src.items.length === 0) delete cur.orders[from];
+      else src.state = "active";
+      save(cur);
+      return { ok: true as const };
+    },
+    [],
+  );
+
+  // -------- Invoices --------
+  const addInvoice = useCallback((inv: Invoice) => {
+    const cur = load();
+    cur.invoices.unshift(inv);
+    save(cur);
+  }, []);
+
+  // -------- Shift --------
+  const openShift = useCallback((cashierId: string, cashierName: string) => {
+    const cur = load();
+    cur.shift = { cashierId, cashierName, openedAt: Date.now() };
+    save(cur);
+  }, []);
+  const closeShift = useCallback(() => {
+    const cur = load();
+
+    if (cur.shift) {
+      // 1. قبل ما نمسح الشيفت، بنأرشيفه
+      // بنضيف التاريخ الحالي للـ endTime عشان نعرف الشيفت قفل امتى
+      const closedShift = {
+        ...cur.shift,
+        closedAt: Date.now(),
+        // لو محتاج تضيف أي داتا تانية زي إجمالي المبيعات، ضيفها هنا
+      };
+
+      // 2. بنضيفه لمصفوفة الـ shifts (اللي ضفناها في الـ interface)
+      cur.shifts = [...(cur.shifts || []), closedShift];
+    }
+
+    // 3. بنصفر الشيفت الحالي
+    cur.shift = null;
+
+    save(cur);
+  }, []);
+
+  return {
+    db,
+    addEmployee,
+    updateEmployee,
+    deleteEmployee,
+    verifyEmployeePin,
+    findByPin,
+    addCustomer,
+    incCustomerOrders,
+    upsertOrder,
+    clearOrder,
+    transferItems,
+    addInvoice,
+    openShift,
+    closeShift,
+  };
+}
+
+// Receipt total math helper used in print & checkout
+export function computeTotals(
+  items: OrderItem[],
+  discountPct: number,
+  taxPct: number,
+) {
+  const subtotal = round2(
+    items.reduce((s, l) => {
+      const extras = l.extras.reduce((x, e) => x + clamp0(e.price), 0);
+      return s + (clamp0(l.unitPrice) + extras) * clamp0(l.qty);
+    }, 0),
+  );
+  const dp = clamp0(discountPct);
+  const tp = clamp0(taxPct);
+  const discountValue = round2((subtotal * dp) / 100);
+  const afterDiscount = round2(subtotal - discountValue);
+  const taxValue = round2((afterDiscount * tp) / 100);
+  const total = round2(afterDiscount + taxValue);
+  return { subtotal, discountValue, taxValue, total };
+}

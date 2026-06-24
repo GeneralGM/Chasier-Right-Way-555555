@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { useDB } from "@/lib/store";
 import { usePosDB } from "@/lib/pos-store.ts";
 import { fmt2, clamp0 } from "@/lib/format";
-import { SHISHA_CATEGORY } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import {
   DollarSign,
@@ -18,6 +17,7 @@ import {
   Wallet,
   Printer,
   LogOut,
+  Bike,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -45,22 +45,30 @@ function ReportsPage() {
   const stats = useMemo(() => {
     let kitchen = 0,
       bar = 0,
-      shisha = 0,
-      takeaway = 0;
+      shisha = 0;
+    let takeawayOnly = 0,
+      deliveryOnly = 0,
+      deliveryFeesOnly = 0;
     let subtotal = 0,
       discount = 0,
-      tax = 0,
-      total = 0;
+      tax = 0;
 
     for (const inv of invoices) {
       subtotal += inv.subtotal;
       discount += inv.discountValue;
       tax += inv.taxValue;
-      total += inv.total;
+
+      // 🌟 السطر السحري: بيضمن يقرأ التوصيل لو اسمه deliveryPrice أو delivery_price من الداتابيز
+      const deliveryFee =
+        Number(inv.deliveryPrice) || Number((inv as any).delivery_price) || 0;
+
+      // هنا بنجمع رسوم التوصيل عشان تظهر في الكارت بتاعها
+      deliveryFeesOnly += deliveryFee;
 
       if (inv.type === "takeaway") {
-        takeaway += inv.total;
-        continue;
+        takeawayOnly += inv.total - deliveryFee;
+      } else if (inv.type === "delivery") {
+        deliveryOnly += inv.total - deliveryFee;
       }
 
       for (const line of inv.items) {
@@ -70,41 +78,31 @@ function ReportsPage() {
         const extras = line.extras.reduce((s, e) => s + e.price, 0);
         const v = (line.unitPrice + extras) * line.qty;
 
-        // --- التعديل هنا: تصحيح المنطق ---
-        // بنشوف الـ category بتاع الوجبة ونقارنه بـ SHISHA_CATEGORY
-        // إذا كان يساويه، نضيف للشيشة
         const isShisha =
           meal.department === "شيشه" ||
           (meal.category || "").trim().replace("ة", "ه") === "شيشه";
 
-        if (isShisha) {
-          shisha += v;
-        } else if (meal.department === "بار") {
-          bar += v;
-        } else {
-          kitchen += v;
-        }
-        if (line.mealId) {
-          const meal = db.meals.find((m) => m.id === line.mealId);
-          if (meal) {
-            console.log(
-              `الوجبة: ${meal.name} | التصنيف في الداتابيز: "${meal.category}" | المطلوب: "${SHISHA_CATEGORY}"`,
-            );
-          }
-        }
+        if (isShisha) shisha += v;
+        else if (meal.department === "بار") bar += v;
+        else kitchen += v;
       }
     }
+
+    // الإيرادات زي ما هي بالظبط بناءً على رغبتك ومن غير ما يدخل فيها التوصيل
+    const finalNetCash = kitchen + bar + shisha + tax - discount;
 
     return {
       kitchen: clamp0(kitchen),
       bar: clamp0(bar),
       shisha: clamp0(shisha),
-      takeaway: clamp0(takeaway),
+      takeaway: clamp0(takeawayOnly),
+      deliveryTotal: clamp0(deliveryOnly),
+      deliveryFees: clamp0(deliveryFeesOnly), // 🌟 دي اللي هتظهر الـ 500 ج في الكارت بناءً على الداتابيز
       subtotal: clamp0(subtotal),
       discount: clamp0(discount),
       tax: clamp0(tax),
-      total: clamp0(total),
-      revenues: clamp0(kitchen + bar + shisha + takeaway),
+      total: clamp0(finalNetCash),
+      revenues: clamp0(finalNetCash),
     };
   }, [invoices, db.meals]);
 
@@ -141,14 +139,14 @@ function ReportsPage() {
               variant="destructive"
               className="gap-2"
             >
-              <Printer className="w-4 h-4" /> 'طباعة وتقفيل الشيفت'{" "}
+              <Printer className="w-4 h-4" /> طباعة وتقفيل الشيفت{" "}
               <LogOut className="w-4 h-4" />
             </Button>
           )}
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <Card
           icon={DollarSign}
           label="الإيرادات"
@@ -170,9 +168,21 @@ function ReportsPage() {
         />
         <Card
           icon={ShoppingBag}
-          label="التيك أواي"
+          label="التيك أواي (إحصائية)"
           value={stats.takeaway}
           accent="sky"
+        />
+        <Card
+          icon={Bike}
+          label="أوردر التوصيل (إحصائية)"
+          value={stats.deliveryTotal}
+          accent="orange"
+        />
+        <Card
+          icon={DollarSign}
+          label="رسوم التوصيل"
+          value={stats.deliveryFees}
+          accent="emerald"
         />
         <Card
           icon={Percent}
@@ -244,7 +254,17 @@ function ReportsPage() {
                     {new Date(inv.createdAt).toLocaleTimeString("ar-EG")}
                   </td>
                   <td className="p-2">
-                    {inv.type === "takeaway" ? "تيك أواي" : "صالة"}
+                    {inv.type === "delivery" ? (
+                      <span className="text-amber-600 font-medium">
+                        توصيل 🛵
+                      </span>
+                    ) : inv.type === "takeaway" ? (
+                      <span className="text-green-600 font-medium">
+                        تيك أواي 🛍️
+                      </span>
+                    ) : (
+                      <span className="text-blue-600 font-medium">صالة 🍽️</span>
+                    )}
                   </td>
                   <td className="p-2 font-mono">
                     {inv.tableCode || inv.customerName}

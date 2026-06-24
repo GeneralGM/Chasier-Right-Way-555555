@@ -39,7 +39,8 @@ export interface Employee {
 export interface Customer {
   id: string;
   name: string;
-  address: string;
+  phone?: string; // 🌟 حقل الهاتف اختياري
+  address?: string; // 🌟 حقل العنوان اختياري
   orderCount: number;
   createdAt: number;
 }
@@ -94,11 +95,15 @@ export interface ActiveOrder {
   customerAddress?: string;
   openedAt: number;
   inventoryDeducted?: boolean;
+  type?: "takeaway" | "delivery";
+  customerPhone?: string | null; // حل الخطأ الحالي ts(2561)
+  deliveryPrice?: number; // عشان تضمن إن سعر التوصيل ميعملش خطأ بعده
 }
 
 export interface Invoice {
   id: string;
-  type: "dinein" | "takeaway";
+  type: "dinein" | "takeaway" | "delivery"; // 🌟 ضيف الأنواع دي هنا
+  deliveryPrice?: number;
   invoiceNumber: number;
   tableCode?: string;
   zone?: ZoneId;
@@ -323,19 +328,53 @@ export function usePosDB() {
       ) || null
     );
   }, []);
+  const addCustomer = useCallback(
+    async (name: string, phone?: string, address?: string) => {
+      try {
+        const res = await fetch("http://localhost:5000/api/customers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, phone, address }),
+        });
+        if (!res.ok) throw new Error("فشل حفظ العميل في السيرفر");
 
-  const addCustomer = useCallback((name: string, address: string) => {
-    const cur = load();
-    cur.customers.push({
-      id: crypto.randomUUID(),
-      name: name.trim(),
-      address: address.trim(),
-      orderCount: 0,
-      createdAt: Date.now(),
-    });
-    save(cur);
-    setDb(cur);
-  }, []);
+        // تحديث الداتا محلياً بعد الحفظ في السيرفر
+        const savedCustomer = await res.json();
+        setDb((cur) => ({
+          ...cur,
+          customers: [...cur.customers, savedCustomer],
+        }));
+        toast.success("تم إضافة العميل بنجاح 🎉");
+      } catch (err) {
+        console.error(err);
+        toast.error("خطأ أثناء إضافة العميل");
+      }
+    },
+    [],
+  );
+  const updateCustomer = useCallback(
+    async (id: string, name: string, phone?: string, address?: string) => {
+      try {
+        const res = await fetch(`http://localhost:5000/api/customers/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, phone, address }),
+        });
+        if (!res.ok) throw new Error("فشل تعديل بيانات العميل في السيرفر");
+
+        setDb((cur) => ({
+          ...cur,
+          customers: cur.customers.map((c) =>
+            c.id === id ? { ...c, name, phone, address } : c,
+          ),
+        }));
+      } catch (err) {
+        console.error(err);
+        toast.error("فشل في تعديل بيانات العميل");
+      }
+    },
+    [],
+  );
 
   const upsertOrder = useCallback((order: ActiveOrder) => {
     const cur = load();
@@ -456,6 +495,17 @@ export function usePosDB() {
       setDb(cur);
     }
   }, []);
+  const incCustomerOrders = useCallback((id?: string) => {
+    if (!id) return;
+    setDb((cur) => {
+      const updated = cur.customers.map((c) =>
+        c.id === id ? { ...c, orderCount: (c.orderCount || 0) + 1 } : c,
+      );
+      const next = { ...cur, customers: updated };
+      save(next);
+      return next;
+    });
+  }, []);
 
   const transferItems = useCallback(
     (
@@ -511,13 +561,14 @@ export function usePosDB() {
     verifyEmployeePin,
     findByPin,
     addCustomer,
+    updateCustomer, // دالة التعديل اللي ضيفناها
     upsertOrder,
     clearOrder,
     transferItems,
     addInvoice,
     openShift,
     closeShift,
-    incCustomerOrders: (id?: string) => {},
+    incCustomerOrders, // 🌟 ضيف اسما هنا بدون أي أقواس أو سهم فاضي
   };
 }
 

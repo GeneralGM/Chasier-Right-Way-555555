@@ -1,4 +1,4 @@
-// 1. استدعاء المكتبات اللي نزلناها
+// 1. استدعاء المكتبات الأساسية
 import express from "express";
 import cors from "cors";
 import pg from "pg";
@@ -7,17 +7,17 @@ import dotenv from "dotenv";
 import crypto from "crypto";
 
 dotenv.config();
-console.log("🔑 الباسورد المقروء من الـ .env هو:", process.env.DB_PASSWORD);
 
+// إعداد الاتصال بقاعدة البيانات PostgreSQL
 const pool = new Pool({
   user: "postgres",
   host: "localhost",
   database: "mall_erp",
-  password: "123456", // الباسورد بتاعك هنا مباشرة
+  password: "123456", // الباسورد الخاص بك
   port: 5432,
 });
 
-// تأكد إن كود اختبار الاتصال مكتوب تحتها بالشكل ده:
+// اختبار الاتصال بقاعدة البيانات للتأكد من نجاحه
 pool.connect((err, client, release) => {
   if (err) {
     return console.error("❌ فشل الاتصال بقاعدة البيانات:", err.stack);
@@ -26,31 +26,32 @@ pool.connect((err, client, release) => {
   release();
 });
 
-// 2. إنشاء السيرفر بتاعنا
+// 2. إنشاء وتجهيز السيرفر
 const app = express();
 
-// 3. تشغيل حارس الأمن (CORS) عشان الـ React يعرف يكلمنا
+// 3. تشغيل حارس الأمن (CORS) للسماح للـ React بالتواصل مع السيرفر
 app.use(cors());
 
-// 4. عشان السيرفر يفهم البيانات اللي جاية من الـ React بصيغة JSON
+// 4. تفعيل قراءة البيانات القادمة بصيغة JSON
 app.use(express.json());
 
 // ==========================================
-// 5. الروابط بتاعتنا (Routes)
+// 5. الروابط والمسارات (Routes)
 // ==========================================
 
-// رابط تجريبي عشان نتأكد إن السيرفر شغال
+// رابط تجريبي للمعاينة الأساسية
 app.get("/", (req, res) => {
   res.send("مرحباً بك في سيرفر إدارة المول! 🚀");
 });
 
-// رابط تجريبي هنجيب منه بيانات وهمية دلوقتي لحد ما نربط الداتا بيس
 app.get("/api/test", (req, res) => {
   res.json({
     message: "تم الاتصال بالباك إند بنجاح!",
     status: "success",
   });
 });
+
+// --- مسارات الموظفين (Employees) ---
 
 // إضافة موظف جديد
 app.post("/api/employees", async (req, res) => {
@@ -85,116 +86,11 @@ app.get("/api/employees", async (req, res) => {
 });
 
 // ==========================================
-// 📄 مسارات الفواتير (Invoices)
+// 📄 مسارات الفواتير (Invoices) - متضمنة عمود التوصيل الحقيقي
 // ==========================================
 
-// 1. حفظ فاتورة جديدة (النسخة النهائية المصححة)
-// app.post("/api/invoices", async (req, res) => {
-//   try {
-//     const data = req.body;
-
-//     const id = data.id || crypto.randomUUID();
-//     let invoice_number =
-//       data.invoiceNumber !== undefined
-//         ? data.invoiceNumber
-//         : data.invoice_number;
-//     if (
-//       invoice_number === undefined ||
-//       invoice_number === null ||
-//       invoice_number === ""
-//     ) {
-//       invoice_number = Math.floor(100000 + Math.random() * 900000);
-//     } else {
-//       invoice_number = Number(invoice_number);
-//     }
-
-//     const type = data.type || "dinein";
-//     const table_code =
-//       data.tableCode !== undefined ? data.tableCode : data.table_code || null;
-//     const items =
-//       typeof data.items === "string"
-//         ? data.items
-//         : JSON.stringify(data.items || []);
-//     const subtotal = Number(data.subtotal || 0);
-//     const discount_pct = Number(
-//       data.discountPct !== undefined
-//         ? data.discountPct
-//         : data.discount_pct || 0,
-//     );
-//     const discount_value = Number(
-//       data.discountValue !== undefined
-//         ? data.discountValue
-//         : data.discount_value || 0,
-//     );
-//     const tax_pct = Number(
-//       data.taxPct !== undefined ? data.taxPct : data.tax_pct || 0,
-//     );
-
-//     // 🔥 الغلطة كانت هنا وتم تصحيحها بالملي!
-//     const tax_value = Number(
-//       data.taxValue !== undefined ? data.taxValue : data.tax_value || 0,
-//     );
-
-//     const total = Number(data.total || 0);
-//     const cashier_id =
-//       data.cashierId !== undefined ? data.cashierId : data.cashier_id || null;
-//     const cashier_name =
-//       data.cashierName !== undefined
-//         ? data.cashierName
-//         : data.cashier_name || null;
-//     const customer_name =
-//       data.customerName !== undefined
-//         ? data.customerName
-//         : data.customer_name || null;
-//     const customer_address =
-//       data.customerAddress !== undefined
-//         ? data.customerAddress
-//         : data.customer_address || null;
-
-//     const createdAtSource = data.createdAt || data.created_at;
-//     const formattedDate = createdAtSource
-//       ? new Date(Number(createdAtSource))
-//       : new Date();
-
-//     const query = `
-//       INSERT INTO invoices (
-//         id, invoice_number, type, table_code, items, subtotal,
-//         discount_pct, discount_value, tax_pct, tax_value, total,
-//         cashier_id, cashier_name, customer_name, customer_address, created_at
-//       )
-//       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-//       RETURNING *
-//     `;
-
-//     const result = await pool.query(query, [
-//       id,
-//       invoice_number,
-//       type,
-//       table_code,
-//       items,
-//       subtotal,
-//       discount_pct,
-//       discount_value,
-//       tax_pct,
-//       tax_value,
-//       total,
-//       cashier_id,
-//       cashier_name,
-//       customer_name,
-//       customer_address,
-//       formattedDate,
-//     ]);
-
-//     res.status(201).json(result.rows[0]);
-//   } catch (err) {
-//     console.error("❌ خطأ حقيقي في حفظ الفاتورة:", err.message);
-//     res
-//       .status(500)
-//       .json({ error: "حدث خطأ أثناء حفظ الفاتورة", details: err.message });
-//   }
-// });
+// 1. حفظ فاتورة جديدة داخل قاعدة البيانات (نسخة معدلة ومطابقة للفرونت إند)
 app.post("/api/invoices", async (req, res) => {
-  // 🔥 السطر ده هيطبعلك الفاتورة أول ما تضغط "إنهاء ودفع" في شاشة الكاشير
   console.log("📥 فاتورة جديدة وصلت للسيرفر وجاري حفظها في pgAdmin:", req.body);
 
   const {
@@ -213,6 +109,7 @@ app.post("/api/invoices", async (req, res) => {
     discountValue,
     taxPct,
     taxValue,
+    deliveryPrice,
     total,
     createdAt,
   } = req.body;
@@ -222,8 +119,9 @@ app.post("/api/invoices", async (req, res) => {
       INSERT INTO invoices (
         id, type, invoice_number, table_code, zone, 
         customer_name, customer_address, cashier_id, cashier_name, 
-        items, subtotal, discount_pct, discount_value, tax_pct, tax_value, total, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        items, subtotal, discount_pct, discount_value, tax_pct, tax_value, 
+        delivery_price, total, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       RETURNING *
     `;
 
@@ -243,32 +141,24 @@ app.post("/api/invoices", async (req, res) => {
       discountValue,
       taxPct,
       taxValue,
+      Number(deliveryPrice) || 0,
       total,
-      new Date(createdAt), // تحويل الطابع الزمني لتاريخ مناسب للـ PostgreSQL
+      new Date(createdAt),
     ]);
 
     console.log(
       "✅ تم الحفظ بنجاح في قاعدة البيانات برقم معرف:",
       result.rows[0].id,
     );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error("❌ خطأ قاتل أثناء الحفظ في pgAdmin:", err.message);
-    res.status(500).json({ error: "حدث خطأ أثناء حفظ الفاتورة" });
-  }
-});
 
-// 2. جلب كل الفواتير
-app.get("/api/invoices", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT * FROM invoices ORDER BY created_at DESC",
-    );
-    const invoices = result.rows.map((inv) => ({
+    // 🌟 التعديل السحري: تحويل وتجهيز البيانات العائدة لتطابق الـ camelCase والـ Timestamp للفرونت إند فوراً
+    const inv = result.rows[0];
+    const mappedResponse = {
       id: inv.id,
-      invoiceNumber: inv.invoice_number,
+      invoiceNumber: Number(inv.invoice_number),
       type: inv.type,
       tableCode: inv.table_code,
+      zone: inv.zone,
       customerName: inv.customer_name,
       customerAddress: inv.customer_address,
       cashierId: inv.cashier_id,
@@ -279,9 +169,52 @@ app.get("/api/invoices", async (req, res) => {
       discountValue: Number(inv.discount_value),
       taxPct: Number(inv.tax_pct),
       taxValue: Number(inv.tax_value),
+      deliveryPrice: Number(inv.delivery_price || 0),
       total: Number(inv.total),
-      createdAt: Number(inv.created_at),
+      createdAt: inv.created_at
+        ? new Date(inv.created_at).getTime()
+        : Date.now(),
+    };
+
+    res.status(201).json(mappedResponse);
+  } catch (err) {
+    console.error("❌ خطأ قاتل أثناء الحفظ في pgAdmin:", err.message);
+    res
+      .status(500)
+      .json({ error: "حدث خطأ أثناء حفظ الفاتورة", details: err.message });
+  }
+});
+
+// 2. جلب الفواتير وقراءة عمود التوصيل وإرساله للتقارير والفرونت إند
+app.get("/api/invoices", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM invoices ORDER BY created_at DESC",
+    );
+
+    const invoices = result.rows.map((inv) => ({
+      id: inv.id,
+      invoiceNumber: Number(inv.invoice_number),
+      type: inv.type,
+      tableCode: inv.table_code,
+      zone: inv.zone,
+      customerName: inv.customer_name,
+      customerAddress: inv.customer_address,
+      cashierId: inv.cashier_id,
+      cashierName: inv.cashier_name,
+      items: typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items,
+      subtotal: Number(inv.subtotal),
+      discountPct: Number(inv.discount_pct),
+      discountValue: Number(inv.discount_value),
+      taxPct: Number(inv.tax_pct),
+      taxValue: Number(inv.tax_value),
+      deliveryPrice: Number(inv.delivery_price || 0), // 🌟 قراءة العمود المخصص من الداتابيز وتحويله لرقم آمن
+      total: Number(inv.total),
+      createdAt: inv.created_at
+        ? new Date(inv.created_at).getTime()
+        : Date.now(), // تحويل الوقت الزمني لـ Timestamp رقمي عشان حسابات التقارير تفهمه
     }));
+
     res.json(invoices);
   } catch (err) {
     console.error("❌ خطأ في جلب الفواتير:", err);
@@ -293,7 +226,6 @@ app.get("/api/invoices", async (req, res) => {
 // 🕒 مسارات الورديات (Shifts)
 // ==========================================
 
-// 1. فتح أو إغلاق شيفت
 app.post("/api/shifts", async (req, res) => {
   const { cashierId, cashierName, openedAt, closedAt } = req.body;
   try {
@@ -317,7 +249,7 @@ app.post("/api/shifts", async (req, res) => {
 });
 
 // ==========================================
-// 6. تشغيل السيرفر على بورت معين
+// 6. تشغيل السيرفر والاستماع للطلبات
 // ==========================================
 const PORT = 5000;
 app.listen(PORT, () => {

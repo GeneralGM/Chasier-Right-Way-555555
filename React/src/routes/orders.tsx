@@ -1058,6 +1058,7 @@ function OrderEntryDialog({
       unitPrice: round2(meal.sellingPrice),
       extras,
       modifiersSummary: summary,
+      mealName: undefined,
     };
     upsertOrder({ ...order, items: [...order.items, line], state: "active" });
   }

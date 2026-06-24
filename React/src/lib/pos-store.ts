@@ -75,12 +75,17 @@ export const PAGE_SIZE = 20;
 export type TableState = "empty" | "active" | "printed";
 
 export interface OrderItem {
+  mealName: any;
   id: string;
   mealId: string;
   name: string;
   qty: number;
   unitPrice: number;
-  extras: { label: string; price: number }[];
+  extras: {
+    name?: any;
+    label: string;
+    price: number;
+  }[];
   modifiersSummary?: string;
 }
 
@@ -401,6 +406,103 @@ export function usePosDB() {
         createdAt,
       };
 
+      // دالة الطباعة المدمجة
+      const triggerPrint = (invoice: any) => {
+        const printWindow = window.open("", "_blank", "width=400,height=600");
+        if (!printWindow) return;
+
+        const dPrice =
+          Number(invoice.deliveryPrice) || Number(invoice.delivery_price) || 0;
+
+        const html = `
+          <html>
+            <head>
+              <title>طباعة الفاتورة</title>
+              <style>
+                body { font-family: Arial, sans-serif; direction: rtl; text-align: center; padding: 20px; font-size: 14px; }
+                .header { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+                .type-title { font-size: 22px; font-weight: bold; margin: 10px 0; border: 2px dashed #000; padding: 5px; text-transform: uppercase; }
+                .meta { margin-bottom: 10px; font-size: 12px; border-bottom: 1px dashed #000; padding-bottom: 5px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 10px; text-align: right; }
+                th { border-bottom: 1px solid #000; padding: 4px; font-size: 13px; }
+                td { padding: 4px; font-size: 13px; vertical-align: top; }
+                .totals { margin-top: 10px; border-top: 1px dashed #000; padding-top: 5px; text-align: right; }
+                .totals div { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 13px; }
+                .bold { font-weight: bold; font-size: 15px; }
+              </style>
+            </head>
+            <body>
+              <div class="header">مجمع الـمـول</div>
+              <div class="type-title">ORDER</div>
+              
+              <div class="meta">
+                <div>رقم الفاتورة: ${String(invoice.id || invoiceNumber).slice(0, 8)}</div>
+                <div>التاريخ: ${new Date(invoice.createdAt || createdAt).toLocaleString("ar-EG")}</div>
+                <div>النوع في النظام: ${invoice.type === "delivery" ? "توصيل" : invoice.type === "takeaway" ? "تيك أواي" : "صالة"}</div>
+              </div>
+
+              <table>
+                <thead>
+                  <tr>
+                    <th>الصنف</th>
+                    <th style="text-align:center;">الكمية</th>
+                    <th style="text-align:left;">الإجمالي</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${
+                    invoice.items
+                      ? (typeof invoice.items === "string"
+                          ? JSON.parse(invoice.items)
+                          : invoice.items
+                        )
+                          .map((line: any) => {
+                            const exStr =
+                              line.extras && line.extras.length
+                                ? ` <span style="font-size:11px;color:#555;">(+${line.extras.map((e: any) => e.name || e.label).join(", ")})</span>`
+                                : "";
+                            return `
+                          <tr>
+                            <td>${line.mealName || ""}${exStr}</td>
+                            <td style="text-align:center;">${line.qty}</td>
+                            <td style="text-align:left;">${((line.unitPrice + (line.extras ? line.extras.reduce((s: number, e: any) => s + e.price, 0) : 0)) * line.qty).toFixed(2)} ج</td>
+                          </tr>
+                        `;
+                          })
+                          .join("")
+                      : ""
+                  }
+                </tbody>
+              </table>
+
+              <div class="totals">
+                <div><span>المجموع الأصلي:</span> <span>${Number(invoice.subtotal || 0).toFixed(2)} ج</span></div>
+                ${invoice.discountValue > 0 ? `<div><span>الخصم:</span> <span>${Number(invoice.discountValue).toFixed(2)} ج</span></div>` : ""}
+                ${invoice.taxValue > 0 ? `<div><span>الضريبة:</span> <span>${Number(invoice.taxValue).toFixed(2)} ج</span></div>` : ""}
+                
+                <div><span>التوصيل:</span> <span class="bold">${dPrice.toFixed(2)} ج</span></div>
+                
+                <div class="bold" style="border-top:1px solid #000; padding-top:4px; margin-top:4px;">
+                  <span>الإجمالي النهائي:</span> <span>${Number(invoice.total || 0).toFixed(2)} ج</span>
+                </div>
+              </div>
+
+              <div style="margin-top:20px; font-size:11px; border-top:1px solid #000; padding-top:5px;">
+                شكراً لزيارتكم!
+              </div>
+
+              <script>
+                window.onload = function() { window.print(); window.close(); }
+              </script>
+            </body>
+          </html>
+        `;
+
+        printWindow.document.open();
+        printWindow.document.write(html);
+        printWindow.document.close();
+      };
+
       try {
         console.log("⏳ جاري محاولة الحفظ على السيرفر...", fullInvoice);
         const res = await addInvoiceToDB(fullInvoice);
@@ -421,7 +523,10 @@ export function usePosDB() {
                 taxPct: Number(res.tax_pct || res.taxPct || 0),
                 taxValue: Number(res.tax_value || res.taxValue || 0),
                 total: Number(res.total),
-                // 🔥 وهنا كمان تظبيط التاريخ بعد الحفظ مباشرة
+                // 🌟 ضمان قراءة سعر التوصيل وتحويله لـ الـ UI بشكل سليم
+                deliveryPrice: Number(
+                  res.delivery_price || res.deliveryPrice || 0,
+                ),
                 createdAt: parseSafeDate(
                   res.created_at || res.createdAt,
                   createdAt,
@@ -440,21 +545,35 @@ export function usePosDB() {
         });
 
         toast.success(`🎉 تم حفظ الفاتورة بنجاح رقم: ${invoiceNumber}`);
+        triggerPrint(savedInvoice);
+
         return savedInvoice;
       } catch (err) {
         console.warn(
           "⚠️ السيرفر واجه مشكلة، يتم الحفظ محلياً الآن لتجنب التعطيل...",
         );
 
+        // تأمين الحفظ المحلي أيضاً
+        const localSaved = {
+          ...fullInvoice,
+          deliveryPrice: Number(
+            (fullInvoice as any).deliveryPrice ||
+              (fullInvoice as any).delivery_price ||
+              0,
+          ),
+        };
+
         setDb((cur) => {
-          const updatedInvoices = [fullInvoice as any, ...cur.invoices];
+          const updatedInvoices = [localSaved as any, ...cur.invoices];
           const next = { ...cur, invoices: updatedInvoices };
           save(next);
           return next;
         });
 
         toast.success(`🎉 تم اعتماد الفاتورة محلياً رقم: ${invoiceNumber}`);
-        return fullInvoice;
+        triggerPrint(localSaved);
+
+        return localSaved;
       }
     },
     [],
@@ -551,6 +670,35 @@ export function usePosDB() {
     },
     [],
   );
+  // 🌟 كود إجباري لجلب الفواتير وتحويل قيمة التوصيل للـ UI فوراً
+  useEffect(() => {
+    async function forceLoadInvoices() {
+      try {
+        const data = await fetchInvoices();
+        if (Array.isArray(data)) {
+          const normalized = data.map((inv: any) => ({
+            ...inv,
+            // تحويل الاسم من الداتابيز (delivery_price) إلى الـ UI (deliveryPrice)
+            deliveryPrice: Number(inv.delivery_price || inv.deliveryPrice || 0),
+            subtotal: Number(inv.subtotal || 0),
+            total: Number(inv.total || 0),
+            discountValue: Number(inv.discount_value || inv.discountValue || 0),
+            taxValue: Number(inv.tax_value || inv.taxValue || 0),
+          }));
+
+          setDb((cur) => {
+            const next = { ...cur, invoices: normalized };
+            save(next);
+            return next;
+          });
+        }
+      } catch (e) {
+        console.error("Error force loading invoices:", e);
+      }
+    }
+    forceLoadInvoices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchInvoices]); // بيشتغل أول ما الموقع يفتح ويجبره يقرأ التوصيل صح
 
   return {
     db,

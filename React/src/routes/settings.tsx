@@ -46,72 +46,91 @@ const printInvoice = (invoice: Invoice) => {
   const printWindow = window.open("", "_blank", "width=400,height=600");
   if (!printWindow) return;
 
-  const invoiceTitle =
-    invoice.deliveryPrice && invoice.deliveryPrice > 0
-      ? "أوردر / Order 🛵"
-      : "تيك أواي / Take Away 🛍️";
+  // جلب قيمة التوصيل الآمنة
+  const dPrice =
+    Number(invoice.deliveryPrice) ||
+    Number((invoice as any).delivery_price) ||
+    0;
 
-  printWindow.document.write(`
-    <html dir="rtl">
+  const html = `
+    <html>
       <head>
-        <title>فاتورة رقم ${invoice.invoiceNumber || "..."}</title>
+        <title>طباعة الفاتورة</title>
         <style>
-          body { width: 75mm; margin: 0 auto; padding: 5px; font-family: 'Tahoma', sans-serif; font-size: 12px; }
-          .header { text-align: center; margin-bottom: 10px; border-bottom: 1px solid #000; padding-bottom: 5px; }
-          .header h2 { margin: 0; font-size: 16px; }
-          .invoice-type { font-weight: bold; font-size: 14px; color: #333; margin: 5px 0; }
-          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-          th, td { border-bottom: 1px dashed #ccc; padding: 5px 0; text-align: right; }
-          .summary-container { margin-top: 10px; font-size: 12px; border-top: 1px solid #000; padding-top: 5px; }
-          .summary-row { display: flex; justify-content: space-between; padding: 2px 0; }
-          .total { font-weight: bold; font-size: 16px; margin-top: 10px; text-align: center; border-top: 2px solid black; padding-top: 5px;}
-          .footer { text-align: center; margin-top: 20px; font-size: 10px; }
+          body { font-family: Arial, sans-serif; direction: rtl; text-align: center; padding: 20px; font-size: 14px; }
+          .header { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+          .type-title { font-size: 22px; font-weight: bold; margin: 10px 0; border: 2px dashed #000; padding: 5px; text-transform: uppercase; }
+          .meta { margin-bottom: 10px; font-size: 12px; border-bottom: 1px dashed #000; padding-bottom: 5px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; text-align: right; }
+          th { border-bottom: 1px solid #000; padding: 4px; font-size: 13px; }
+          td { padding: 4px; font-size: 13px; vertical-align: top; }
+          .totals { margin-top: 10px; border-top: 1px dashed #000; padding-top: 5px; text-align: right; }
+          .totals div { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 13px; }
+          .bold { font-weight: bold; font-size: 15px; }
         </style>
       </head>
       <body>
-        <div class="header">
-          <h2>اسم المحل بتاعك</h2>
-          <div class="invoice-type">${invoiceTitle}</div>
-          <p style="margin: 3px 0;">فاتورة رقم: <strong>${invoice.invoiceNumber || "---"}</strong></p>
-          <p style="margin: 3px 0;">${new Date(invoice.createdAt).toLocaleString("ar-EG")}</p>
+        <div class="header">مجمع الـمـول</div>
+        <div class="type-title">ORDER</div>
+        
+        <div class="meta">
+          <div>رقم الفاتورة: ${invoice.id.slice(0, 8)}</div>
+          <div>التاريخ: ${new Date(invoice.createdAt).toLocaleString("ar-EG")}</div>
+          <div>النوع في النظام: ${invoice.type === "delivery" ? "توصيل" : invoice.type === "takeaway" ? "تيك أواي" : "صالة"}</div>
         </div>
+
         <table>
           <thead>
-            <tr><th>الصنف</th><th>الكمية</th><th>السعر</th></tr>
+            <tr>
+              <th>الصنف</th>
+              <th style="text-align:center;">الكمية</th>
+              <th style="text-align:left;">الإجمالي</th>
+            </tr>
           </thead>
           <tbody>
             ${invoice.items
-              .map(
-                (item) => `
-              <tr>
-                <td>${item.name}</td>
-                <td>${item.qty}</td>
-                <td>${item.unitPrice} جنيه</td>
-              </tr>
-            `,
-              )
+              .map((line) => {
+                const exStr = line.extras.length
+                  ? ` <span style="font-size:11px;color:#555;">(+${line.extras.map((e) => e.name).join(", ")})</span>`
+                  : "";
+                return `
+                <tr>
+                  <td>${line.mealName}${exStr}</td>
+                  <td style="text-align:center;">${line.qty}</td>
+                  <td style="text-align:left;">${((line.unitPrice + line.extras.reduce((s, e) => s + e.price, 0)) * line.qty).toFixed(2)} ج</td>
+                </tr>
+              `;
+              })
               .join("")}
           </tbody>
         </table>
-        <div class="summary-container">
-          <div class="summary-row">
-            <span>المجموع الفرعي:</span>
-            <span>${invoice.subtotal} جنيه</span>
+
+        <div class="totals">
+          <div><span>المجموع الأصلي:</span> <span>${Number(invoice.subtotal).toFixed(2)} ج</span></div>
+          ${invoice.discountValue > 0 ? `<div><span>الخصم:</span> <span>${Number(invoice.discountValue).toFixed(2)} ج</span></div>` : ""}
+          ${invoice.taxValue > 0 ? `<div><span>الضريبة:</span> <span>${Number(invoice.taxValue).toFixed(2)} ج</span></div>` : ""}
+          
+          <div><span>التوصيل:</span> <span class="bold">${dPrice.toFixed(2)} ج</span></div>
+          
+          <div class="bold" style="border-top:1px solid #000; padding-top:4px; margin-top:4px;">
+            <span>الإجمالي النهائي:</span> <span>${Number(invoice.total).toFixed(2)} ج</span>
           </div>
-          ${invoice.discountValue && invoice.discountValue > 0 ? `<div class="summary-row"><span>الخصم:</span><span>-${invoice.discountValue} جنيه</span></div>` : ""}
-          ${invoice.taxValue && invoice.taxValue > 0 ? `<div class="summary-row"><span>الضريبة:</span><span>+${invoice.taxValue} جنيه</span></div>` : ""}
-          ${invoice.deliveryPrice && invoice.deliveryPrice > 0 ? `<div class="summary-row" style="font-weight: bold; color: #b45309;"><span>مصاريف التوصيل:</span><span>+${invoice.deliveryPrice} جنيه</span></div>` : ""}
         </div>
-        <div class="total">الإجمالي النهائي: ${invoice.total} جنيه</div>
-        <div class="footer">شكراً لزيارتكم!</div>
+
+        <div style="margin-top:20px; font-size:11px; border-top:1px solid #000; padding-top:5px;">
+          شكراً لزيارتكم!
+        </div>
+
+        <script>
+          window.onload = function() { window.print(); window.close(); }
+        </script>
       </body>
     </html>
-  `);
+  `;
+
+  printWindow.document.open();
+  printWindow.document.write(html);
   printWindow.document.close();
-  setTimeout(() => {
-    printWindow.print();
-    printWindow.close();
-  }, 500);
 };
 
 function SettingsPage() {

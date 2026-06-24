@@ -248,6 +248,189 @@ app.post("/api/shifts", async (req, res) => {
   }
 });
 
+
+// ==========================================
+// 📦 مسارات المخزون الرئيسي (Inventory Items)
+// ==========================================
+
+// 1. إضافة صنف جديد للمخزن
+app.post("/api/inventory", async (req, res) => {
+  const {
+    id,
+    code,
+    name,
+    department,
+    unit,
+    qty,
+    avgPrice,
+    critical,
+    conversionFactor,
+    subUnitQty,
+    subUnitType,
+    kind,
+    yieldDef,
+    notes,
+  } = req.body;
+
+  try {
+    const query = `
+      INSERT INTO inventory_items (
+        id, code, name, department, unit, qty, avg_price, critical, 
+        conversion_factor, sub_unit_qty, sub_unit_type, kind, yield_def, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      RETURNING *
+    `;
+    const result = await pool.query(query, [
+      id,
+      code,
+      name,
+      department || "",
+      unit,
+      qty,
+      avgPrice,
+      critical,
+      conversionFactor,
+      subUnitQty || null,
+      subUnitType || null,
+      kind,
+      yieldDef ? JSON.stringify(yieldDef) : null,
+      notes || null,
+    ]);
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("❌ خطأ في إضافة صنف للمخزن:", err);
+    res.status(500).json({ error: "حدث خطأ أثناء حفظ الصنف" });
+  }
+});
+
+// 2. جلب كل أصناف المخزن الرئيسي
+app.get("/api/inventory", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM inventory_items ORDER BY created_at DESC",
+    );
+
+    // تحويل الأسماء للـ Frontend
+    const items = result.rows.map((row) => ({
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      department: row.department,
+      unit: row.unit,
+      qty: Number(row.qty),
+      avgPrice: Number(row.avg_price),
+      critical: Number(row.critical),
+      conversionFactor: Number(row.conversion_factor),
+      subUnitQty: row.sub_unit_qty ? Number(row.sub_unit_qty) : undefined,
+      subUnitType: row.sub_unit_type,
+      kind: row.kind,
+      yieldDef:
+        typeof row.yield_def === "string"
+          ? JSON.parse(row.yield_def)
+          : row.yield_def,
+      notes: row.notes,
+    }));
+
+    res.json(items);
+  } catch (err) {
+    console.error("❌ خطأ في جلب المخزن:", err);
+    res.status(500).json({ error: "حدث خطأ أثناء جلب الأصناف" });
+  }
+});
+
+// 3. تعديل صنف موجود (Update)
+app.put("/api/inventory/:id", async (req, res) => {
+  const { id } = req.params;
+  const {
+    name,
+    qty,
+    avgPrice,
+    critical,
+    conversionFactor,
+    subUnitQty,
+    subUnitType,
+    yieldDef,
+    notes,
+  } = req.body;
+
+  try {
+    const query = `
+      UPDATE inventory_items SET 
+        name = COALESCE($1, name),
+        qty = COALESCE($2, qty),
+        avg_price = COALESCE($3, avg_price),
+        critical = COALESCE($4, critical),
+        conversion_factor = COALESCE($5, conversion_factor),
+        sub_unit_qty = $6,
+        sub_unit_type = $7,
+        yield_def = $8,
+        notes = $9
+      WHERE id = $10 RETURNING *
+    `;
+    const result = await pool.query(query, [
+      name,
+      qty,
+      avgPrice,
+      critical,
+      conversionFactor,
+      subUnitQty || null,
+      subUnitType || null,
+      yieldDef ? JSON.stringify(yieldDef) : null,
+      notes || null,
+      id,
+    ]);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("❌ خطأ في تعديل الصنف:", err);
+    res.status(500).json({ error: "حدث خطأ أثناء التعديل" });
+  }
+});
+
+// 4. مسح صنف
+app.delete("/api/inventory/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM inventory_items WHERE id = $1", [
+      req.params.id,
+    ]);
+    res.json({ message: "تم الحذف بنجاح" });
+  } catch (err) {
+    res.status(500).json({ error: "حدث خطأ أثناء الحذف" });
+  }
+});
+
+// ==========================================
+// 🏭 مسارات مخازن الأقسام الفرعية (Department Stock)
+// ==========================================
+
+// جلب مخزون الأقسام (مطبخ، بار، شيشة)
+app.get("/api/inventory/dept-stock", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM department_stock");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "حدث خطأ في جلب مخازن الأقسام" });
+  }
+});
+
+// تحديث كمية صنف في قسم معين (عند الصرف أو المبيعات)
+app.post("/api/inventory/dept-stock", async (req, res) => {
+  const { departmentName, itemId, qty } = req.body;
+  try {
+    const query = `
+      INSERT INTO department_stock (department_name, item_id, qty) 
+      VALUES ($1, $2, $3)
+      ON CONFLICT (department_name, item_id) 
+      DO UPDATE SET qty = $3 
+      RETURNING *
+    `;
+    const result = await pool.query(query, [departmentName, itemId, qty]);
+    res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error("❌ خطأ في تحديث مخزن القسم:", err);
+    res.status(500).json({ error: "حدث خطأ في تحديث القسم" });
+  }
+});
+
 // ==========================================
 // 6. تشغيل السيرفر والاستماع للطلبات
 // ==========================================

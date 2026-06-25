@@ -2,6 +2,7 @@
 import { sha256 } from "js-sha256";
 import { useEffect, useState, useCallback } from "react";
 import { round2, clamp0 } from "./format";
+import { toast } from "sonner";
 // أضف هذا الكود تحت الـ imports مباشرة
 if (typeof window !== "undefined") {
   if (!window.crypto) {
@@ -466,85 +467,177 @@ export function useDB() {
     };
   }, []);
 
-  const addItem = useCallback(
-    (item: Omit<Item, "id" | "code"> & { code?: string }) => {
+  // 1️⃣ دالة إضافة صنف جديد (ترمي في الـ pgAdmin + تحدث الكاش المحلي)
+  const addItem = useCallback(async (item: Omit<Item, "id">) => {
+    // 🧹 تنظيف وتأمين البيانات وبناء الـ UUID من الـ window مباشرة
+    const cleanItem: Item = {
+      id:
+        typeof window !== "undefined" && window.crypto?.randomUUID
+          ? window.crypto.randomUUID()
+          : "local-" + Date.now(),
+      department: item.department || "",
+      code: item.code || "",
+      name: item.name || "",
+      unit: item.unit,
+      qty: Number(item.qty) || 0,
+      avgPrice: Number(item.avgPrice) || 0,
+      critical: Number(item.critical) || 0,
+      conversionFactor: Number(item.conversionFactor) || 1,
+      subUnitQty: Number(item.subUnitQty) || 0,
+      subUnitType: item.subUnitType,
+      kind: item.kind || "standard",
+      yieldDef: item.yieldDef || undefined,
+      lastYieldDeltas: item.lastYieldDeltas || [],
+      notes: item.notes || "",
+    };
+
+    console.log("🚀 البيانات اللي طالعة من الفورمة للسيرفر:", cleanItem);
+
+    try {
+      const response = await fetch("http://localhost:5000/api/inventory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cleanItem),
+      });
+
+      if (response.ok) {
+        const savedItem = await response.json();
+
+        const cur = load();
+        cur.items = [...cur.items, savedItem];
+        save(cur);
+        setDb(cur);
+        toast.success(
+          `✅ تم تسجيل الصنف "${savedItem.name}" في الداتابيز بنجاح!`,
+        );
+        return savedItem;
+      } else {
+        const errorText = await response.text();
+        console.error("⚠️ رد السيرفر بالرفض:", errorText);
+        toast.error("⚠️ السيرفر رفض حفظ الصنف الجديد");
+      }
+    } catch (error) {
+      console.error("❌ السيرفر واقع أو مش شغال:", error);
+      toast.error("مش قادر أتصل بالسيرفر أصلاً.");
+    }
+  }, []);
+  // 2️⃣ دالة تحديث صنف بالكامل
+  // ملحوظة: غيرنا الرابط لـ POST لأن السيرفر فيه (ON CONFLICT) يعني هيعمل تدوير وتحديث تلقائي لو الـ ID موجود
+  const updateItem = useCallback(
+    async (id: string, updatedFields: Partial<Item>) => {
       const cur = load();
-      const code = item.code?.trim() || nextCode(cur.items);
-      const newItem: Item = {
-        ...item,
-        code,
-        id: crypto.randomUUID(),
-        qty: clamp0(item.qty || 0),
-        avgPrice: round2(clamp0(item.avgPrice || 0)),
-        critical: clamp0(item.critical || 0),
-        conversionFactor: Math.max(
-          1,
-          item.conversionFactor ||
-            (item.subUnitQty && item.subUnitQty > 0 ? item.subUnitQty : 1),
-        ),
-        kind: item.kind || "standard",
-        lastYieldDeltas: [],
-      };
-      cur.items.push(newItem);
-      reapplyYield(cur, newItem);
-      save(cur);
+      const currentItem = cur.items.find((i) => i.id === id);
+      if (!currentItem) return;
+
+      const fullUpdatedItem = { ...currentItem, ...updatedFields };
+
+      try {
+        const response = await fetch("http://localhost:5000/api/inventory", {
+          method: "POST", // السيرفر بيستقبلها وبيدخل في الـ UPDATE علطول بسبب الـ ON CONFLICT
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fullUpdatedItem),
+        });
+
+        if (response.ok) {
+          const savedItem = await response.json();
+
+          cur.items = cur.items.map((i) => (i.id === id ? savedItem : i));
+          save(cur);
+          setDb(cur);
+          toast.success("✅ تم تحديث بيانات الصنف بنجاح");
+        } else {
+          toast.error("⚠️ فشل تحديث بيانات الصنف بالسيرفر");
+        }
+      } catch (error) {
+        console.error("❌ خطأ أثناء تحديث الصنف:", error);
+        toast.error("خطأ في الاتصال بالسيرفر أثناء التعديل");
+      }
     },
     [],
   );
 
-  const updateItem = useCallback((id: string, patch: Partial<Item>) => {
-    const cur = load();
-    const target = cur.items.find((i) => i.id === id);
-    if (!target) return;
-    Object.assign(target, patch);
-    target.qty = clamp0(target.qty);
-    target.avgPrice = round2(clamp0(target.avgPrice));
-    target.critical = clamp0(target.critical);
-    if (target.subUnitQty !== undefined && target.subUnitQty > 0)
-      target.conversionFactor = target.subUnitQty;
-    if (!target.conversionFactor || target.conversionFactor <= 0)
-      target.conversionFactor = 1;
-    reapplyYield(cur, target);
-    save(cur);
+  // 3️⃣ دالة حذف صنف تماماً
+  const deleteItem = useCallback(async (id: string) => {
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/inventory/${id}`,
+        {
+          method: "DELETE",
+        },
+      );
+
+      if (response.ok) {
+        const cur = load();
+        cur.items = cur.items.filter((i) => i.id !== id);
+        save(cur);
+        setDb(cur);
+        toast.success("🗑️ تم حذف الصنف نهائياً من الداتابيز والكاش");
+      } else {
+        toast.error("⚠️ السيرفر رفض عملية الحذف");
+      }
+    } catch (error) {
+      console.error("❌ خطأ أثناء حذف الصنف:", error);
+      toast.error("خطأ في الاتصال بالسيرفر أثناء الحذف");
+    }
   }, []);
 
-  const deleteItem = useCallback((id: string) => {
-    const cur = load();
-    const target = cur.items.find((i) => i.id === id);
-    if (target && target.kind === "processed") {
-      if (Array.isArray(target.lastYieldDeltas)) {
-        for (const d of target.lastYieldDeltas) {
-          const t = cur.items.find((i) => i.id === d.itemId);
-          if (!t) continue;
-          t.qty = round2(clamp0(t.qty - d.addedBase));
+  // 4️⃣ دالة المزامنة التلقائية لجلب البيانات القديمة عند تشغيل النظام
+  useEffect(() => {
+    async function syncInventoryFromServer() {
+      try {
+        console.log("🔄 جاري تحميل أصناف المخزن الرئيسي من الداتابيز...");
+        const response = await fetch("http://localhost:5000/api/inventory");
+
+        if (response.ok) {
+          const serverItems = await response.json();
+
+          const cur = load();
+          cur.items = serverItems;
+          save(cur);
+          setDb(cur);
+
+          console.log(
+            `✅ تمت المزامنة! تم تحميل ${serverItems.length} صنف بنجاح من الـ pgAdmin.`,
+          );
         }
+      } catch (error) {
+        console.error("❌ فشل سحب بيانات المخزن:", error);
       }
     }
-    cur.items = cur.items.filter((i) => i.id !== id);
-    save(cur);
+
+    syncInventoryFromServer();
   }, []);
 
   const addEntryVoucher = useCallback(
-    (
+    async (
+      // 🌟 تحويل الدالة لـ async
       date: string,
       supplier: string,
       lines: { itemId: string; qty: number; price: number }[],
     ) => {
       const cur = load();
       const fullLines: VoucherLine[] = [];
+      const itemsToUpdateDB: Item[] = []; // 🌟 مصفوفة لحفظ الأصناف التي تغيرت
+
       for (const l of lines) {
         const qty = clamp0(l.qty);
         const price = clamp0(l.price);
         if (qty <= 0) continue;
         const item = cur.items.find((i) => i.id === l.itemId);
         if (!item) continue;
+
         const newQty = item.qty + qty;
+        // معادلة متوسط السعر الخاصة بك
         const newAvg =
           newQty > 0
             ? (item.qty * item.avgPrice + qty * price) / newQty
             : price;
+
         item.qty = round2(clamp0(newQty));
         item.avgPrice = round2(clamp0(newAvg));
+
+        itemsToUpdateDB.push(item); // 🌟 حفظ الصنف بعد تحديثه
+
         fullLines.push({
           itemId: item.id,
           itemName: item.name,
@@ -553,6 +646,7 @@ export function useDB() {
           price: round2(price),
         });
       }
+
       const v: EntryVoucher = {
         id: crypto.randomUUID(),
         type: "entry",
@@ -563,18 +657,37 @@ export function useDB() {
       };
       cur.vouchers.unshift(v);
       save(cur);
+      setDb(cur);
+
+      // 🌟 السحر هنا: نرسل الأصناف التي تغير سعرها وكميتها إلى PostgreSQL
+      for (const updatedItem of itemsToUpdateDB) {
+        try {
+          await fetch("http://localhost:5000/api/inventory", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updatedItem),
+          });
+        } catch (err) {
+          console.error("❌ فشل مزامنة الصنف مع الداتابيز بعد التوريد:", err);
+        }
+      }
+
       return v;
     },
     [],
   );
 
   const addIssueVoucher = useCallback(
-    (
+    async (
+      // 🌟 تحويل الدالة لـ async
       date: string,
       department: Department,
       lines: { itemId: string; qty: number }[],
-    ): { ok: true; voucher: IssueVoucher } | { ok: false; error: string } => {
+    ): Promise<
+      { ok: true; voucher: IssueVoucher } | { ok: false; error: string }
+    > => {
       const cur = load();
+
       for (const l of lines) {
         const q = clamp0(l.qty);
         if (q <= 0)
@@ -587,24 +700,32 @@ export function useDB() {
             error: `الكمية المطلوبة من "${item.name}" تتجاوز المتاح (${round2(item.qty)} ${item.unit})`,
           };
       }
+
       const fullLines: VoucherLine[] = [];
-      // 🔥 التعديل: التأكد من إذن الصرف يقبل أي قسم فرعي
+      const itemsToUpdateDB: Item[] = []; // 🌟 مصفوفة للحفظ في الداتابيز
+
       const isSubDept = (SUB_DEPTS as readonly string[]).includes(department);
+
       for (const l of lines) {
         const q = clamp0(l.qty);
         const item = cur.items.find((i) => i.id === l.itemId)!;
+
         item.qty = round2(clamp0(item.qty - q));
+        itemsToUpdateDB.push(item); // 🌟 حفظ الصنف بعد خصم الكمية
+
         fullLines.push({
           itemId: item.id,
           itemName: item.name,
           unit: item.unit,
           qty: round2(q),
         });
+
         if (isSubDept) {
           const k = deptKey(department as SubDept, item.id);
           cur.deptStock[k] = round2(clamp0((cur.deptStock[k] || 0) + q));
         }
       }
+
       const v: IssueVoucher = {
         id: crypto.randomUUID(),
         type: "issue",
@@ -613,8 +734,24 @@ export function useDB() {
         lines: fullLines,
         createdAt: Date.now(),
       };
+
       cur.vouchers.unshift(v);
       save(cur);
+      setDb(cur);
+
+      // 🌟 إرسال الأصناف المخصومة للسيرفر
+      for (const updatedItem of itemsToUpdateDB) {
+        try {
+          await fetch("http://localhost:5000/api/inventory", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updatedItem),
+          });
+        } catch (err) {
+          console.error("❌ فشل خصم الصنف من الداتابيز بعد الصرف:", err);
+        }
+      }
+
       return { ok: true, voucher: v };
     },
     [],

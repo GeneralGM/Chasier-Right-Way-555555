@@ -287,12 +287,13 @@ app.post("/api/shifts", async (req, res) => {
       RETURNING *
     `;
 
+    // 🌟 التعديل السحري: تحويل التايم-ستامب الرقمي إلى كائن تاريخ يفهمه الـ PostgreSQL تماماً
     const result = await pool.query(query, [
       crypto.randomUUID(),
       cashierId,
       cashierName,
-      openedAt,
-      closedAt || Date.now(),
+      openedAt ? new Date(Number(openedAt)) : new Date(),
+      closedAt ? new Date(Number(closedAt)) : new Date(),
       kitchenSales || 0,
       barSales || 0,
       shishaSales || 0,
@@ -306,29 +307,36 @@ app.post("/api/shifts", async (req, res) => {
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error("❌ خطأ في حفظ الشفت بالداتابيز:", err);
-    res.status(500).json({ error: "حدث خطأ أثناء حفظ الوردية" });
+    console.error("❌ خطأ في حفظ الشفت بالداتابيز:", err.message);
+    res
+      .status(500)
+      .json({ error: "حدث خطأ أثناء حفظ الوردية", details: err.message });
   }
 });
 
-// 1. جلب كل الورديات (Shifts) من قاعدة البيانات
+// 1. جلب كل الورديات (Shifts) من قاعدة البيانات (النسخة المعدلة)
 app.get("/api/shifts", async (req, res) => {
   try {
-    // تأكد من أن اسم الجدول عندك هو shifts أو عدله للاسم الصحيح في pgAdmin
     const result = await pool.query(
       "SELECT * FROM shifts ORDER BY opened_at DESC",
     );
 
-    // تحويل الأسماء من snake_case (قاعدة البيانات) إلى camelCase (الفرونت إند) لو لزم الأمر
     const formattedShifts = result.rows.map((row) => ({
       id: row.id,
       cashierName: row.cashier_name || row.cashierName,
-      openedAt: Number(row.opened_at || row.openedAt),
-      closedAt:
-        row.closed_at || row.closedAt
-          ? Number(row.closed_at || row.closedAt)
-          : null,
+      openedAt: row.opened_at ? new Date(row.opened_at).getTime() : Date.now(),
+      closedAt: row.closed_at ? new Date(row.closed_at).getTime() : null,
       status: row.status,
+      // 🌟 السطر السحري: إضافة كل حقول الأموال والمبيعات وتمريرها للفرونت إند
+      kitchenSales: Number(row.kitchen_sales) || 0,
+      barSales: Number(row.bar_sales) || 0,
+      shishaSales: Number(row.shisha_sales) || 0,
+      taxValue: Number(row.tax_value) || 0,
+      discountValue: Number(row.discount_value) || 0,
+      totalRevenue: Number(row.total_revenue) || 0,
+      dineinSales: Number(row.dinein_sales) || 0,
+      takeawaySales: Number(row.takeaway_sales) || 0,
+      deliverySales: Number(row.delivery_sales) || 0,
     }));
 
     res.json(formattedShifts);
@@ -337,7 +345,7 @@ app.get("/api/shifts", async (req, res) => {
     res.status(500).json({ error: "حدث خطأ أثناء جلب الورديات" });
   }
 });
-
+// 📌 ملاحظة: تم حذف دالة جلب الفواتير المكررة الثانية التي كانت هنا لعدم تضارب الكود وموتها.
 // 2. جلب كل الفواتير (Invoices) من قاعدة البيانات
 app.get("/api/invoices", async (req, res) => {
   try {
@@ -372,18 +380,50 @@ app.get("/api/invoices", async (req, res) => {
     res.status(500).json({ error: "حدث خطأ أثناء جلب الفواتير" });
   }
 });
-
 // ==========================================
-// 📦 مسارات المخزون الرئيسي (Inventory Items)
+// 📦 مسارات المخزن الرئيسي (Main Inventory)
 // ==========================================
 
-// 1. إضافة صنف جديد للمخزن
+// 1. جلب جميع الأصناف
+app.get("/api/inventory", async (req, res) => {
+  try {
+    // 🌟 التعديل هنا: inventory_items
+    const result = await pool.query(
+      "SELECT * FROM inventory_items ORDER BY name ASC",
+    );
+
+    const formattedRows = result.rows.map((row) => ({
+      id: row.id,
+      department: row.department || "",
+      code: row.code || "",
+      name: row.name,
+      unit: row.unit,
+      qty: Number(row.qty) || 0,
+      avgPrice: Number(row.avg_price) || 0,
+      critical: Number(row.critical) || 0,
+      conversionFactor: Number(row.conversion_factor) || 1,
+      subUnitQty: Number(row.sub_unit_qty) || 0,
+      subUnitType: row.sub_unit_type || "",
+      kind: row.kind || "standard",
+      yieldDef: row.yield_def || null,
+      lastYieldDeltas: row.last_yield_deltas || [],
+      notes: row.notes || "",
+    }));
+
+    res.json(formattedRows);
+  } catch (err) {
+    console.error("🚨 خطأ في جلب الأصناف:", err);
+    res.status(500).json({ error: "حدث خطأ في جلب أصناف المخزن" });
+  }
+});
+
+// 2. إضافة أو تحديث صنف جديد
 app.post("/api/inventory", async (req, res) => {
   const {
     id,
+    department,
     code,
     name,
-    department,
     unit,
     qty,
     avgPrice,
@@ -393,168 +433,103 @@ app.post("/api/inventory", async (req, res) => {
     subUnitType,
     kind,
     yieldDef,
+    lastYieldDeltas,
     notes,
   } = req.body;
 
   try {
+    // 🌟 التعديل هنا: inventory_items بدلاً من inventory
     const query = `
       INSERT INTO inventory_items (
-        id, code, name, department, unit, qty, avg_price, critical, 
-        conversion_factor, sub_unit_qty, sub_unit_type, kind, yield_def, notes
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        id, department, code, name, unit, qty, avg_price, critical, 
+        conversion_factor, sub_unit_qty, sub_unit_type, kind, yield_def, last_yield_deltas, notes
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      ON CONFLICT (id) DO UPDATE SET
+        department = EXCLUDED.department,
+        code = EXCLUDED.code,
+        name = EXCLUDED.name,
+        unit = EXCLUDED.unit,
+        qty = EXCLUDED.qty,
+        avg_price = EXCLUDED.avg_price,
+        critical = EXCLUDED.critical,
+        conversion_factor = EXCLUDED.conversion_factor,
+        sub_unit_qty = EXCLUDED.sub_unit_qty,
+        sub_unit_type = EXCLUDED.sub_unit_type,
+        kind = EXCLUDED.kind,
+        yield_def = EXCLUDED.yield_def,
+        last_yield_deltas = EXCLUDED.last_yield_deltas,
+        notes = EXCLUDED.notes
       RETURNING *
     `;
-    const result = await pool.query(query, [
+
+    const values = [
       id,
-      code,
-      name,
       department || "",
+      code || "",
+      name,
       unit,
-      qty,
-      avgPrice,
-      critical,
-      conversionFactor,
-      subUnitQty || null,
+      Number(qty) || 0,
+      Number(avgPrice) || 0,
+      Number(critical) || 0,
+      Number(conversionFactor) || 1,
+      Number(subUnitQty) || 0,
       subUnitType || null,
-      kind,
-      yieldDef ? JSON.stringify(yieldDef) : null,
-      notes || null,
-    ]);
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error("❌ خطأ في إضافة صنف للمخزن:", err);
-    res.status(500).json({ error: "حدث خطأ أثناء حفظ الصنف" });
-  }
-});
+      kind || "standard",
+      yieldDef
+        ? typeof yieldDef === "string"
+          ? yieldDef
+          : JSON.stringify(yieldDef)
+        : null,
+      lastYieldDeltas
+        ? typeof lastYieldDeltas === "string"
+          ? lastYieldDeltas
+          : JSON.stringify(lastYieldDeltas)
+        : null,
+      notes || "",
+    ];
 
-// 2. جلب كل أصناف المخزن الرئيسي
-app.get("/api/inventory", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT * FROM inventory_items ORDER BY created_at DESC",
-    );
+    const result = await pool.query(query, values);
+    const row = result.rows[0];
 
-    // تحويل الأسماء للـ Frontend
-    const items = result.rows.map((row) => ({
+    res.status(201).json({
       id: row.id,
+      department: row.department,
       code: row.code,
       name: row.name,
-      department: row.department,
       unit: row.unit,
       qty: Number(row.qty),
       avgPrice: Number(row.avg_price),
       critical: Number(row.critical),
       conversionFactor: Number(row.conversion_factor),
-      subUnitQty: row.sub_unit_qty ? Number(row.sub_unit_qty) : undefined,
+      subUnitQty: Number(row.sub_unit_qty),
       subUnitType: row.sub_unit_type,
       kind: row.kind,
-      yieldDef:
-        typeof row.yield_def === "string"
-          ? JSON.parse(row.yield_def)
-          : row.yield_def,
+      yieldDef: row.yield_def,
+      lastYieldDeltas: row.last_yield_deltas,
       notes: row.notes,
-    }));
-
-    res.json(items);
+    });
   } catch (err) {
-    console.error("❌ خطأ في جلب المخزن:", err);
-    res.status(500).json({ error: "حدث خطأ أثناء جلب الأصناف" });
+    console.error("🚨 خطأ حقيقي جوة السيرفر:", err.message);
+    res.status(500).json({
+      error: "حدث خطأ أثناء إضافة الصنف للداتابيز",
+      details: err.message,
+    });
   }
 });
 
-// 3. تعديل صنف موجود (Update)
-app.put("/api/inventory/:id", async (req, res) => {
-  const { id } = req.params;
-  const {
-    name,
-    qty,
-    avgPrice,
-    critical,
-    conversionFactor,
-    subUnitQty,
-    subUnitType,
-    yieldDef,
-    notes,
-  } = req.body;
-
-  try {
-    const query = `
-      UPDATE inventory_items SET 
-        name = COALESCE($1, name),
-        qty = COALESCE($2, qty),
-        avg_price = COALESCE($3, avg_price),
-        critical = COALESCE($4, critical),
-        conversion_factor = COALESCE($5, conversion_factor),
-        sub_unit_qty = $6,
-        sub_unit_type = $7,
-        yield_def = $8,
-        notes = $9
-      WHERE id = $10 RETURNING *
-    `;
-    const result = await pool.query(query, [
-      name,
-      qty,
-      avgPrice,
-      critical,
-      conversionFactor,
-      subUnitQty || null,
-      subUnitType || null,
-      yieldDef ? JSON.stringify(yieldDef) : null,
-      notes || null,
-      id,
-    ]);
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("❌ خطأ في تعديل الصنف:", err);
-    res.status(500).json({ error: "حدث خطأ أثناء التعديل" });
-  }
-});
-
-// 4. مسح صنف
+// 3. حذف صنف
 app.delete("/api/inventory/:id", async (req, res) => {
+  const { id } = req.params;
   try {
-    await pool.query("DELETE FROM inventory_items WHERE id = $1", [
-      req.params.id,
-    ]);
-    res.json({ message: "تم الحذف بنجاح" });
+    // 🌟 التعديل هنا: inventory_items
+    await pool.query("DELETE FROM inventory_items WHERE id = $1", [id]);
+    res.json({ success: true, message: "تم حذف الصنف بنجاح" });
   } catch (err) {
+    console.error("🚨 خطأ في حذف الصنف:", err);
     res.status(500).json({ error: "حدث خطأ أثناء الحذف" });
   }
 });
-
-// ==========================================
-// 🏭 مسارات مخازن الأقسام الفرعية (Department Stock)
-// ==========================================
-
-// جلب مخزون الأقسام (مطبخ، بار، شيشة)
-app.get("/api/inventory/dept-stock", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM department_stock");
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: "حدث خطأ في جلب مخازن الأقسام" });
-  }
-});
-
-// تحديث كمية صنف في قسم معين (عند الصرف أو المبيعات)
-app.post("/api/inventory/dept-stock", async (req, res) => {
-  const { departmentName, itemId, qty } = req.body;
-  try {
-    const query = `
-      INSERT INTO department_stock (department_name, item_id, qty) 
-      VALUES ($1, $2, $3)
-      ON CONFLICT (department_name, item_id) 
-      DO UPDATE SET qty = $3 
-      RETURNING *
-    `;
-    const result = await pool.query(query, [departmentName, itemId, qty]);
-    res.status(200).json(result.rows[0]);
-  } catch (err) {
-    console.error("❌ خطأ في تحديث مخزن القسم:", err);
-    res.status(500).json({ error: "حدث خطأ في تحديث القسم" });
-  }
-});
-
 // ==========================================
 // 6. تشغيل السيرفر والاستماع للطلبات
 // ==========================================

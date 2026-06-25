@@ -11,7 +11,6 @@ import {
   type SubDept,
   type Item,
   type ModifierGroup,
-  type SaleLine,
 } from "@/lib/store";
 import {
   usePosDB,
@@ -32,7 +31,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
@@ -43,15 +41,9 @@ import {
   Printer,
   ArrowLeftRight,
   CheckCircle2,
-  LogOut,
-  X,
   UserPlus,
-  Phone,
   Trash2,
-  MapPin,
-  DollarSign,
   Bike,
-  ShoppingBag,
   AlertTriangle,
 } from "lucide-react";
 
@@ -65,6 +57,7 @@ function OrdersGate() {
   if (!pos.shift) return <ShiftLogin />;
   return <PosScreen />;
 }
+
 // دالة بتحسب الرقم بناءً على تاريخ اليوم
 function getNextInvoiceNumber(invoices: Invoice[]) {
   const today = new Date().toDateString();
@@ -78,23 +71,82 @@ function getNextInvoiceNumber(invoices: Invoice[]) {
   const maxNum = Math.max(...todayInvoices.map((i) => i.invoiceNumber || 0));
   return maxNum + 1;
 }
+
 /* ---------------- Shift login (Cashier PIN) ---------------- */
 function ShiftLogin() {
   const { db: pos, findByPin, openShift } = usePosDB();
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
 
+  // 🌟 ولايات المزامنة مع السيرفر
+  const [serverEmployees, setServerEmployees] = useState<any[]>([]);
+  const [isLoadingEmployees, setIsLoadingEmployees] = useState(false);
+
+  // 🔄 جلب الموظفين من الـ Backend فوراً لو الـ LocalStorage ممسوح
+  useEffect(() => {
+    async function fetchEmployeesFallback() {
+      if (pos.employees && pos.employees.length > 0) return;
+      try {
+        setIsLoadingEmployees(true);
+        const response = await fetch("http://localhost:5000/api/employees");
+        if (response.ok) {
+          const data = await response.json();
+          setServerEmployees(data);
+        }
+      } catch (error) {
+        console.error("❌ خطأ أثناء جلب الكاشيرية:", error);
+      } finally {
+        setIsLoadingEmployees(false);
+      }
+    }
+    fetchEmployeesFallback();
+  }, [pos.employees, pos.employees.length]);
+
+  // القائمة الذكية المدمجة
+  const activeEmployeesList =
+    pos.employees && pos.employees.length > 0 ? pos.employees : serverEmployees;
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr("");
-    const emp = await findByPin(pin, "كاشير");
+
+    // البحث في القائمة المدمجة عن طريق الباسوورد
+    const emp = activeEmployeesList.find(
+      (x) =>
+        (x.pin === pin || x.pinHash === pin || x.pin_hash === pin) &&
+        x.role === "كاشير",
+    );
+
     if (!emp) {
-      setErr("كلمة سر الكاشير غير صحيحة");
+      // محاولة أخيرة عبر الدالة الأصلية تحسباً للتشويش
+      const fallbackEmp = await findByPin(pin, "كاشير");
+      if (!fallbackEmp) {
+        setErr("كلمة سر الكاشير غير صحيحة");
+        return;
+      }
+      openShift(fallbackEmp.id, fallbackEmp.name);
+      toast.success(`أهلاً ${fallbackEmp.name} — بدأت الشيفت`);
       return;
     }
+
     openShift(emp.id, emp.name);
     toast.success(`أهلاً ${emp.name} — بدأت الشيفت`);
   }
+
+  // شاشة التحميل وقت الفحص
+  if (isLoadingEmployees) {
+    return (
+      <div className="flex items-center justify-center h-[70vh]" dir="rtl">
+        <p className="text-xl font-medium text-amber-600 animate-pulse font-bold">
+          جاري التحقق من الكاشيرية المسجلين في السيرفر...
+        </p>
+      </div>
+    );
+  }
+
+  const cashiersCount = activeEmployeesList.filter(
+    (e) => e.role === "كاشير",
+  ).length;
 
   return (
     <div dir="rtl" className="min-h-[70vh] grid place-items-center">
@@ -118,11 +170,15 @@ function ShiftLogin() {
           className="text-center text-xl tracking-widest h-12"
         />
         {err && <p className="text-xs text-destructive text-center">{err}</p>}
-        <Button type="submit" className="w-full h-11" disabled={!pin}>
+        <Button
+          type="submit"
+          className="w-full h-11"
+          disabled={!pin || cashiersCount === 0}
+        >
           دخول
         </Button>
-        {pos.employees.filter((e) => e.role === "كاشير").length === 0 && (
-          <p className="text-xs text-amber-600 text-center">
+        {cashiersCount === 0 && (
+          <p className="text-xs text-amber-600 text-center font-bold">
             لا يوجد كاشير مسجل — أضف من صفحة بصمات الموظفين.
           </p>
         )}
@@ -223,7 +279,18 @@ function PosScreen() {
   if (zone === "takeaway") {
     return (
       <PosFrame
-        onLogout={closeShift}
+        onLogout={() =>
+          closeShift({
+            kitchenSales: 0,
+            barSales: 0,
+            shishaSales: 0,
+            taxValue: 0,
+            discountValue: 0,
+            dineinSales: 0,
+            takeawaySales: 0,
+            deliverySales: 0,
+          })
+        }
         cashierName={pos.shift!.cashierName}
         zoneTabs={<ZoneTabs zone={zone} setZone={setZone} />}
       >
@@ -243,7 +310,18 @@ function PosScreen() {
 
   return (
     <PosFrame
-      onLogout={closeShift}
+      onLogout={() =>
+        closeShift({
+          kitchenSales: 0,
+          barSales: 0,
+          shishaSales: 0,
+          taxValue: 0,
+          discountValue: 0,
+          dineinSales: 0,
+          takeawaySales: 0,
+          deliverySales: 0,
+        })
+      }
       cashierName={pos.shift!.cashierName}
       zoneTabs={<ZoneTabs zone={zone} setZone={setZone} />}
     >
@@ -410,7 +488,6 @@ function PosScreen() {
     </PosFrame>
   );
 }
-// 🌟 حط السطرين دول فوق خالص جوه الـ Component الرئيسي وليس جوه دالة الحفظ
 
 function ZoneTabs({
   zone,
@@ -504,186 +581,11 @@ function TableChairsSvg() {
   );
 }
 
-/* ---------------- Take-away CRM ---------------- */
-// function TakeawayView({
-//   onOpenOrder,
-// }: {
-//   onOpenOrder: (code: string) => void;
-// }) {
-//   const { db: pos, addCustomer, upsertOrder } = usePosDB();
-//   const [q, setQ] = useState("");
-//   const [adding, setAdding] = useState(false);
-//   const [newName, setNewName] = useState("");
-//   const [newAddr, setNewAddr] = useState("");
-
-//   const filtered = useMemo(
-//     () =>
-//       pos.customers.filter(
-//         (c) => !q || c.name.includes(q) || c.address.includes(q),
-//       ),
-//     [pos.customers, q],
-//   );
-
-//   function openFor(
-//     c: { id: string; name: string; address: string },
-//     isDelivery: boolean = false,
-//   ) {
-//     const prefix = isDelivery ? "DEL" : "TAK";
-//     const code = `${prefix}-${c.id.slice(0, 6)}-${Date.now().toString(36)}`;
-
-//     upsertOrder({
-//       tableCode: code,
-//       zone: "takeaway",
-//       type: isDelivery ? "delivery" : "takeaway", // تحديد النوع هنا داخلياً
-//       items: [],
-//       state: "active",
-//       discountPct: 0,
-//       taxPct: 0,
-//       customerName: c.name,
-//       customerAddress: c.address,
-//       customerPhone: c.address, // الهاتف مخزن في العنوان عندك
-//       deliveryPrice: 0, // هيبدأ بصفر ويتعدل عند تأكيد الطلب
-//       openedAt: Date.now(),
-//     });
-
-//     onOpenOrder(code);
-//     toast.success(
-//       isDelivery ? "تم فتح أوردر توصيل 🛵" : "تم فتح طلب تيك أواي 🛍️",
-//     );
-//   }
-
-//   return (
-//     <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-4 pt-3 gap-3">
-//       {/* شريط البحث وإضافة العميل */}
-//       <div className="flex gap-2 items-center shrink-0">
-//         <div className="relative flex-1">
-//           <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-//           <Input
-//             dir="rtl"
-//             placeholder="بحث عن عميل..."
-//             value={q}
-//             onChange={(e) => setQ(e.target.value)}
-//             className="pe-10 h-10"
-//           />
-//         </div>
-//         <Button onClick={() => setAdding(true)} className="gap-2">
-//           <UserPlus className="w-4 h-4" /> إضافة عميل تيك أواي/أوردر
-//         </Button>
-//       </div>
-
-//       {/* جدول العملاء مع زرين منفصلين لكل عميل */}
-//       <div className="flex-1 overflow-auto bg-card border border-border rounded-xl">
-//         <table className="w-full text-sm">
-//           <thead className="bg-secondary/50 text-xs sticky top-0">
-//             <tr>
-//               <th className="text-right p-3">الاسم</th>
-//               <th className="text-right p-3">الهاتف / العنوان</th>
-//               <th className="text-right p-3">عدد مرات الطلب</th>
-//               <th className="text-right p-3">خيارات فتح الطلب</th>
-//             </tr>
-//           </thead>
-//           <tbody>
-//             {filtered.length === 0 ? (
-//               <tr>
-//                 <td
-//                   colSpan={4}
-//                   className="p-8 text-center text-muted-foreground"
-//                 >
-//                   لا يوجد عملاء — أضف عميل للبدء.
-//                 </td>
-//               </tr>
-//             ) : (
-//               filtered.map((c) => (
-//                 <tr
-//                   key={c.id}
-//                   className="border-t border-border hover:bg-secondary/40"
-//                 >
-//                   <td className="p-3 font-medium">{c.name}</td>
-//                   <td className="p-3 text-muted-foreground">
-//                     <div className="flex items-center gap-1">
-//                       <Phone className="w-3 h-3" /> {c.address}
-//                     </div>
-//                   </td>
-//                   <td className="p-3 font-bold">{c.orderCount || 0}</td>
-//                   <td className="p-3 text-left flex gap-2 justify-end">
-//                     {/* زر التيك أواي المنفصل */}
-//                     <Button
-//                       size="sm"
-//                       variant="outline"
-//                       onClick={() => openFor(c, false)}
-//                     >
-//                       🛍️ تيك أواي
-//                     </Button>
-//                     {/* زر الأوردر المنفصل */}
-//                     <Button
-//                       size="sm"
-//                       variant="default"
-//                       className="bg-amber-600 hover:bg-amber-700 text-white"
-//                       onClick={() => openFor(c, true)}
-//                     >
-//                       🛵 أوردر توصيل
-//                     </Button>
-//                   </td>
-//                 </tr>
-//               ))
-//             )}
-//           </tbody>
-//         </table>
-//       </div>
-
-//       {/* مودال الإضافة الافتراضي الخاص بك */}
-//       {adding && (
-//         <Dialog open onOpenChange={(o) => !o && setAdding(false)}>
-//           <DialogContent dir="rtl" className="max-w-md">
-//             <DialogHeader>
-//               <DialogTitle>إضافة عميل</DialogTitle>
-//             </DialogHeader>
-//             <div className="space-y-3">
-//               <div>
-//                 <label className="text-xs">الاسم الكامل</label>
-//                 <Input
-//                   value={newName}
-//                   onChange={(e) => setNewName(e.target.value)}
-//                 />
-//               </div>
-//               <div>
-//                 <label className="text-xs">الهاتف أو العنوان</label>
-//                 <Input
-//                   value={newAddr}
-//                   onChange={(e) => setNewAddr(e.target.value)}
-//                 />
-//               </div>
-//             </div>
-//             <DialogFooter className="gap-2">
-//               <Button variant="outline" onClick={() => setAdding(false)}>
-//                 إلغاء
-//               </Button>
-//               <Button
-//                 onClick={() => {
-//                   if (!newName.trim() || !newAddr.trim())
-//                     return toast.error("الاسم والبيانات مطلوبة");
-//                   addCustomer(newName, newAddr);
-//                   setAdding(false);
-//                   setNewName("");
-//                   setNewAddr("");
-//                   toast.success("تم إضافة العميل");
-//                 }}
-//               >
-//                 حفظ
-//               </Button>
-//             </DialogFooter>
-//           </DialogContent>
-//         </Dialog>
-//       )}
-//     </div>
-//   );
-// }
 function TakeawayView({
   onOpenOrder,
 }: {
   onOpenOrder: (code: string) => void;
 }) {
-  // افترضنا إنك ضفت updateCustomer في الـ store
   const { db: pos, addCustomer, upsertOrder, updateCustomer } = usePosDB();
   const [q, setQ] = useState("");
 
@@ -881,6 +783,7 @@ function TakeawayView({
     </div>
   );
 }
+
 /* ---------------- Order entry (فتح) ---------------- */
 function OrderEntryDialog({
   tableCode,
@@ -984,6 +887,7 @@ function OrderEntryDialog({
 
     return maxPossible;
   };
+
   // Manufacturable qty per meal (limit by sub-inventory; shisha bypassed)
   function manufacturable(meal: Meal): number | null {
     if (meal.category === SHISHA_CATEGORY) return null;
@@ -1062,6 +966,7 @@ function OrderEntryDialog({
     };
     upsertOrder({ ...order, items: [...order.items, line], state: "active" });
   }
+
   const getMaxQty = (meal: any, db: any) => {
     // 1. حدد القسم اللي الوجبة دي بتطلع منه (مثلاً "بار")
     const department = meal.department;
@@ -1081,6 +986,7 @@ function OrderEntryDialog({
     // 3. أقل رقم هو ده اللي يحدد أقصى عدد وجبات نقدر نطلعه
     return Math.min(...limits);
   };
+
   function deductInventoryFinal() {
     const perDept: Record<string, { itemId: string; baseQty: number }[]> = {};
     for (const line of order.items) {
@@ -1113,6 +1019,7 @@ function OrderEntryDialog({
     for (const [d, arr] of Object.entries(perDept))
       deductSubStock(d as SubDept, arr);
   }
+
   async function handleSaveAndDeduct(code: string) {
     const updatedDeptStock = { ...db.deptStock };
     const outOfStockMeals: string[] = [];
@@ -1300,6 +1207,7 @@ function OrderEntryDialog({
       onClose();
     }
   }
+
   async function processTakeawayInvoice(isDelivery: boolean) {
     const finalDeliveryPrice = isDelivery ? Number(deliveryInputPrice) || 0 : 0;
     const computedType = isDelivery ? "delivery" : "takeaway";
@@ -1363,6 +1271,7 @@ function OrderEntryDialog({
       toast.error(`حدث خطأ أثناء الحفظ: ${error.message}`);
     }
   }
+
   function onPickMeal(meal: Meal) {
     if (meal.hasModifiers && (meal.modifierGroups?.length || 0) > 0) {
       setModifierMeal(meal);
@@ -1370,7 +1279,7 @@ function OrderEntryDialog({
       addLine(meal);
     }
   }
-  // onClose();
+
   const handleQtyChange = (val: number, maxQty: number, lineId: string) => {
     if (val > maxQty) {
       // إظهار التنبيه
@@ -1382,6 +1291,7 @@ function OrderEntryDialog({
       changeQty(lineId, val);
     }
   };
+
   function changeQty(lineId: string, qty: number) {
     upsertOrder({
       ...order,
@@ -1609,14 +1519,12 @@ function OrderEntryDialog({
                           -
                         </button>
 
-                        {/* هنا التعديل: شلنا الـ map التانية واستخدمنا l (الصنف الحالي) مباشرة */}
                         <input
                           type="number"
                           value={l.qty}
                           className="w-12 text-center border rounded"
                           onChange={(e) => {
                             const val = parseFloat(e.target.value) || 0;
-                            // بنجيب الوجبة عشان نعرف الـ maxQty
                             const meal = db.meals.find(
                               (m) => m.id === l.mealId,
                             );
@@ -1653,7 +1561,7 @@ function OrderEntryDialog({
             </div>
             <DialogFooter className="p-3 border-t border-border">
               <Button
-                onClick={() => handleSaveAndDeduct(order.tableCode)} // 🌟 مررنا order.tableCode هنا كـ argument
+                onClick={() => handleSaveAndDeduct(order.tableCode)}
                 className={`w-full ${order.zone === "takeaway" ? "bg-green-600 hover:bg-green-700 text-white" : ""}`}
               >
                 {order.zone === "takeaway"
@@ -1674,7 +1582,6 @@ function OrderEntryDialog({
             }}
           />
         )}
-        {/* بوكس التوصيل الاحترافي بدل الـ prompt */}
         <Dialog open={deliveryModalOpen} onOpenChange={setDeliveryModalOpen}>
           <DialogContent dir="rtl" className="max-w-sm">
             <DialogHeader>
@@ -1835,14 +1742,12 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
   const [showList, setShowList] = useState(false);
   const [picks, setPicks] = useState<Record<string, number>>({});
 
-  // 1. توليد قائمة ثابتة بكل الطاولات من 1 إلى 70 (بدلاً من الاعتماد على الأوردرات)
   const allTables = useMemo(() => {
     const cTables = Array.from({ length: 70 }, (_, i) => `C${i + 1}`);
     const oTables = Array.from({ length: 70 }, (_, i) => `O${i + 1}`);
     return [...cTables, ...oTables];
   }, []);
 
-  // فلترة الطاولات بناءً على البحث
   const filteredTables = allTables.filter((t) =>
     t.toLowerCase().includes(search.toLowerCase()),
   );
@@ -1855,8 +1760,6 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
     const itemsToMove = Object.entries(picks).map(([id, qty]) => ({ id, qty }));
     if (itemsToMove.length === 0) return toast.error("اختر أصنافاً للنقل");
 
-    // نحدد الزون بناءً على كود الطاولة (C غالباً كافيه، O غالباً أوردرات خارجية أو شيء آخر)
-    // يمكنك تعديل هذا المنطق ليناسب مشروعك
     const targetZone = to.startsWith("C") ? "dining" : "takeaway";
 
     const r = transferItems(
@@ -1879,7 +1782,6 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
         </DialogHeader>
 
         <div className="grid grid-cols-2 gap-4">
-          {/* اختيار الطاولة المنقول منها */}
           <div className="space-y-2">
             <label className="text-xs font-medium">المنقول منها</label>
             <Input
@@ -1947,7 +1849,6 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
             )}
           </div>
 
-          {/* اختيار الطاولة المنقول إليها (نظام بحث احترافي) */}
           <div className="space-y-2 relative">
             <label className="text-xs font-medium">المنقول إليها</label>
             <Input
@@ -2019,7 +1920,6 @@ function PrintDialog({
   }
 
   function doPrint() {
-    // نضمن حفظ الخصم قبل الطباعة
     upsertOrder({ ...order, discountPct: discount });
     window.print();
     onPrinted();
@@ -2086,7 +1986,6 @@ function PrintDialog({
               }
               className="h-8 w-24"
             />
-            {/* زرار يظهر لو فيه خصم جديد محتاج تأكيد */}
             {pendingDiscount !== null && pendingDiscount !== discount && (
               <Button size="sm" onClick={() => setPinOpen(true)}>
                 تطبيق
@@ -2117,7 +2016,6 @@ function PrintDialog({
         onSuccess={() => {
           if (pendingDiscount !== null) {
             setDiscount(pendingDiscount);
-            // السر هنا: بنحفظ الخصم الجديد في الداتا بيز فوراً بمجرد نجاح الـ PIN
             upsertOrder({ ...order, discountPct: pendingDiscount });
             toast.success("تم تطبيق الخصم وحفظه في الطلب بنجاح");
           }
@@ -2141,15 +2039,12 @@ function CheckoutDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
-  // تم استبدال addSaleLine بالدالة الصحيحة addSale
   const { db, deductSubStock, addSale } = useDB();
   const { db: pos, addInvoice, incCustomerOrders } = usePosDB();
   const [confirmed, setConfirmed] = useState(false);
 
-  // السحب المباشر والأمن من الـ Store بناءً على اقتراحك لتجنب ضياع الخصم
   const currentOrder = pos.orders[tableCode] || order;
 
-  // الحسابات المحدثة مبنية كلياً على الـ currentOrder المحفوظ بالخصم بتاعه
   const totals = computeTotals(
     currentOrder.items,
     currentOrder.discountPct,
@@ -2199,25 +2094,21 @@ function CheckoutDialog({
           .toUpperCase()
           .startsWith("T");
 
-      // 🌟 التعديل السحري هنا: لو تيك أواي، نسأله فيه توصيل ولا لأ قبل ما نضرب الفاتورة
       let finalDeliveryPrice = 0;
       let finalType: "takeaway" | "delivery" | "dinein" = isTakeaway
         ? "takeaway"
         : "dinein";
 
       if (isTakeaway) {
-        // نفتح الـ prompt للكاشير عشان يحدد لو كان أوردر ولا تيك أواي صريح
         const inputPrice = prompt(
           "الرجاء إدخال مصاريف التوصيل (اتركه 0 أو فارغ إذا كان تيك أواي عادي):",
           "0",
         );
 
-        // لو الكاشير داس Cancel نوقف عملية الدفع عشان ميضربش فاتورة غلط
         if (inputPrice === null) return;
 
         finalDeliveryPrice = Number(inputPrice) || 0;
 
-        // لو التوصيل أكبر من صفر يبقى ده أوردر دليفري 🛵 مش تيك أواي 🛍️
         if (finalDeliveryPrice > 0) {
           finalType = "delivery";
         }
@@ -2226,7 +2117,7 @@ function CheckoutDialog({
       const inv: Invoice = {
         id: crypto.randomUUID(),
         invoiceNumber: getNextInvoiceNumber(pos.invoices),
-        type: finalType, // 🌟 النوع النهائي (صالة، تيك أواي، أو دليفري)
+        type: finalType,
         tableCode: isTakeaway ? undefined : tableCode,
         zone: isTakeaway ? undefined : currentOrder.zone,
         customerName: currentOrder.customerName,
@@ -2240,17 +2131,13 @@ function CheckoutDialog({
         discountValue: totals.discountValue,
         taxPct: currentOrder.taxPct,
         taxValue: totals.taxValue,
-        // 🌟 إضافة مصاريف التوصيل هنا عشان تتبعت للسيرفر وتتحفظ في الداتابيز!
         deliveryPrice: finalDeliveryPrice,
-        // 🌟 الإجمالي الشامل للتوصيل
         total: totals.total + finalDeliveryPrice,
         createdAt: Date.now(),
       };
 
-      // 🔥 نبعت الفاتورة الكاملة لقاعدة البيانات
       await addInvoice(inv);
 
-      // خصم من المخزن
       deductInventory();
 
       const salesByDept: Record<string, { mealId: string; qty: number }[]> = {};
@@ -2291,7 +2178,6 @@ function CheckoutDialog({
         if (c) incCustomerOrders(c.id);
       }
 
-      // رسالة نجاح مخصصة حسب نوع الفاتورة
       if (finalType === "delivery") {
         toast.success(
           `تم إنهاء أوردر التوصيل بنجاح 🛵 (+${finalDeliveryPrice} ج.م)`,

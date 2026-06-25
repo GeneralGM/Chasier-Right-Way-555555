@@ -2,16 +2,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { round2, clamp0 } from "./format";
 import { sha256 as jsSha256 } from "js-sha256";
-import {
-  fetchEmployees,
-  addEmployeeToDB,
-  fetchInvoices,
-  addInvoiceToDB,
-  saveShiftToDB,
-} from "./api";
 import { toast } from "sonner";
 
-// أضف هذا الكود تحت الـ imports مباشرة
 if (typeof window !== "undefined") {
   if (!window.crypto) {
     (window as any).crypto = {};
@@ -27,7 +19,6 @@ if (typeof window !== "undefined") {
   }
 }
 
-// --- Types ---
 export type EmployeeRole = "كاشير" | "كابتن صالة";
 export interface Employee {
   id: string;
@@ -39,8 +30,8 @@ export interface Employee {
 export interface Customer {
   id: string;
   name: string;
-  phone?: string; // 🌟 حقل الهاتف اختياري
-  address?: string; // 🌟 حقل العنوان اختياري
+  phone?: string;
+  address?: string;
   orderCount: number;
   createdAt: number;
 }
@@ -53,7 +44,6 @@ export type ZoneId =
   | "small"
   | "large"
   | "kids";
-
 export interface Zone {
   id: ZoneId;
   label: string;
@@ -81,11 +71,7 @@ export interface OrderItem {
   name: string;
   qty: number;
   unitPrice: number;
-  extras: {
-    name?: any;
-    label: string;
-    price: number;
-  }[];
+  extras: { name?: any; label: string; price: number }[];
   modifiersSummary?: string;
 }
 
@@ -101,13 +87,13 @@ export interface ActiveOrder {
   openedAt: number;
   inventoryDeducted?: boolean;
   type?: "takeaway" | "delivery";
-  customerPhone?: string | null; // حل الخطأ الحالي ts(2561)
-  deliveryPrice?: number; // عشان تضمن إن سعر التوصيل ميعملش خطأ بعده
+  customerPhone?: string | null;
+  deliveryPrice?: number;
 }
 
 export interface Invoice {
   id: string;
-  type: "dinein" | "takeaway" | "delivery"; // 🌟 ضيف الأنواع دي هنا
+  type: "dinein" | "takeaway" | "delivery";
   deliveryPrice?: number;
   invoiceNumber: number;
   tableCode?: string;
@@ -144,11 +130,7 @@ interface PosDB {
 
 const KEY = "rest-pos-db-v1";
 
-// --- Helpers ---
-async function sha256(s: string): Promise<string> {
-  return jsSha256(s);
-}
-export const hashPin = sha256;
+export const hashPin = async (s: string): Promise<string> => jsSha256(s);
 
 function defaultDB(): PosDB {
   return {
@@ -177,90 +159,9 @@ function save(db: PosDB) {
   window.dispatchEvent(new Event("pos-update"));
 }
 
-// دالة مساعدة لضبط التاريخ من السيرفر
-function parseSafeDate(dateVal: any, fallback: number): number {
-  if (!dateVal) return fallback;
-  const parsed = new Date(dateVal).getTime();
-  return isNaN(parsed) ? fallback : parsed;
-}
-
-// --- Hook ---
 export function usePosDB() {
   const [db, setDb] = useState<PosDB>(load);
-  const [isLoadingEmployees, setIsLoadingEmployees] = useState(false);
-
-  // 1. جلب الموظفين من الـ API أول ما الـ Hook يشتغل
-  useEffect(() => {
-    const loadInitialData = async () => {
-      setIsLoadingEmployees(true);
-      try {
-        const [apiEmployees, apiInvoices] = await Promise.all([
-          fetchEmployees(),
-          fetchInvoices(),
-        ]);
-
-        const formattedInvoices = (apiInvoices || []).map((inv: any) => ({
-          id: inv.id,
-          invoiceNumber:
-            inv.invoice_number !== undefined
-              ? inv.invoice_number
-              : inv.invoiceNumber,
-          type: inv.type,
-          tableCode:
-            inv.table_code !== undefined ? inv.table_code : inv.tableCode,
-          customerName:
-            inv.customer_name !== undefined
-              ? inv.customer_name
-              : inv.customerName,
-          customerAddress:
-            inv.customer_address !== undefined
-              ? inv.customer_address
-              : inv.customerAddress,
-          cashierId:
-            inv.cashier_id !== undefined ? inv.cashier_id : inv.cashierId,
-          cashierName:
-            inv.cashier_name !== undefined ? inv.cashier_name : inv.cashierName,
-          items:
-            typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items,
-          subtotal: Number(inv.subtotal || 0),
-          discountPct: Number(
-            inv.discount_pct !== undefined
-              ? inv.discount_pct
-              : inv.discountPct || 0,
-          ),
-          discountValue: Number(
-            inv.discount_value !== undefined
-              ? inv.discount_value
-              : inv.discountValue || 0,
-          ),
-          taxPct: Number(
-            inv.tax_pct !== undefined ? inv.tax_pct : inv.taxPct || 0,
-          ),
-          taxValue: Number(
-            inv.tax_value !== undefined ? inv.tax_value : inv.taxValue || 0,
-          ),
-          total: Number(inv.total || 0),
-          // 🔥 السر كله هنا: تحويل التاريخ لنظام الأرقام المفهوم للفرونت إند
-          createdAt: parseSafeDate(inv.created_at || inv.createdAt, Date.now()),
-        }));
-
-        setDb((prev) => {
-          const updated = {
-            ...prev,
-            employees: apiEmployees || [],
-            invoices: formattedInvoices,
-          };
-          localStorage.setItem(KEY, JSON.stringify(updated));
-          return updated;
-        });
-      } catch (error) {
-        console.error("❌ فشل في جلب البيانات من السيرفر:", error);
-      } finally {
-        setIsLoadingEmployees(false);
-      }
-    };
-    loadInitialData();
-  }, []);
+  const [isLoadingEmployees] = useState(false);
 
   useEffect(() => {
     const r = () => setDb(load());
@@ -272,29 +173,19 @@ export function usePosDB() {
     };
   }, []);
 
-  // -- Actions --
-
   const addEmployee = useCallback(
     async (name: string, role: EmployeeRole, pin: string) => {
-      try {
-        const pinHash = await sha256(pin);
-        const newEmpData = { name: name.trim(), role, pinHash };
-        const savedEmployee = await addEmployeeToDB(newEmpData);
-
-        const cur = load();
-        cur.employees.push(
-          savedEmployee || {
-            id: crypto.randomUUID(),
-            ...newEmpData,
-          },
-        );
-
-        save(cur);
-        setDb(cur);
-      } catch (error) {
-        console.error("فشل في حفظ الموظف على السيرفر:", error);
-        alert("حدث خطأ أثناء حفظ الموظف، يرجى المحاولة مرة أخرى.");
-      }
+      const cur = load();
+      const pinHash = await hashPin(pin);
+      cur.employees.push({
+        id: crypto.randomUUID(),
+        name: name.trim(),
+        role,
+        pinHash,
+      });
+      save(cur);
+      setDb(cur);
+      toast.success("تم إضافة الموظف بنجاح");
     },
     [],
   );
@@ -305,9 +196,10 @@ export function usePosDB() {
     if (!e) return;
     if (patch.name !== undefined) e.name = patch.name.trim();
     if (patch.role !== undefined) e.role = patch.role;
-    if (patch.newPin) e.pinHash = await sha256(patch.newPin);
+    if (patch.newPin) e.pinHash = await hashPin(patch.newPin);
     save(cur);
     setDb(cur);
+    toast.success("تم التحديث بنجاح");
   }, []);
 
   const deleteEmployee = useCallback((id: string) => {
@@ -315,68 +207,53 @@ export function usePosDB() {
     cur.employees = cur.employees.filter((e) => e.id !== id);
     save(cur);
     setDb(cur);
+    toast.success("تم حذف الموظف");
   }, []);
 
   const verifyEmployeePin = useCallback(async (id: string, pin: string) => {
     const cur = load();
     const e = cur.employees.find((x) => x.id === id);
     if (!e) return false;
-    return (await sha256(pin)) === e.pinHash;
+    return (await hashPin(pin)) === e.pinHash;
   }, []);
 
   const findByPin = useCallback(async (pin: string, role?: EmployeeRole) => {
     const cur = load();
-    const h = await sha256(pin);
+    const h = await hashPin(pin);
     return (
       cur.employees.find(
         (e) => e.pinHash === h && (!role || e.role === role),
       ) || null
     );
   }, []);
+
   const addCustomer = useCallback(
     async (name: string, phone?: string, address?: string) => {
-      try {
-        const res = await fetch("http://localhost:5000/api/customers", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, phone, address }),
-        });
-        if (!res.ok) throw new Error("فشل حفظ العميل في السيرفر");
-
-        // تحديث الداتا محلياً بعد الحفظ في السيرفر
-        const savedCustomer = await res.json();
-        setDb((cur) => ({
-          ...cur,
-          customers: [...cur.customers, savedCustomer],
-        }));
-        toast.success("تم إضافة العميل بنجاح 🎉");
-      } catch (err) {
-        console.error(err);
-        toast.error("خطأ أثناء إضافة العميل");
-      }
+      const cur = load();
+      cur.customers.push({
+        id: crypto.randomUUID(),
+        name,
+        phone,
+        address,
+        orderCount: 0,
+        createdAt: Date.now(),
+      });
+      save(cur);
+      setDb(cur);
+      toast.success("تم إضافة العميل بنجاح 🎉");
     },
     [],
   );
+
   const updateCustomer = useCallback(
     async (id: string, name: string, phone?: string, address?: string) => {
-      try {
-        const res = await fetch(`http://localhost:5000/api/customers/${id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, phone, address }),
-        });
-        if (!res.ok) throw new Error("فشل تعديل بيانات العميل في السيرفر");
-
-        setDb((cur) => ({
-          ...cur,
-          customers: cur.customers.map((c) =>
-            c.id === id ? { ...c, name, phone, address } : c,
-          ),
-        }));
-      } catch (err) {
-        console.error(err);
-        toast.error("فشل في تعديل بيانات العميل");
-      }
+      const cur = load();
+      cur.customers = cur.customers.map((c) =>
+        c.id === id ? { ...c, name, phone, address } : c,
+      );
+      save(cur);
+      setDb(cur);
+      toast.success("تم تعديل بيانات العميل");
     },
     [],
   );
@@ -397,184 +274,118 @@ export function usePosDB() {
 
   const addInvoice = useCallback(
     async (inv: Omit<Invoice, "invoiceNumber" | "createdAt">) => {
+      const cur = load();
       const invoiceNumber = Math.floor(100000 + Math.random() * 900000);
       const createdAt = Date.now();
 
-      const fullInvoice = {
+      const fullInvoice: Invoice = {
         ...inv,
+        id: crypto.randomUUID(),
         invoiceNumber,
         createdAt,
+        deliveryPrice: Number(inv.deliveryPrice || 0),
       };
 
-      // دالة الطباعة المدمجة
+      // 🌟 السحر هنا: إرسال الفاتورة فوراً لقاعدة البيانات (pgAdmin) مهما كان نوعها (صالة / تيك أواي / دليفري)
+      try {
+        const response = await fetch("http://localhost:5000/api/invoices", {
+          method: "POST",
+          mode: "cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fullInvoice),
+        });
+
+        if (response.ok) {
+          console.log("✅ تم حفظ الفاتورة بنجاح في قاعدة البيانات PostgreSQL!");
+        } else {
+          console.error("⚠️ السيرفر رجع خطأ أثناء حفظ الفاتورة");
+        }
+      } catch (error) {
+        console.error(
+          "❌ فشل الاتصال بالسيرفر لحفظ الفاتورة بالداتابيز:",
+          error,
+        );
+      }
+
       const triggerPrint = (invoice: any) => {
         const printWindow = window.open("", "_blank", "width=400,height=600");
         if (!printWindow) return;
-
-        const dPrice =
-          Number(invoice.deliveryPrice) || Number(invoice.delivery_price) || 0;
-
+        const dPrice = Number(invoice.deliveryPrice) || 0;
         const html = `
-          <html>
-            <head>
-              <title>طباعة الفاتورة</title>
-              <style>
-                body { font-family: Arial, sans-serif; direction: rtl; text-align: center; padding: 20px; font-size: 14px; }
-                .header { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
-                .type-title { font-size: 22px; font-weight: bold; margin: 10px 0; border: 2px dashed #000; padding: 5px; text-transform: uppercase; }
-                .meta { margin-bottom: 10px; font-size: 12px; border-bottom: 1px dashed #000; padding-bottom: 5px; }
-                table { width: 100%; border-collapse: collapse; margin-top: 10px; text-align: right; }
-                th { border-bottom: 1px solid #000; padding: 4px; font-size: 13px; }
-                td { padding: 4px; font-size: 13px; vertical-align: top; }
-                .totals { margin-top: 10px; border-top: 1px dashed #000; padding-top: 5px; text-align: right; }
-                .totals div { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 13px; }
-                .bold { font-weight: bold; font-size: 15px; }
-              </style>
-            </head>
-            <body>
-              <div class="header">مجمع الـمـول</div>
-              <div class="type-title">ORDER</div>
-              
-              <div class="meta">
-                <div>رقم الفاتورة: ${String(invoice.id || invoiceNumber).slice(0, 8)}</div>
-                <div>التاريخ: ${new Date(invoice.createdAt || createdAt).toLocaleString("ar-EG")}</div>
-                <div>النوع في النظام: ${invoice.type === "delivery" ? "توصيل" : invoice.type === "takeaway" ? "تيك أواي" : "صالة"}</div>
+        <html>
+          <head>
+            <title>طباعة الفاتورة</title>
+            <style>
+              body { font-family: Arial, sans-serif; direction: rtl; text-align: center; padding: 20px; font-size: 14px; }
+              .header { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+              .type-title { font-size: 22px; font-weight: bold; margin: 10px 0; border: 2px dashed #000; padding: 5px; text-transform: uppercase; }
+              .meta { margin-bottom: 10px; font-size: 12px; border-bottom: 1px dashed #000; padding-bottom: 5px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 10px; text-align: right; }
+              th { border-bottom: 1px solid #000; padding: 4px; font-size: 13px; }
+              td { padding: 4px; font-size: 13px; vertical-align: top; }
+              .totals { margin-top: 10px; border-top: 1px dashed #000; padding-top: 5px; text-align: right; }
+              .totals div { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 13px; }
+              .bold { font-weight: bold; font-size: 15px; }
+            </style>
+          </head>
+          <body>
+            <div class="header">مجمع الـمـول</div>
+            <div class="type-title">ORDER</div>
+            <div class="meta">
+              <div>رقم الفاتورة: ${String(invoice.id || invoiceNumber).slice(0, 8)}</div>
+              <div>التاريخ: ${new Date(invoice.createdAt || createdAt).toLocaleString("ar-EG")}</div>
+              <div>النوع: ${invoice.type === "delivery" ? "توصيل" : invoice.type === "takeaway" ? "تيك أواي" : "صالة"}</div>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>الصنف</th>
+                  <th style="text-align:center;">الكمية</th>
+                  <th style="text-align:left;">الإجمالي</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(typeof invoice.items === "string"
+                  ? JSON.parse(invoice.items)
+                  : invoice.items
+                )
+                  .map((line: any) => {
+                    const exStr =
+                      line.extras && line.extras.length
+                        ? ` <span style="font-size:11px;color:#555;">(+${line.extras.map((e: any) => e.name || e.label).join(", ")})</span>`
+                        : "";
+                    return `<tr><td>${line.mealName || line.name}${exStr}</td><td style="text-align:center;">${line.qty}</td><td style="text-align:left;">${((line.unitPrice + (line.extras ? line.extras.reduce((s: number, e: any) => s + e.price, 0) : 0)) * line.qty).toFixed(2)} ج</td></tr>`;
+                  })
+                  .join("")}
+              </tbody>
+            </table>
+            <div class="totals">
+              <div><span>المجموع الأصلي:</span> <span>${Number(invoice.subtotal || 0).toFixed(2)} ج</span></div>
+              ${invoice.discountValue > 0 ? `<div><span>الخصم:</span> <span>${Number(invoice.discountValue).toFixed(2)} ج</span></div>` : ""}
+              ${invoice.taxValue > 0 ? `<div><span>الضريبة:</span> <span>${Number(invoice.taxValue).toFixed(2)} ج</span></div>` : ""}
+              <div><span>التوصيل:</span> <span class="bold">${dPrice.toFixed(2)} ج</span></div>
+              <div class="bold" style="border-top:1px solid #000; padding-top:4px; margin-top:4px;">
+                <span>الإجمالي النهائي:</span> <span>${Number(invoice.total || 0).toFixed(2)} ج</span>
               </div>
-
-              <table>
-                <thead>
-                  <tr>
-                    <th>الصنف</th>
-                    <th style="text-align:center;">الكمية</th>
-                    <th style="text-align:left;">الإجمالي</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${
-                    invoice.items
-                      ? (typeof invoice.items === "string"
-                          ? JSON.parse(invoice.items)
-                          : invoice.items
-                        )
-                          .map((line: any) => {
-                            const exStr =
-                              line.extras && line.extras.length
-                                ? ` <span style="font-size:11px;color:#555;">(+${line.extras.map((e: any) => e.name || e.label).join(", ")})</span>`
-                                : "";
-                            return `
-                          <tr>
-                            <td>${line.mealName || ""}${exStr}</td>
-                            <td style="text-align:center;">${line.qty}</td>
-                            <td style="text-align:left;">${((line.unitPrice + (line.extras ? line.extras.reduce((s: number, e: any) => s + e.price, 0) : 0)) * line.qty).toFixed(2)} ج</td>
-                          </tr>
-                        `;
-                          })
-                          .join("")
-                      : ""
-                  }
-                </tbody>
-              </table>
-
-              <div class="totals">
-                <div><span>المجموع الأصلي:</span> <span>${Number(invoice.subtotal || 0).toFixed(2)} ج</span></div>
-                ${invoice.discountValue > 0 ? `<div><span>الخصم:</span> <span>${Number(invoice.discountValue).toFixed(2)} ج</span></div>` : ""}
-                ${invoice.taxValue > 0 ? `<div><span>الضريبة:</span> <span>${Number(invoice.taxValue).toFixed(2)} ج</span></div>` : ""}
-                
-                <div><span>التوصيل:</span> <span class="bold">${dPrice.toFixed(2)} ج</span></div>
-                
-                <div class="bold" style="border-top:1px solid #000; padding-top:4px; margin-top:4px;">
-                  <span>الإجمالي النهائي:</span> <span>${Number(invoice.total || 0).toFixed(2)} ج</span>
-                </div>
-              </div>
-
-              <div style="margin-top:20px; font-size:11px; border-top:1px solid #000; padding-top:5px;">
-                شكراً لزيارتكم!
-              </div>
-
-              <script>
-                window.onload = function() { window.print(); window.close(); }
-              </script>
-            </body>
-          </html>
-        `;
-
+            </div>
+            <div style="margin-top:20px; font-size:11px; border-top:1px solid #000; padding-top:5px;">شكراً لزيارتكم!</div>
+            <script>window.onload = function() { window.print(); window.close(); }</script>
+          </body>
+        </html>
+      `;
         printWindow.document.open();
         printWindow.document.write(html);
         printWindow.document.close();
       };
 
-      try {
-        console.log("⏳ جاري محاولة الحفظ على السيرفر...", fullInvoice);
-        const res = await addInvoiceToDB(fullInvoice);
-
-        const savedInvoice =
-          res && res.id
-            ? {
-                ...res,
-                items:
-                  typeof res.items === "string"
-                    ? JSON.parse(res.items)
-                    : res.items,
-                subtotal: Number(res.subtotal),
-                discountPct: Number(res.discount_pct || res.discountPct || 0),
-                discountValue: Number(
-                  res.discount_value || res.discountValue || 0,
-                ),
-                taxPct: Number(res.tax_pct || res.taxPct || 0),
-                taxValue: Number(res.tax_value || res.taxValue || 0),
-                total: Number(res.total),
-                // 🌟 ضمان قراءة سعر التوصيل وتحويله لـ الـ UI بشكل سليم
-                deliveryPrice: Number(
-                  res.delivery_price || res.deliveryPrice || 0,
-                ),
-                createdAt: parseSafeDate(
-                  res.created_at || res.createdAt,
-                  createdAt,
-                ),
-                invoiceNumber: Number(
-                  res.invoice_number || res.invoiceNumber || invoiceNumber,
-                ),
-              }
-            : fullInvoice;
-
-        setDb((cur) => {
-          const updatedInvoices = [savedInvoice, ...cur.invoices];
-          const next = { ...cur, invoices: updatedInvoices };
-          save(next);
-          return next;
-        });
-
-        toast.success(`🎉 تم حفظ الفاتورة بنجاح رقم: ${invoiceNumber}`);
-        triggerPrint(savedInvoice);
-
-        return savedInvoice;
-      } catch (err) {
-        console.warn(
-          "⚠️ السيرفر واجه مشكلة، يتم الحفظ محلياً الآن لتجنب التعطيل...",
-        );
-
-        // تأمين الحفظ المحلي أيضاً
-        const localSaved = {
-          ...fullInvoice,
-          deliveryPrice: Number(
-            (fullInvoice as any).deliveryPrice ||
-              (fullInvoice as any).delivery_price ||
-              0,
-          ),
-        };
-
-        setDb((cur) => {
-          const updatedInvoices = [localSaved as any, ...cur.invoices];
-          const next = { ...cur, invoices: updatedInvoices };
-          save(next);
-          return next;
-        });
-
-        toast.success(`🎉 تم اعتماد الفاتورة محلياً رقم: ${invoiceNumber}`);
-        triggerPrint(localSaved);
-
-        return localSaved;
-      }
+      cur.invoices = [fullInvoice, ...cur.invoices];
+      save(cur);
+      setDb(cur);
+      toast.success(
+        `🎉 تم اعتماد الفاتورة محلياً ورفعها رقم: ${invoiceNumber}`,
+      );
+      triggerPrint(fullInvoice);
+      return fullInvoice;
     },
     [],
   );
@@ -582,38 +393,75 @@ export function usePosDB() {
   const openShift = useCallback(
     async (cashierId: string, cashierName: string) => {
       const cur = load();
-      const openedAt = Date.now();
-      cur.shift = { cashierId, cashierName, openedAt };
-
-      try {
-        await saveShiftToDB({ cashierId, cashierName, openedAt });
-      } catch (e) {
-        console.error("خطأ في حفظ الشيفت بالباك إند", e);
-      }
-
+      cur.shift = { cashierId, cashierName, openedAt: Date.now() };
       save(cur);
       setDb(cur);
     },
     [],
   );
 
-  const closeShift = useCallback(async () => {
-    const cur = load();
-    if (cur.shift) {
-      const closedShift = { ...cur.shift, closedAt: Date.now() };
-      cur.shifts = [...(cur.shifts || []), closedShift];
-      cur.shift = null;
+  const closeShift = useCallback(
+    async (totalsData: {
+      kitchenSales: number;
+      barSales: number;
+      shishaSales: number;
+      taxValue: number;
+      discountValue: number;
+      dineinSales: number;
+      takeawaySales: number;
+      deliverySales: number;
+    }) => {
+      const activeShift = db.shift;
 
-      try {
-        await saveShiftToDB(closedShift);
-      } catch (e) {
-        console.error("خطأ في إغلاق الشيفت بالباك إند", e);
+      if (!activeShift) {
+        toast.error("لا يوجد وردية مفتوحة لإغلاقها!");
+        return;
       }
 
-      save(cur);
-      setDb(cur);
-    }
-  }, []);
+      const closedShiftData = {
+        cashierId: activeShift.cashierId,
+        cashierName: activeShift.cashierName,
+        openedAt: activeShift.openedAt,
+        closedAt: Date.now(),
+        ...totalsData,
+      };
+
+      try {
+        const res = await fetch("http://localhost:5000/api/shifts", {
+          method: "POST",
+          mode: "cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(closedShiftData),
+        });
+
+        if (!res.ok) {
+          throw new Error("فشل الحفظ على السيرفر");
+        }
+
+        // 🌟 استلام البيانات الفعلية المحفوظة من السيرفر (عشان ناخد الـ ID اللي اتعمل في الداتابيز)
+        const savedShiftFromServer = await res.json();
+
+        const cur = load();
+
+        // دمج الشفت الجديد المقفل في أول مصفوفة الورديات محلياً
+        cur.shifts = [savedShiftFromServer, ...cur.shifts];
+        // تصفير الشفت الحالي المفتوح
+        cur.shift = null;
+
+        // حفظ التحديث في الكاش الرئيسي والاحتياطي لضمان السرعة والمزامنة
+        save(cur);
+        localStorage.setItem("pos_shifts", JSON.stringify(cur.shifts));
+        setDb(cur);
+
+        toast.success(`🎉 تم إغلاق الوردية وحفظها بنجاح في الداتابيز والكاش!`);
+      } catch (err) {
+        console.error("❌ خطأ أثناء إغلاق الشفت بالسيرفر:", err);
+        toast.error("حدث خطأ أثناء الاتصال بالسيرفر لحفظ بيانات الوردية");
+      }
+    },
+    [db],
+  );
+
   const incCustomerOrders = useCallback((id?: string) => {
     if (!id) return;
     setDb((cur) => {
@@ -626,6 +474,7 @@ export function usePosDB() {
     });
   }, []);
 
+  // 🌟 تعديل الـ transferItems لحل مشكلة التيك أواي مع الحفاظ على بقية الصفحات
   const transferItems = useCallback(
     (
       from: string,
@@ -636,15 +485,35 @@ export function usePosDB() {
       const cur = load();
       const src = cur.orders[from];
       if (!src) return { ok: false };
+
+      // 1. معالجة الـ targetZone لضمان تحويل المسميات المختصرة (مثل O) إلى الـ ID الحقيقي (open)
+      let finalZone: ZoneId = targetZone as ZoneId;
+      const foundZone = ZONES.find(
+        (z) =>
+          z.id === targetZone ||
+          z.prefix === targetZone ||
+          (to && to.startsWith(z.prefix)),
+      );
+      if (foundZone) {
+        finalZone = foundZone.id;
+      }
+
+      // 2. إنشاء الأوردر الجديد مع وراثة الخصائص الأصلية (العميل، الخصم، الضرائب) حتى لا تضيع البيانات
       const dst = cur.orders[to] || {
+        ...src,
         tableCode: to,
-        zone: targetZone,
+        zone: finalZone,
         items: [],
-        state: "active",
-        discountPct: 0,
-        taxPct: 14,
-        openedAt: Date.now(),
+        state: src.state || "active",
+        discountPct: src.discountPct !== undefined ? src.discountPct : 0,
+        taxPct: src.taxPct !== undefined ? src.taxPct : 14,
+        openedAt: src.openedAt || Date.now(),
       };
+
+      // 3. مسح خاصية الـ type التيك أواي طالما الأوردر منقول لصالة حقيقية حتي لا يقرأه السيستم كتيك أواي
+      if (finalZone !== "takeaway") {
+        delete dst.type;
+      }
 
       for (const move of itemsToMove) {
         const idx = src.items.findIndex((i) => i.id === move.id);
@@ -670,35 +539,49 @@ export function usePosDB() {
     },
     [],
   );
-  // 🌟 كود إجباري لجلب الفواتير وتحويل قيمة التوصيل للـ UI فوراً
-  useEffect(() => {
-    async function forceLoadInvoices() {
-      try {
-        const data = await fetchInvoices();
-        if (Array.isArray(data)) {
-          const normalized = data.map((inv: any) => ({
-            ...inv,
-            // تحويل الاسم من الداتابيز (delivery_price) إلى الـ UI (deliveryPrice)
-            deliveryPrice: Number(inv.delivery_price || inv.deliveryPrice || 0),
-            subtotal: Number(inv.subtotal || 0),
-            total: Number(inv.total || 0),
-            discountValue: Number(inv.discount_value || inv.discountValue || 0),
-            taxValue: Number(inv.tax_value || inv.taxValue || 0),
-          }));
 
-          setDb((cur) => {
-            const next = { ...cur, invoices: normalized };
-            save(next);
-            return next;
-          });
+  useEffect(() => {
+    async function syncServerToLocalStorage() {
+      try {
+        console.log(
+          "🔄 جاري مزامنة وتحديث البيانات من pgAdmin إلى الـ LocalStorage...",
+        );
+
+        const [invoicesRes, shiftsRes, employeesRes] = await Promise.all([
+          fetch("http://localhost:5000/api/invoices"),
+          fetch("http://localhost:5000/api/shifts"),
+          fetch("http://localhost:5000/api/employees"),
+        ]);
+
+        if (invoicesRes.ok && shiftsRes.ok && employeesRes.ok) {
+          const invoices = await invoicesRes.json();
+          const shifts = await shiftsRes.json();
+          const employees = await employeesRes.json();
+
+          // 💾 تحديث مفاتيح الكاش الفرعية
+          localStorage.setItem("pos_invoices", JSON.stringify(invoices));
+          localStorage.setItem("pos_shifts", JSON.stringify(shifts));
+          localStorage.setItem("pos_employees", JSON.stringify(employees));
+
+          // 🌟 تحديث كاش الـ Store الرئيسي (rest-pos-db-v1) عشان لو فتحت صفحة الإعدادات تلاقي الوردية نزلت فوراً
+          const cur = load();
+          cur.shifts = shifts;
+          cur.employees = employees;
+          // تدمج الفواتير برضه لو حابب
+          cur.invoices = invoices;
+          save(cur);
+
+          console.log(
+            "✅ تمت المزامنة بنجاح! الورديات متطابقة الآن تماماً مع pgAdmin.",
+          );
         }
-      } catch (e) {
-        console.error("Error force loading invoices:", e);
+      } catch (error) {
+        console.error("❌ فشل تحديث الكاش المحلى من السيرفر:", error);
       }
     }
-    forceLoadInvoices();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchInvoices]); // بيشتغل أول ما الموقع يفتح ويجبره يقرأ التوصيل صح
+
+    syncServerToLocalStorage();
+  }, []);
 
   return {
     db,
@@ -709,17 +592,16 @@ export function usePosDB() {
     verifyEmployeePin,
     findByPin,
     addCustomer,
-    updateCustomer, // دالة التعديل اللي ضيفناها
+    updateCustomer,
     upsertOrder,
     clearOrder,
     transferItems,
     addInvoice,
     openShift,
     closeShift,
-    incCustomerOrders, // 🌟 ضيف اسما هنا بدون أي أقواس أو سهم فاضي
+    incCustomerOrders,
   };
 }
-
 export function computeTotals(
   items: OrderItem[],
   discountPct: number,

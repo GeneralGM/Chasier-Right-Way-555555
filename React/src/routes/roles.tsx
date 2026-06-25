@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { toast } from "sonner";
 import { usePosDB, type Employee, type EmployeeRole } from "@/lib/pos-store.ts";
 import { Button } from "@/components/ui/button";
@@ -21,9 +21,40 @@ export const Route = createFileRoute("/roles")({
 
 function RolesPage() {
   const { db, addEmployee, updateEmployee, deleteEmployee } = usePosDB();
-  const [revealed, setRevealed] = useState<Record<string, string>>({}); // id -> displayed pin (only set if admin pin verified — but we never store the raw pin server-side; we just allow viewing the masked entry as "****" + actual value if user enters it on creation; in this MVP we show "(محفوظ)" after verification)
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [pinFor, setPinFor] = useState<string | null>(null);
   const [editing, setEditing] = useState<Employee | "new" | null>(null);
+
+  const [serverEmployees, setServerEmployees] = useState<Employee[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    async function fetchEmployeesFromPostgres() {
+      try {
+        setIsLoading(true);
+        const response = await fetch("http://localhost:5000/api/employees");
+        if (response.ok) {
+          const data = await response.json();
+          setServerEmployees(data);
+        }
+      } catch (error) {
+        console.error("❌ خطأ أثناء جلب الموظفين من pgAdmin:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    fetchEmployeesFromPostgres();
+  }, []);
+
+  // 🌟 دمج الموظفين من الداتابيز والـ LocalStorage عشان محدش يختفي
+  const employeesList = useMemo(() => {
+    const map = new Map();
+    // نحط موظفين السيرفر الأول
+    serverEmployees.forEach((e) => map.set(e.name, e));
+    // نحط موظفين اللوكال ستوريدج عليهم (لو فيه تكرار بالاسم هيتحدث)
+    db.employees.forEach((e) => map.set(e.name, e));
+    return Array.from(map.values());
+  }, [serverEmployees, db.employees]);
 
   function toggleEye(id: string) {
     if (revealed[id]) {
@@ -62,7 +93,16 @@ function RolesPage() {
             </tr>
           </thead>
           <tbody>
-            {db.employees.length === 0 ? (
+            {isLoading ? (
+              <tr>
+                <td
+                  colSpan={4}
+                  className="p-8 text-center text-amber-600 font-medium animate-pulse"
+                >
+                  جاري جلب الموظفين من قاعدة البيانات (pgAdmin)...
+                </td>
+              </tr>
+            ) : employeesList.length === 0 ? (
               <tr>
                 <td
                   colSpan={4}
@@ -72,12 +112,16 @@ function RolesPage() {
                 </td>
               </tr>
             ) : (
-              db.employees.map((e) => (
+              employeesList.map((e) => (
                 <tr key={e.id} className="border-t border-border">
                   <td className="p-3 font-medium">{e.name}</td>
                   <td className="p-3">
                     <span
-                      className={`px-2 py-0.5 rounded text-xs ${e.role === "كاشير" ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"}`}
+                      className={`px-2 py-0.5 rounded text-xs ${
+                        e.role === "كاشير"
+                          ? "bg-primary/10 text-primary"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
                     >
                       {e.role}
                     </span>
@@ -85,7 +129,7 @@ function RolesPage() {
                   <td className="p-3 font-mono">
                     <div className="flex items-center gap-2">
                       <span className="tracking-widest">
-                        {revealed[e.id] ? revealed[e.id] : "####"}
+                        {revealed[e.id] ? e.pinHash || e.pin || "####" : "####"}
                       </span>
                       <button
                         onClick={() => toggleEye(e.id)}
@@ -110,8 +154,9 @@ function RolesPage() {
                       <button
                         onClick={() => {
                           if (confirm(`حذف ${e.name}؟`)) {
+                            // للحذف من اللوكال ستوريدج (يفضل ربطها بالسيرفر لاحقاً)
                             deleteEmployee(e.id);
-                            toast.success("تم الحذف");
+                            toast.success("تم الحذف محلياً");
                           }
                         }}
                         className="p-1.5 rounded hover:bg-destructive/10 text-destructive"
@@ -133,8 +178,7 @@ function RolesPage() {
         description="أدخل كلمة مرور المسؤول لعرض الكود السري للموظف."
         onClose={() => setPinFor(null)}
         onSuccess={() => {
-          if (pinFor)
-            setRevealed((r) => ({ ...r, [pinFor]: "(تم التحقق — مُشفّر)" }));
+          if (pinFor) setRevealed((r) => ({ ...r, [pinFor]: true }));
           setPinFor(null);
         }}
       />
@@ -144,18 +188,48 @@ function RolesPage() {
           employee={editing === "new" ? null : editing}
           onClose={() => setEditing(null)}
           onSave={async (data) => {
-            if (editing === "new") {
-              await addEmployee(data.name, data.role, data.pin!);
-              toast.success("تم إضافة الموظف");
-            } else {
-              await updateEmployee((editing as Employee).id, {
-                name: data.name,
-                role: data.role,
-                newPin: data.pin || undefined,
-              });
-              toast.success("تم التحديث");
+            try {
+              if (editing === "new") {
+                // 🌟 إرسال الموظف الجديد لقاعدة البيانات (السيرفر)
+                const res = await fetch("http://localhost:5000/api/employees", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    name: data.name,
+                    role: data.role,
+                    pinHash: data.pin,
+                  }),
+                });
+
+                if (res.ok) {
+                  const savedEmp = await res.json();
+                  // 🌟 حفظ في اللوكال ستوريدج بعد نجاح السيرفر
+                  await addEmployee(
+                    savedEmp.name,
+                    savedEmp.role,
+                    savedEmp.pinHash,
+                  );
+                  toast.success("تم الإضافة في السيرفر بنجاح");
+
+                  // تحديث القائمة فوراً
+                  setServerEmployees((prev) => [...prev, savedEmp]);
+                } else {
+                  toast.error("فشل الحفظ في السيرفر!");
+                }
+              } else {
+                await updateEmployee((editing as Employee).id, {
+                  name: data.name,
+                  role: data.role,
+                  newPin: data.pin || undefined,
+                });
+                toast.success("تم التحديث");
+              }
+            } catch (err) {
+              console.error(err);
+              toast.error("خطأ في الاتصال بقاعدة البيانات");
+            } finally {
+              setEditing(null);
             }
-            setEditing(null);
           }}
         />
       )}

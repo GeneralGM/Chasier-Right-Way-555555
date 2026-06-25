@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePosDB, type Invoice, type ShiftState } from "@/lib/pos-store";
 import { useDB, SHISHA_CATEGORY } from "@/lib/store";
 import { fmt2, clamp0 } from "@/lib/format";
@@ -133,8 +133,63 @@ const printInvoice = (invoice: Invoice) => {
   printWindow.document.close();
 };
 
+// function SettingsPage() {
+//   const [tab, setTab] = useState<Tab>("invoices");
+//   // مخزن لحفظ الشيفتات القادمة من الداتابيز
+//   const [dbShifts, setDbShifts] = useState<any[]>([]);
+
+//   // جلب الشيفتات من السيرفر بورت 5000
+//   useEffect(() => {
+//     const loadShifts = async () => {
+//       try {
+//         const res = await fetch("http://localhost:5000/api/shifts");
+//         if (res.ok) {
+//           const data = await res.json();
+//           setDbShifts(data); // حفظ البيانات في الستيت
+//         }
+//       } catch (err) {
+//         console.error("خطأ أثناء تحميل الشيفتات في الإعدادات:", err);
+//       }
+//     };
+
+//     if (tab === "shifts") {
+//       loadShifts();
+//     }
+//   }, [tab]);
+
+//   return (
+//     <div dir="rtl" className="space-y-4">
+//       <div>
+//         <h1 className="text-2xl font-bold flex items-center gap-2">
+//           <SettingsIcon className="w-6 h-6" /> الإعدادات
+//         </h1>
+//         <p className="text-sm text-muted-foreground">
+//           أرشيف الفواتير وإعدادات النظام.
+//         </p>
+//       </div>
+//       <div className="flex gap-1 bg-secondary p-1 rounded-lg w-fit">
+//         <button
+//           onClick={() => setTab("invoices")}
+//           className={`px-4 h-9 rounded-md text-sm font-medium flex items-center gap-2 ${tab === "invoices" ? "bg-card shadow-sm" : "text-muted-foreground"}`}
+//         >
+//           <Receipt className="w-4 h-4" /> الفواتير
+//         </button>
+//         <button
+//           onClick={() => setTab("shifts")}
+//           className={`px-4 h-9 rounded-md text-sm font-medium flex items-center gap-2 ${tab === "shifts" ? "bg-card shadow-sm" : "text-muted-foreground"}`}
+//         >
+//           <Clock className="w-4 h-4" /> الشيفتات
+//         </button>
+//       </div>
+//       {tab === "invoices" && <InvoicesTab />}
+//       {/* ✅ تعديل 1: قمنا بتمرير الشيفتات القادمة من السيرفر إلى المكون */}
+//       {tab === "shifts" && <ShiftsTab dbShifts={dbShifts} />}
+//     </div>
+//   );
+// }
 function SettingsPage() {
   const [tab, setTab] = useState<Tab>("invoices");
+
   return (
     <div dir="rtl" className="space-y-4">
       <div>
@@ -164,12 +219,37 @@ function SettingsPage() {
     </div>
   );
 }
-
 function InvoicesTab() {
   const { db: pos } = usePosDB();
   const [sub, setSub] = useState<InvTab>("takeaway");
   const [range, setRange] = useState<Range>("today");
   const [q, setQ] = useState("");
+
+  const [serverInvoices, setServerInvoices] = useState<Invoice[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // 🔄 جلب كل الفواتير من السيرفر دائماً لضمان عرض الأرشيف
+  useEffect(() => {
+    async function fetchInvoicesFromPostgres() {
+      try {
+        setIsLoading(true);
+        const response = await fetch("http://localhost:5000/api/invoices");
+        if (response.ok) {
+          const data = await response.json();
+          setServerInvoices(data);
+        }
+      } catch (error) {
+        console.error(
+          "❌ خطأ أثناء جلب الفواتير الاحتياطية من pgAdmin:",
+          error,
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchInvoicesFromPostgres();
+  }, []);
 
   const fromTs = useMemo(() => {
     if (range === "all") return 0;
@@ -179,12 +259,29 @@ function InvoicesTab() {
     return d.getTime();
   }, [range]);
 
+  // 🌟 هنا السحر: دمج الفواتير وترتيبها وتطبيق الفلاتر
   const rows: Invoice[] = useMemo(() => {
-    return pos.invoices.filter((i) => {
+    // 1. دمج الفواتير من المصدرين بدون تكرار (باستخدام رقم الفاتورة ID)
+    const map = new Map<string, Invoice>();
+    serverInvoices.forEach((inv) => map.set(inv.id, inv));
+    pos.invoices.forEach((inv) => map.set(inv.id, inv));
+
+    // 2. تحويلهم لمصفوفة وترتيبهم من الأحدث للأقدم
+    const mergedInvoices = Array.from(map.values()).sort(
+      (a, b) => b.createdAt - a.createdAt,
+    );
+
+    // 3. تطبيق فلاتر (النوع، الوقت، البحث)
+    return mergedInvoices.filter((i) => {
+      // فلتر النوع (تيك أواي/دليفري أو صالة)
       if (sub === "takeaway" && i.type !== "takeaway" && i.type !== "delivery")
         return false;
       if (sub === "dinein" && i.type !== "dinein") return false;
+
+      // فلتر الوقت (اليوم، الأسبوع، الكل)
       if (i.createdAt < fromTs) return false;
+
+      // فلتر البحث بالنص
       if (q) {
         const hay =
           `${i.tableCode || ""} ${i.customerName || ""} ${i.customerAddress || ""}`.toLowerCase();
@@ -192,7 +289,7 @@ function InvoicesTab() {
       }
       return true;
     });
-  }, [pos.invoices, sub, fromTs, q]);
+  }, [pos.invoices, serverInvoices, sub, fromTs, q]);
 
   function exportToExcel() {
     const data = rows.map((inv) => {
@@ -201,7 +298,8 @@ function InvoicesTab() {
           inv.createdAt >= s.openedAt &&
           (!s.closedAt || inv.createdAt <= s.closedAt),
       );
-      const soldItems = inv.items.map((i) => `${i.name}×${i.qty}`).join(" , ");
+      const soldItems =
+        inv.items?.map((i) => `${i.name}×${i.qty}`).join(" , ") || "";
       return {
         "الأصناف المباعة": soldItems,
         الشيفت: shift
@@ -284,13 +382,22 @@ function InvoicesTab() {
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {isLoading ? (
+              <tr>
+                <td
+                  colSpan={12}
+                  className="p-8 text-center text-amber-600 font-medium animate-pulse"
+                >
+                  جاري جلب الفواتير من الأرشيف (pgAdmin)...
+                </td>
+              </tr>
+            ) : rows.length === 0 ? (
               <tr>
                 <td
                   colSpan={12}
                   className="p-8 text-center text-muted-foreground"
                 >
-                  لا توجد فواتير مطابقة.
+                  لا توجد فواتير مطابقة للفلاتر المحددة.
                 </td>
               </tr>
             ) : (
@@ -394,48 +501,99 @@ function ShiftsTab() {
   const { db } = useDB();
   const [detailShift, setDetailShift] = useState<ShiftReport | null>(null);
 
+  // 🌟 ولايات جديدة لجلب الشفتات والفواتير من pgAdmin لو الـ LocalStorage اتمسح
+  const [serverShifts, setServerShifts] = useState<any[]>([]);
+  const [serverInvoices, setServerInvoices] = useState<Invoice[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // 🔄 جلب البيانات من السيرفر أوتوماتيكياً في حالة مسح الذاكرة المحلية
+  useEffect(() => {
+    async function fetchShiftsAndInvoices() {
+      if (pos.shifts.length > 0) return; // لو الداتا موجودة محلياً مفيش داعي نكلم السيرفر
+
+      try {
+        setIsLoading(true);
+        const [shiftsRes, invoicesRes] = await Promise.all([
+          fetch("http://localhost:5000/api/shifts"),
+          fetch("http://localhost:5000/api/invoices"),
+        ]);
+
+        if (shiftsRes.ok && invoicesRes.ok) {
+          const shiftsData = await shiftsRes.json();
+          const invoicesData = await invoicesRes.json();
+          setServerShifts(shiftsData);
+          setServerInvoices(invoicesData);
+        }
+      } catch (err) {
+        console.error("❌ خطأ أثناء جلب الشيفتات الاحتياطية من pgAdmin:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchShiftsAndInvoices();
+  }, [pos.shifts.length]);
+
   const shiftsWithData: ShiftReport[] = useMemo(() => {
-    return pos.shifts.map((shift) => {
-      const shiftInvoices = pos.invoices.filter((inv) => {
+    const sourceShifts = pos.shifts.length > 0 ? pos.shifts : serverShifts;
+    const sourceInvoices =
+      pos.invoices.length > 0 ? pos.invoices : serverInvoices;
+
+    const sortedShifts = [...sourceShifts].sort(
+      (a, b) => (b.closedAt || 0) - (a.closedAt || 0),
+    );
+
+    return sortedShifts.map((shift) => {
+      const shiftInvoices = sourceInvoices.filter((inv) => {
         if (inv.createdAt < shift.openedAt) return false;
         if (shift.closedAt && inv.createdAt > shift.closedAt) return false;
         return true;
       });
 
-      let kitchen = 0,
-        bar = 0,
+      // 🌟 التعديل السحري: نضع القيم المخزنة في السيرفر كقيمة مبدئية بدلاً من الصفر الصريح!
+      let kitchen = Number(shift.kitchenSales) || 0;
+      let bar = Number(shift.barSales) || 0;
+      let shisha = Number(shift.shishaSales) || 0;
+      let takeawayOnly = Number(shift.takeawaySales) || 0;
+      let deliveryOnly = Number(shift.deliverySales) || 0;
+      let tax = Number(shift.taxValue) || 0;
+      let discount = Number(shift.discountValue) || 0;
+
+      // حساب الإجمالي الأصلي (الفرعي) إذا لم تتوفر فواتير تفصيلية
+      let subtotal = kitchen + bar + shisha;
+
+      // إذا كانت هناك فواتير متوفرة فعلياً، نقوم بالحساب الديناميكي الدقيق منها
+      if (shiftInvoices.length > 0 && db.meals && db.meals.length > 0) {
+        // إعادة تصفير للحساب التفصيلي فقط لو الفواتير موجودة
+        kitchen = 0;
+        bar = 0;
         shisha = 0;
-      let takeawayOnly = 0,
-        deliveryOnly = 0,
-        deliveryFeesOnly = 0;
-      let subtotal = 0,
-        discount = 0,
+        takeawayOnly = 0;
+        deliveryOnly = 0;
+        let deliveryFeesOnly = 0;
+        subtotal = 0;
+        discount = 0;
         tax = 0;
 
-      for (const inv of shiftInvoices) {
-        subtotal += inv.subtotal;
-        discount += inv.discountValue;
-        tax += inv.taxValue;
+        for (const inv of shiftInvoices) {
+          subtotal += inv.subtotal;
+          discount += inv.discountValue;
+          tax += inv.taxValue;
 
-        // 🌟 نفس الحماية هنا لقراءة العمود بشكل صحيح من الداتابيز
-        const deliveryFee =
-          Number(inv.deliveryPrice) || Number((inv as any).delivery_price) || 0;
+          const deliveryFee = Number(inv.deliveryPrice) || 0;
+          deliveryFeesOnly += deliveryFee;
 
-        deliveryFeesOnly += deliveryFee;
+          if (inv.type === "takeaway") {
+            takeawayOnly += inv.total - deliveryFee;
+          } else if (inv.type === "delivery") {
+            deliveryOnly += inv.total - deliveryFee;
+          }
 
-        if (inv.type === "takeaway") {
-          takeawayOnly += inv.total - deliveryFee;
-        } else if (inv.type === "delivery") {
-          deliveryOnly += inv.total - deliveryFee;
-        }
-
-        for (const line of shiftInvoices) {
-          // حسابات الأقسام الداخلية
           for (const line of inv.items) {
             const meal = db.meals.find((m) => m.id === line.mealId);
             if (!meal) continue;
 
-            const extras = line.extras.reduce((s, e) => s + e.price, 0);
+            const extras = line.extras?.reduce((s, e) => s + e.price, 0) || 0;
             const v = (line.unitPrice + extras) * line.qty;
 
             const isShisha =
@@ -449,17 +607,21 @@ function ShiftsTab() {
         }
       }
 
-      const finalNetCash = kitchen + bar + shisha + tax - discount;
+      // الاعتماد على التوتال المحسوب في السيرفر أو إعادة حسابه مع الضريبة والخصم
+      const finalNetCash = shift.totalRevenue
+        ? Number(shift.totalRevenue)
+        : kitchen + bar + shisha + tax - discount;
 
       return {
         shift,
-        invoiceCount: shiftInvoices.length,
+        invoiceCount:
+          shiftInvoices.length || Number((shift as any).invoice_count) || 0,
         kitchen: clamp0(kitchen),
         bar: clamp0(bar),
         shisha: clamp0(shisha),
         takeaway: clamp0(takeawayOnly),
         delivery: clamp0(deliveryOnly),
-        deliveryFees: clamp0(deliveryFeesOnly), // 🌟 هتعرض الرقم هنا بدل الشرطة
+        deliveryFees: clamp0(Number(shift.deliverySales) || 0),
         subtotal: clamp0(subtotal),
         discount: clamp0(discount),
         tax: clamp0(tax),
@@ -467,7 +629,7 @@ function ShiftsTab() {
         revenues: clamp0(finalNetCash),
       };
     });
-  }, [pos.shifts, pos.invoices, db.meals]);
+  }, [pos.shifts, serverShifts, pos.invoices, serverInvoices, db.meals]);
 
   function printShift(report: ShiftReport) {
     const w = window.open("", "_blank");
@@ -496,22 +658,7 @@ function ShiftsTab() {
           <tr><td>إيرادات الشيشة</td><td>${fmt2(report.shisha)} ج.م</td></tr>
           <tr class="total"><td>إجمالي الإيرادات الأساسية</td><td>${fmt2(report.revenues)} ج.م</td></tr>
         </table>
-
-        <table>
-          <tr><th colspan="2">إحصائيات منفصلة (مشمولة بالأعلى - للعلم فقط)</th></tr>
-          <tr><td>أوردرات التيك أواي</td><td>${fmt2(report.takeaway)} ج.م</td></tr>
-          <tr><td>أوردرات التوصيل</td><td>${fmt2(report.delivery)} ج.م</td></tr>
-          <tr><td>رسوم التوصيل</td><td>${fmt2(report.deliveryFees)} ج.م</td></tr>
-        </table>
-
-        <table>
-          <tr><th colspan="2">الحسابات الختامية</th></tr>
-          <tr><td>إجمالي المبيعات</td><td>${fmt2(report.subtotal)} ج.م</td></tr>
-          <tr><td>الخصومات</td><td>- ${fmt2(report.discount)} ج.م</td></tr>
-          <tr><td>القيمة المضافة (14%)</td><td>+ ${fmt2(report.tax)} ج.م</td></tr>
-          <tr class="total"><td>التوتال النهائي في الدرج (Net Cash)</td><td>${fmt2(report.total)} ج.م</td></tr>
-        </table>
-        <div class="footer">طُبع بواسطة نظام نقطة البيع بتاريخ: ${new Date().toLocaleString("ar-EG")}</div>
+        <div class="footer">طُبع بواسطة النظام بتاريخ: ${new Date().toLocaleString("ar-EG")}</div>
       </body>
       </html>
     `);
@@ -533,7 +680,17 @@ function ShiftsTab() {
             </tr>
           </thead>
           <tbody>
-            {shiftsWithData.length === 0 ? (
+            {isLoading ? (
+              /* ⏳ مؤشر تحميل من السيرفر */
+              <tr>
+                <td
+                  colSpan={5}
+                  className="p-8 text-center text-amber-600 font-medium animate-pulse"
+                >
+                  جاري استرجاع الورديات والتقارير من السيرفر (pgAdmin)...
+                </td>
+              </tr>
+            ) : shiftsWithData.length === 0 ? (
               <tr>
                 <td
                   colSpan={5}
@@ -547,14 +704,16 @@ function ShiftsTab() {
                 <tr key={idx} className="border-t border-border">
                   <td className="p-3 text-xs">
                     <div>
-                      {new Date(report.shift.openedAt).toLocaleString("ar-EG")}
+                      {new Date(Number(report.shift.openedAt)).toLocaleString(
+                        "ar-EG",
+                      )}
                     </div>
                     <div className="text-muted-foreground">
                       إلى:{" "}
                       {report.shift.closedAt
-                        ? new Date(report.shift.closedAt).toLocaleTimeString(
-                            "ar-EG",
-                          )
+                        ? new Date(
+                            Number(report.shift.closedAt),
+                          ).toLocaleTimeString("ar-EG")
                         : "الآن"}
                     </div>
                   </td>
@@ -573,7 +732,7 @@ function ShiftsTab() {
                         onClick={() => setDetailShift(report)}
                       >
                         <Info className="w-3 h-3" />
-                        <span className="mr-1">معلومات أخرى</span>
+                        <span className="mr-1">التفاصيل</span>
                       </Button>
                       <Button
                         size="sm"
@@ -581,7 +740,7 @@ function ShiftsTab() {
                         onClick={() => printShift(report)}
                       >
                         <Printer className="w-3 h-3" />
-                        <span className="mr-1">طباعة التقرير</span>
+                        <span className="mr-1">طباعة</span>
                       </Button>
                     </div>
                   </td>
@@ -594,20 +753,53 @@ function ShiftsTab() {
 
       {detailShift && (
         <Dialog open onOpenChange={() => setDetailShift(null)}>
-          <DialogContent dir="rtl" className="max-w-4xl p-6">
+          <DialogContent
+            dir="rtl"
+            className="max-w-5xl p-6 overflow-y-auto max-h-[90vh]"
+          >
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-xl mb-4">
-                <Info className="w-5 h-5 text-primary" /> تفاصيل شيفت (
-                {detailShift.shift.cashierName})
+              <DialogTitle className="text-xl font-bold flex items-center gap-2 border-b pb-3 text-primary">
+                <Clock className="w-5 h-5 text-emerald-600" />
+                <span>
+                  تقرير تفاصيل وردية الكاشير: ({detailShift.shift.cashierName})
+                </span>
               </DialogTitle>
             </DialogHeader>
 
+            {/* 📅 الميتا داتا الخاصة بالوردية */}
+            <div className="bg-secondary/40 rounded-xl p-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs mb-4 border border-border">
+              <div>
+                <span className="font-semibold text-muted-foreground">
+                  تاريخ ووقت الفتح:{" "}
+                </span>
+                <span className="font-mono text-foreground">
+                  {new Date(Number(detailShift.shift.openedAt)).toLocaleString(
+                    "ar-EG",
+                  )}
+                </span>
+              </div>
+              <div>
+                <span className="font-semibold text-muted-foreground">
+                  تاريخ ووقت الإغلاق:{" "}
+                </span>
+                <span className="font-mono text-foreground">
+                  {detailShift.shift.closedAt
+                    ? new Date(
+                        Number(detailShift.shift.closedAt),
+                      ).toLocaleString("ar-EG")
+                    : "لا يزال مفتوحاً الأن"}
+                </span>
+              </div>
+            </div>
+
+            {/* 📊 شبكة الكروت الإحصائية (مطابقة تماماً لصفحة التقارير) */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {/* الصف الأول: الإيرادات الأساسية للأقسام */}
               <Card
                 icon={DollarSign}
-                label="الإيرادات"
-                value={detailShift.revenues}
-                accent="emerald"
+                label="الإيرادات الأساسية"
+                value={detailShift.subtotal}
+                accent="slate"
               />
               <Card
                 icon={ChefHat}
@@ -627,6 +819,8 @@ function ShiftsTab() {
                 value={detailShift.shisha}
                 accent="purple"
               />
+
+              {/* الصف الثاني: أنواع الطلبات (إحصائية) */}
               <Card
                 icon={ShoppingBag}
                 label="التيك أواي (إحصائية)"
@@ -637,7 +831,7 @@ function ShiftsTab() {
                 icon={Bike}
                 label="أوردر التوصيل (إحصائية)"
                 value={detailShift.delivery}
-                accent="orange"
+                accent="amber"
               />
               <Card
                 icon={DollarSign}
@@ -651,45 +845,54 @@ function ShiftsTab() {
                 value={detailShift.tax}
                 accent="indigo"
               />
+
+              {/* الصف الثالث: الحسابات الإجمالية والخصومات */}
               <Card
                 icon={Receipt}
                 label="المجموع الكلي"
-                value={detailShift.subtotal}
+                value={
+                  detailShift.subtotal +
+                  detailShift.tax +
+                  detailShift.deliveryFees
+                }
                 accent="slate"
               />
               <Card
                 icon={Minus}
                 label="الخصم"
                 value={detailShift.discount}
-                accent="amber"
+                accent="rose"
               />
             </div>
 
-            <div className="bg-gradient-to-br from-primary to-primary/70 text-primary-foreground rounded-2xl p-6 shadow-lg mt-4">
+            {/* 💰 الشريط السفلي العريض للتوتال النهائي الصافي (Net Cash) */}
+            <div className="mt-5 bg-emerald-600 text-white rounded-xl p-4 flex items-center justify-between shadow-md">
               <div className="flex items-center gap-3">
-                <Wallet className="w-10 h-10 opacity-80" />
-                <div className="flex-1">
-                  <p className="text-sm opacity-80">
+                <div className="w-12 h-12 rounded-lg bg-white/20 grid place-items-center">
+                  <Wallet className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-emerald-100">
                     التوتال النهائي (Net Cash in Drawer)
                   </p>
-                  <p className="text-4xl font-bold mt-1">
-                    {fmt2(detailShift.total)}{" "}
-                    <span className="text-lg font-normal opacity-80">ج.م</span>
+                  <p className="text-xs text-emerald-200 mt-0.5">
+                    عدد الفواتير المسجلة: {detailShift.invoiceCount} فاتورة
                   </p>
                 </div>
-                <div className="text-sm opacity-80 text-end">
-                  <div>{detailShift.invoiceCount} فاتورة</div>
-                  <div>الكاشير: {detailShift.shift.cashierName}</div>
-                </div>
+              </div>
+              <div className="text-left">
+                <p className="text-2xl font-black">
+                  {fmt2(detailShift.total)}{" "}
+                  <span className="text-xs font-normal text-emerald-100">
+                    ج.م
+                  </span>
+                </p>
               </div>
             </div>
 
-            <DialogFooter className="mt-4">
+            <DialogFooter className="mt-4 border-t pt-3 flex gap-2 justify-end">
               <Button variant="outline" onClick={() => setDetailShift(null)}>
-                إغلاق
-              </Button>
-              <Button onClick={() => printShift(detailShift)} className="gap-2">
-                <Printer className="w-4 h-4" /> طباعة هذا التقرير
+                إغلاق النافذة
               </Button>
             </DialogFooter>
           </DialogContent>

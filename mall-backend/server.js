@@ -53,10 +53,20 @@ app.get("/api/test", (req, res) => {
 
 // --- مسارات الموظفين (Employees) ---
 
-// إضافة موظف جديد
+// إضافة موظف جديد وضمان السماع في الداتابيز مهما كانت مسميات الفرونت إند
 app.post("/api/employees", async (req, res) => {
-  const { name, role, pinHash } = req.body;
+  console.log("📥 بيانات الموظف الجديد وصلت للسيرفر:", req.body);
+
+  const { name, role } = req.body;
+  // 🌟 لقط الباسورد مهما كان اسمه القادم من الفرونت إند (pinHash أو pin أو password)
+  const pinHash = req.body.pinHash || req.body.pin || req.body.password || "";
   const id = req.body.id || crypto.randomUUID();
+
+  // لو الاسم أو الباسورد فاضي متسجلش واقفل عشان الداتابيز متزعلش
+  if (!name || !pinHash) {
+    console.error("❌ فشل الإضافة: الاسم أو الباسورد ناقصين!");
+    return res.status(400).json({ error: "الاسم والرقم السري مطلوبان" });
+  }
 
   try {
     const query = `
@@ -64,15 +74,32 @@ app.post("/api/employees", async (req, res) => {
       VALUES ($1, $2, $3, $4)
       RETURNING id, name, role, pin_hash AS "pinHash"
     `;
-    const result = await pool.query(query, [id, name, role, pinHash]);
-    res.status(201).json(result.rows[0]);
+
+    const result = await pool.query(query, [
+      id,
+      name,
+      role || "cashier",
+      pinHash,
+    ]);
+    console.log("✅ تم حفظ الموظف بنجاح في pgAdmin:", result.rows[0]);
+
+    // إرسال الاستجابة مطابقة للفرونت إند بكل الطرق الممكنة لمنع الـ Errors
+    const savedEmp = result.rows[0];
+    res.status(201).json({
+      id: savedEmp.id,
+      name: savedEmp.name,
+      role: savedEmp.role,
+      pinHash: savedEmp.pinHash,
+      pin: savedEmp.pinHash, // احتياطي لو الفرونت إند بيدور على pin
+    });
   } catch (err) {
-    console.error("❌ خطأ أثناء إضافة موظف:", err);
-    res.status(500).json({ error: "حدث خطأ في قاعدة البيانات" });
+    console.error("❌ خطأ قاتل أثناء إضافة موظف في pgAdmin:", err.message);
+    res
+      .status(500)
+      .json({ error: "حدث خطأ في قاعدة البيانات", details: err.message });
   }
 });
-
-// جلب كل الموظفين
+// جلب كل الموظفين بالباسورد الظاهر بتاعهم
 app.get("/api/employees", async (req, res) => {
   try {
     const result = await pool.query(
@@ -225,29 +252,126 @@ app.get("/api/invoices", async (req, res) => {
 // ==========================================
 // 🕒 مسارات الورديات (Shifts)
 // ==========================================
-
 app.post("/api/shifts", async (req, res) => {
-  const { cashierId, cashierName, openedAt, closedAt } = req.body;
+  const {
+    cashierId,
+    cashierName,
+    openedAt,
+    closedAt,
+    kitchenSales,
+    barSales,
+    shishaSales,
+    taxValue,
+    discountValue,
+    dineinSales,
+    takeawaySales,
+    deliverySales,
+  } = req.body;
+
   try {
+    // 🧮 تطبيق معادلتك المحاسبية: (مطبخ + بار + شيشة + قيمة مضافة) - الخصم
+    const totalRevenue =
+      (Number(kitchenSales) || 0) +
+      (Number(barSales) || 0) +
+      (Number(shishaSales) || 0) +
+      (Number(taxValue) || 0) -
+      (Number(discountValue) || 0);
+
     const query = `
-      INSERT INTO shifts (id, cashier_id, cashier_name, opened_at, closed_at)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO shifts (
+        id, cashier_id, cashier_name, opened_at, closed_at,
+        kitchen_sales, bar_sales, shisha_sales, tax_value, discount_value, total_revenue,
+        dinein_sales, takeaway_sales, delivery_sales
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING *
     `;
+
     const result = await pool.query(query, [
       crypto.randomUUID(),
       cashierId,
       cashierName,
       openedAt,
-      closedAt || null,
+      closedAt || Date.now(),
+      kitchenSales || 0,
+      barSales || 0,
+      shishaSales || 0,
+      taxValue || 0,
+      discountValue || 0,
+      totalRevenue,
+      dineinSales || 0,
+      takeawaySales || 0,
+      deliverySales || 0,
     ]);
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error("❌ خطأ في تحديث الشيفت:", err);
-    res.status(500).json({ error: "حدث خطأ في الـ Shift" });
+    console.error("❌ خطأ في حفظ الشفت بالداتابيز:", err);
+    res.status(500).json({ error: "حدث خطأ أثناء حفظ الوردية" });
   }
 });
 
+// 1. جلب كل الورديات (Shifts) من قاعدة البيانات
+app.get("/api/shifts", async (req, res) => {
+  try {
+    // تأكد من أن اسم الجدول عندك هو shifts أو عدله للاسم الصحيح في pgAdmin
+    const result = await pool.query(
+      "SELECT * FROM shifts ORDER BY opened_at DESC",
+    );
+
+    // تحويل الأسماء من snake_case (قاعدة البيانات) إلى camelCase (الفرونت إند) لو لزم الأمر
+    const formattedShifts = result.rows.map((row) => ({
+      id: row.id,
+      cashierName: row.cashier_name || row.cashierName,
+      openedAt: Number(row.opened_at || row.openedAt),
+      closedAt:
+        row.closed_at || row.closedAt
+          ? Number(row.closed_at || row.closedAt)
+          : null,
+      status: row.status,
+    }));
+
+    res.json(formattedShifts);
+  } catch (err) {
+    console.error("Error fetching shifts:", err);
+    res.status(500).json({ error: "حدث خطأ أثناء جلب الورديات" });
+  }
+});
+
+// 2. جلب كل الفواتير (Invoices) من قاعدة البيانات
+app.get("/api/invoices", async (req, res) => {
+  try {
+    // تأكد من أن اسم جدول الفواتير هو invoices
+    const result = await pool.query(
+      "SELECT * FROM invoices ORDER BY created_at DESC",
+    );
+
+    const formattedInvoices = result.rows.map((row) => ({
+      id: row.id,
+      invoiceNumber: row.invoice_number || row.invoiceNumber,
+      createdAt: Number(row.created_at || row.createdAt),
+      type: row.type, // takeaway, dinein, delivery
+      tableCode: row.table_code || row.tableCode,
+      customerName: row.customer_name || row.customerName,
+      customerAddress: row.customer_address || row.customerAddress,
+      cashierName: row.cashier_name || row.cashierName,
+      subtotal: Number(row.subtotal || 0),
+      discountValue: Number(row.discount_value || row.discountValue || 0),
+      discountPct: Number(row.discount_pct || row.discountPct || 0),
+      taxValue: Number(row.tax_value || row.taxValue || 0),
+      deliveryPrice: Number(row.delivery_price || row.deliveryPrice || 0),
+      total: Number(row.total || 0),
+      // إذا كانت الأصناف مخزنة كـ JSON في قاعدة البيانات
+      items:
+        typeof row.items === "string" ? JSON.parse(row.items) : row.items || [],
+    }));
+
+    res.json(formattedInvoices);
+  } catch (err) {
+    console.error("Error fetching invoices:", err);
+    res.status(500).json({ error: "حدث خطأ أثناء جلب الفواتير" });
+  }
+});
 
 // ==========================================
 // 📦 مسارات المخزون الرئيسي (Inventory Items)

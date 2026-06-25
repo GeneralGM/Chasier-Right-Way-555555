@@ -105,11 +105,22 @@ function ReportsPage() {
       revenues: clamp0(finalNetCash),
     };
   }, [invoices, db.meals]);
-
-  function closeShiftAndLogout() {
+  async function closeShiftAndLogout() {
     window.print();
-    closeShift();
-    toast.success("تم تقفيل الشيفت — الطاولات النشطة محفوظة للشيفت القادم");
+
+    // 🌟 حطينا await عشان نستنى السيرفر يرد، لو نجح هيمسح الوردية، لو فشل مش هيمسحها
+    await closeShift({
+      kitchenSales: stats.kitchen,
+      barSales: stats.bar,
+      shishaSales: stats.shisha,
+      taxValue: stats.tax,
+      discountValue: stats.discount,
+      dineinSales: stats.revenues - stats.takeaway - stats.deliveryTotal,
+      takeawaySales: stats.takeaway,
+      deliverySales: stats.deliveryTotal,
+    });
+
+    // شيلنا الـ toast من هنا عشان متطلعش رسالة كدابة لو السيرفر واقع
   }
 
   return (

@@ -56,8 +56,10 @@ export const DEPARTMENTS = ["مطبخ", "بار", "صالة", "شيشه"] as con
 export type Department = (typeof DEPARTMENTS)[number];
 
 // 🔥 التعديل: إضافة "شيشه" كقسم فرعي
-export const SUB_DEPTS = ["مطبخ", "بار", "شيشه"] as const;
-export type SubDept = (typeof SUB_DEPTS)[number];
+export type SubDept = "مطبخ" | "بار" | "شيشه";
+export const SUB_DEPTS: SubDept[] = ["مطبخ", "بار", "شيشه"];
+
+export const deptKey = (dept: SubDept, itemId: string) => `${dept}_${itemId}`;
 
 export type ItemKind = "standard" | "processed";
 
@@ -200,10 +202,10 @@ interface DB {
   updateDeptStock: any;
   items: Item[];
   vouchers: Voucher[];
-  deptStock: DeptStock;
   meals: Meal[];
   sales: SaleEntry[];
   audits: AuditEntry[];
+  deptStock: DeptStock;
 }
 
 const KEY = "rest-inv-db-v1";
@@ -372,10 +374,6 @@ function load(): DB {
 function save(db: DB) {
   localStorage.setItem(KEY, JSON.stringify(db));
   window.dispatchEvent(new Event("db-update"));
-}
-
-export function deptKey(dept: SubDept, itemId: string) {
-  return `${dept}::${itemId}`;
 }
 
 export function yieldToBase(
@@ -582,32 +580,98 @@ export function useDB() {
   }, []);
 
   // 4️⃣ دالة المزامنة التلقائية لجلب البيانات القديمة عند تشغيل النظام
-  useEffect(() => {
-    async function syncInventoryFromServer() {
-      try {
-        console.log("🔄 جاري تحميل أصناف المخزن الرئيسي من الداتابيز...");
-        const response = await fetch("http://localhost:5000/api/inventory");
+  // useEffect(() => {
+  //   async function syncInventoryFromServer() {
+  //     try {
+  //       console.log("🔄 جاري سحب الأصناف وأرصدة الأقسام من الداتابيز...");
 
-        if (response.ok) {
-          const serverItems = await response.json();
+  //       // جلب المخزن الرئيسي والمخازن الفرعية مع بعض
+  //       const [invRes, deptRes] = await Promise.all([
+  //         fetch("http://localhost:5000/api/inventory"),
+  //         fetch("http://localhost:5000/api/dept-stock"),
+  //       ]);
 
-          const cur = load();
-          cur.items = serverItems;
-          save(cur);
-          setDb(cur);
+  //       if (invRes.ok && deptRes.ok) {
+  //         const serverItems = await invRes.json();
+  //         const deptStockData = await deptRes.json();
 
-          console.log(
-            `✅ تمت المزامنة! تم تحميل ${serverItems.length} صنف بنجاح من الـ pgAdmin.`,
-          );
-        }
-      } catch (error) {
-        console.error("❌ فشل سحب بيانات المخزن:", error);
+  //         // 1. لقط النسخة الحالية بأسلوبنا
+  //         const cur = load();
+
+  //         // 2. تحديث قائمة الأصناف الرئيسية
+  //         cur.items = serverItems;
+
+  //         // 3. تجميع أرصدة الأقسام وتحويلها للشكل بتاعنا (مطبخ::123)
+  //         const newDeptStock: Record<string, number> = {};
+  //         deptStockData.forEach((row: any) => {
+  //           const key = `${row.department}::${row.item_id}`;
+  //           newDeptStock[key] = Number(row.qty);
+  //         });
+
+  //         // 4. دمج الأرصدة الجديدة جوه الكاش
+  //         cur.deptStock = newDeptStock;
+
+  //         // 5. الحفظ النهائي في الـ Local Storage والـ State
+  //         save(cur);
+  //         setDb(cur);
+  //         console.log(
+  //           `✅ تمت المزامنة بالكامل! الأرصدة جاهزة في الـ Local Storage.`,
+  //         );
+  //       }
+  //     } catch (error) {
+  //       console.error("❌ فشل سحب البيانات من السيرفر:", error);
+  //     }
+  //   }
+
+  //   syncInventoryFromServer();
+  // }, []);
+  // 1. الدالة دي هتجيب من السيرفر -> تحفظ في Local Storage -> تحدث الـ UI
+  const syncFromServer = useCallback(async () => {
+    try {
+      console.log("🔄 جاري سحب الأصناف وأرصدة الأقسام من الداتابيز...");
+      const [invRes, deptRes] = await Promise.all([
+        fetch("http://localhost:5000/api/inventory"),
+        fetch("http://localhost:5000/api/dept-stock"),
+      ]);
+
+      if (invRes.ok && deptRes.ok) {
+        const serverItems = await invRes.json();
+        const deptStockData = await deptRes.json();
+        const cur = load(); // قراءة الـ Local Storage الحالي
+
+        cur.items = serverItems;
+
+        const newDeptStock: Record<string, number> = {};
+        deptStockData.forEach((row: any) => {
+          // 🔥 التعديل الأول: استخدام دالة deptKey عشان المفتاح يبقى (مطبخ_123) وتشوفه شاشة الكوست كنترول
+          const key = deptKey(row.department as SubDept, row.item_id);
+          newDeptStock[key] = Number(row.qty);
+        });
+
+        cur.deptStock = newDeptStock;
+
+        // الحفظ في Local Storage ثم تحديث State الـ React
+        save(cur);
+        setDb(cur);
       }
+    } catch (error) {
+      console.error("❌ فشل سحب البيانات من السيرفر:", error);
     }
-
-    syncInventoryFromServer();
   }, []);
 
+  // 2. تشغيل المزامنة أول ما التطبيق يفتح
+  useEffect(() => {
+    syncFromServer();
+
+    // باقي الـ Event Listeners زي ما هي عندك
+    const refresh = () => setDb(load());
+    window.addEventListener("db-update", refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener("db-update", refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, [syncFromServer]);
   const addEntryVoucher = useCallback(
     async (
       // 🌟 تحويل الدالة لـ async
@@ -655,6 +719,12 @@ export function useDB() {
         lines: fullLines,
         createdAt: Date.now(),
       };
+      // إرسال إذن التوريد للسيرفر ليظهر في الـ History
+      fetch("http://localhost:5000/api/vouchers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(v),
+      }).catch((err) => console.error("❌ فشل إرسال إذن التوريد:", err));
       cur.vouchers.unshift(v);
       save(cur);
       setDb(cur);
@@ -702,7 +772,15 @@ export function useDB() {
       }
 
       const fullLines: VoucherLine[] = [];
-      const itemsToUpdateDB: Item[] = []; // 🌟 مصفوفة للحفظ في الداتابيز
+      const itemsToUpdateDB: Item[] = []; // 🌟 مصفوفة للحفظ في الداتابيز (المخزن الرئيسي)
+
+      // 🌟 مصفوفة جديدة لحفظ أرصدة الأقسام الفرعية في الداتابيز
+      const deptStocksToUpdateDB: {
+        department: string;
+        itemId: string;
+        itemName: string;
+        qty: number;
+      }[] = [];
 
       const isSubDept = (SUB_DEPTS as readonly string[]).includes(department);
 
@@ -722,7 +800,16 @@ export function useDB() {
 
         if (isSubDept) {
           const k = deptKey(department as SubDept, item.id);
-          cur.deptStock[k] = round2(clamp0((cur.deptStock[k] || 0) + q));
+          const newDeptQty = round2(clamp0((cur.deptStock[k] || 0) + q));
+          cur.deptStock[k] = newDeptQty;
+
+          // 🌟 ضفنا اسم الصنف هنا عشان يروح للسيرفر
+          deptStocksToUpdateDB.push({
+            department: department,
+            itemId: item.id,
+            itemName: item.name,
+            qty: newDeptQty,
+          });
         }
       }
 
@@ -735,11 +822,18 @@ export function useDB() {
         createdAt: Date.now(),
       };
 
+      // إرسال إذن الصرف للسيرفر ليظهر في الـ History
+      fetch("http://localhost:5000/api/vouchers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(v),
+      }).catch((err) => console.error("❌ فشل إرسال إذن الصرف:", err));
+
       cur.vouchers.unshift(v);
       save(cur);
       setDb(cur);
 
-      // 🌟 إرسال الأصناف المخصومة للسيرفر
+      // 🌟 إرسال الأصناف المخصومة (المخزن الرئيسي) للسيرفر
       for (const updatedItem of itemsToUpdateDB) {
         try {
           await fetch("http://localhost:5000/api/inventory", {
@@ -749,6 +843,19 @@ export function useDB() {
           });
         } catch (err) {
           console.error("❌ فشل خصم الصنف من الداتابيز بعد الصرف:", err);
+        }
+      }
+
+      // 🌟 السطر السحري الجديد: إرسال أرصدة الأقسام (المطبخ) للسيرفر والداتابيز
+      for (const ds of deptStocksToUpdateDB) {
+        try {
+          await fetch("http://localhost:5000/api/dept-stock", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(ds),
+          });
+        } catch (err) {
+          console.error(`❌ فشل حفظ رصيد ${ds.department} في الداتابيز:`, err);
         }
       }
 
@@ -890,10 +997,41 @@ export function useDB() {
   );
 
   const setDeptStockQty = useCallback(
-    (dept: SubDept, itemId: string, newQty: number) => {
+    async (dept: SubDept, itemId: string, newQty: number) => {
+      // 1. تحميل البيانات الحالية من الـ Local Storage
       const cur = load();
-      cur.deptStock[deptKey(dept, itemId)] = round2(clamp0(newQty));
+      const safeQty = Math.max(0, newQty); // التأكد إن الكمية مش بالسالب
+
+      // 🔥 التعديل الثاني: تجهيز المفتاح بنفس طريقتك القياسية (مطبخ_123)
+      const key = deptKey(dept, itemId);
+
+      // 3. تحديث الكمية في الكاش المحلي والـ Local Storage فوراً
+      cur.deptStock[key] = safeQty;
       save(cur);
+      setDb(cur);
+
+      // 🔥 التعديل الثالث: هنجيب اسم الصنف عشان نبعته للسيرفر بناءً على كود الباك إند
+      const itemName =
+        cur.items.find((i) => i.id === itemId)?.name || "غير محدد";
+
+      // 4. رمي التحديث للداتابيز في الخلفية
+      try {
+        await fetch("http://localhost:5000/api/dept-stock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            itemId,
+            itemName,
+            department: dept,
+            qty: safeQty,
+          }),
+        });
+        console.log(
+          `✅ تم حفظ رصيد ${dept} للصنف ${itemName} في الداتابيز بنجاح!`,
+        );
+      } catch (err) {
+        console.error("❌ فشل تحديث رصيد القسم في السيرفر:", err);
+      }
     },
     [],
   );
@@ -914,6 +1052,7 @@ export function useDB() {
 
   return {
     db,
+    syncFromServer,
     addItem,
     updateItem,
     deleteItem,

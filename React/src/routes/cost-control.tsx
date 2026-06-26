@@ -94,6 +94,7 @@ function CostControlPage() {
 
 /* ============== TAB 1: Department Inventory ============== */
 function DeptStockTab() {
+  // const { db, syncFromServer } = useDB();
   const { db, setDeptStockQty } = useDB();
   const [dept, setDept] = useState<SubDept>("مطبخ");
   const [pinFor, setPinFor] = useState<string | null>(null); // itemId awaiting PIN

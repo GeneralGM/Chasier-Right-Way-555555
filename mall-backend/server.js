@@ -530,6 +530,105 @@ app.delete("/api/inventory/:id", async (req, res) => {
     res.status(500).json({ error: "حدث خطأ أثناء الحذف" });
   }
 });
+
+// ==========================================
+// 🧾 مسارات أذونات المخزن (التوريد والصرف)
+// ==========================================
+
+// 1. حفظ إذن جديد (توريد أو صرف) في قاعدة البيانات
+app.post("/api/vouchers", async (req, res) => {
+  const { id, type, date, supplier, department, lines, createdAt } = req.body;
+
+  try {
+    const query = `
+      INSERT INTO inventory_vouchers (id, type, date, supplier, department, lines, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `;
+    const values = [
+      id,
+      type,
+      date,
+      supplier || null,
+      department || null,
+      JSON.stringify(lines), // تحويل الأصناف والأسعار لـ JSON
+      createdAt || Date.now(),
+    ];
+
+    const result = await pool.query(query, values);
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("❌ خطأ في حفظ الإذن بالداتابيز:", err.message);
+    res.status(500).json({ error: "حدث خطأ أثناء حفظ الإذن" });
+  }
+});
+
+// 2. جلب كل الأذونات لعرضها في صفحة السجل (History)
+app.get("/api/vouchers", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM inventory_vouchers ORDER BY created_at DESC",
+    );
+
+    // تجهيز البيانات لتطابق ما ينتظره الفرونت إند بالضبط
+    const formattedVouchers = result.rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      date: row.date,
+      supplier: row.supplier,
+      department: row.department,
+      lines: typeof row.lines === "string" ? JSON.parse(row.lines) : row.lines,
+      createdAt: Number(row.created_at),
+    }));
+
+    res.json(formattedVouchers);
+  } catch (err) {
+    console.error("❌ خطأ في جلب الأذونات:", err);
+    res.status(500).json({ error: "حدث خطأ أثناء جلب الأذونات" });
+  }
+});
+// ==========================================
+// 🏪 مسارات المخازن الفرعية (مطبخ، بار، شيشة)
+// ==========================================
+
+// 1. جلب أرصدة كل الأقسام
+app.get("/api/dept-stock", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT item_id, department, qty, item_name FROM department_stock",
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("🚨 خطأ في جلب المخازن الفرعية:", err);
+    res.status(500).json({ error: "حدث خطأ في جلب أرصدة الأقسام" });
+  }
+});
+
+// 2. تحديث رصيد صنف في قسم معين
+app.post("/api/dept-stock", async (req, res) => {
+  // 🌟 استلمنا الـ itemName من الفرونت إند
+  const { itemId, itemName, department, qty } = req.body;
+  try {
+    const query = `
+      INSERT INTO department_stock (item_id, item_name, department, qty)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (item_id, department) DO UPDATE SET 
+        qty = EXCLUDED.qty,
+        item_name = EXCLUDED.item_name
+      RETURNING *
+    `;
+    await pool.query(query, [
+      itemId,
+      itemName || "غير محدد",
+      department,
+      Number(qty) || 0,
+    ]);
+    res.json({ success: true, message: "تم تحديث رصيد القسم بنجاح" });
+  } catch (err) {
+    console.error("🚨 خطأ في تحديث رصيد القسم:", err);
+    res.status(500).json({ error: "حدث خطأ أثناء تعديل رصيد القسم" });
+  }
+});
 // ==========================================
 // 6. تشغيل السيرفر والاستماع للطلبات
 // ==========================================

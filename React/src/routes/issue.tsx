@@ -36,22 +36,33 @@ function IssuePage() {
   const updateLine = (id: string, patch: Partial<Line>) =>
     setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     const valid = lines
       .filter((l) => l.itemId && parseFloat(l.qty) > 0)
       .map((l) => ({ itemId: l.itemId, qty: parseFloat(l.qty) }));
+
     if (valid.length === 0) {
       toast.error("أضف صنفًا واحدًا على الأقل");
       return;
     }
-    const res = addIssueVoucher(date, department, valid);
-    if (!res.ok) {
-      toast.error(res.error);
-      return;
+
+    try {
+      // 🌟 السطر السحري: إضافة await عشان نستنى النتيجة الحقيقية تطلع من الداتابيز والسيرفر
+      const res = await addIssueVoucher(date, department, valid);
+
+      if (!res.ok) {
+        toast.error(res.error || "حدث خطأ أثناء حفظ الإذن");
+        return;
+      }
+
+      toast.success("تم حفظ إذن الصرف وخصم الكميات من المخزون");
+      navigate({ to: "/history" });
+    } catch (err) {
+      console.error("خطأ أثناء الحفظ:", err);
+      toast.error("حدث خطأ غير متوقع أثناء الحفظ.");
     }
-    toast.success("تم حفظ إذن الصرف وخصم الكميات من المخزون");
-    navigate({ to: "/history" });
   };
 
   function importFromInvoice(v: EntryVoucher) {

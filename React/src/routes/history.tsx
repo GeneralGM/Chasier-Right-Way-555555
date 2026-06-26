@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDB, type Voucher } from "@/lib/store";
 import { PrintVoucher } from "@/components/PrintVoucher";
 import { PrintReport } from "@/components/PrintReport";
@@ -67,6 +67,40 @@ function HistoryPage() {
   const { db } = useDB();
   const [tab, setTab] = useState<Tab>("entry");
 
+  // 🌟 1. ستيت (State) لتخزين البيانات القادمة من السيرفر كبديل احتياطي
+  const [serverVouchers, setServerVouchers] = useState<Voucher[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // 🌟 2. جلب الأذونات من الداتابيز (pgAdmin) لو الـ LocalStorage اتمسح
+  // 🌟 جلب البيانات من السيرفر بشكل دائم
+  useEffect(() => {
+    async function fetchVouchersFromDB() {
+      try {
+        const response = await fetch("http://localhost:5000/api/vouchers");
+        if (response.ok) {
+          const data = await response.json();
+          setServerVouchers(data);
+        }
+      } catch (error) {
+        console.error("❌ خطأ أثناء جلب الأذونات:", error);
+      }
+    }
+    fetchVouchersFromDB();
+  }, []);
+
+  // 🌟 الدمج الذكي (المحلي + السيرفر)
+  const activeVouchers = useMemo(() => {
+    const allVouchers = new Map();
+    // نحط السيرفر الأول
+    serverVouchers.forEach((v) => allVouchers.set(v.id, v));
+    // نحط المحلي فوقه عشان يظهر معانا
+    (db.vouchers || []).forEach((v) => allVouchers.set(v.id, v));
+
+    return Array.from(allVouchers.values()).sort(
+      (a, b) => b.createdAt - a.createdAt,
+    );
+  }, [db.vouchers, serverVouchers]);
+
   const today = new Date();
   const currentISO = getISOWeek(today);
   const year = currentISO.year;
@@ -81,12 +115,16 @@ function HistoryPage() {
 
   const weekDates = useMemo(() => getDatesOfISOWeek(year, week), [year, week]);
 
+  // // 🌟 3. المصدر الذكي للبيانات (يختار المحلي أولاً ثم السيرفر)
+  // const activeVouchers =
+  //   db.vouchers && db.vouchers.length > 0 ? db.vouchers : serverVouchers;
+
   const tabVouchers = useMemo(
     () =>
-      db.vouchers
+      activeVouchers
         .filter((v) => v.type === tab)
         .sort((a, b) => b.createdAt - a.createdAt),
-    [db.vouchers, tab],
+    [activeVouchers, tab],
   );
 
   const weekVouchers = useMemo(
@@ -226,7 +264,11 @@ function HistoryPage() {
 
       {/* List */}
       <div className="no-print space-y-2">
-        {filtered.length === 0 ? (
+        {isLoading ? (
+          <div className="bg-card border border-border rounded-xl p-10 text-center text-amber-600 font-bold animate-pulse">
+            جاري تحميل الأذونات من قاعدة البيانات...
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="bg-card border border-border rounded-xl p-10 text-center text-muted-foreground">
             لا توجد أذونات ضمن هذا التصفية
           </div>
@@ -252,7 +294,11 @@ function HistoryPage() {
                       {" "}
                       • الإجمالي:{" "}
                       {v.lines
-                        .reduce((s, l) => s + (l.price || 0) * l.qty, 0)
+                        .reduce(
+                          (s: number, l: { price: any; qty: number }) =>
+                            s + (l.price || 0) * l.qty,
+                          0,
+                        )
                         .toFixed(2)}
                     </>
                   )}

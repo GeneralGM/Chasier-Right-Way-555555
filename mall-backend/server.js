@@ -13,7 +13,7 @@ const pool = new Pool({
   user: "postgres",
   host: "localhost",
   database: "mall_erp",
-  password: "123456", 
+  password: "123456",
   port: 5432,
 });
 
@@ -60,19 +60,28 @@ app.post("/api/employees", async (req, res) => {
       VALUES ($1, $2, $3, $4)
       RETURNING id, name, role, pin_hash AS "pinHash"
     `;
-    const result = await pool.query(query, [id, name, role || "cashier", pinHash]);
+    const result = await pool.query(query, [
+      id,
+      name,
+      role || "cashier",
+      pinHash,
+    ]);
     res.status(201).json({
       ...result.rows[0],
-      pin: result.rows[0].pinHash
+      pin: result.rows[0].pinHash,
     });
   } catch (err) {
-    res.status(500).json({ error: "حدث خطأ في قاعدة البيانات", details: err.message });
+    res
+      .status(500)
+      .json({ error: "حدث خطأ في قاعدة البيانات", details: err.message });
   }
 });
 
 app.get("/api/employees", async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, name, role, pin_hash AS "pinHash" FROM employees');
+    const result = await pool.query(
+      'SELECT id, name, role, pin_hash AS "pinHash" FROM employees',
+    );
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: "خطأ في جلب البيانات" });
@@ -83,8 +92,24 @@ app.get("/api/employees", async (req, res) => {
 
 app.post("/api/invoices", async (req, res) => {
   const {
-    id, type, invoiceNumber, tableCode, zone, customerName, customerAddress,
-    cashierId, cashierName, items, subtotal, discountPct, discountValue, taxPct, taxValue, deliveryPrice, total, createdAt
+    id,
+    type,
+    invoiceNumber,
+    tableCode,
+    zone,
+    customerName,
+    customerAddress,
+    cashierId,
+    cashierName,
+    items,
+    subtotal,
+    discountPct,
+    discountValue,
+    taxPct,
+    taxValue,
+    deliveryPrice,
+    total,
+    createdAt,
   } = req.body;
 
   try {
@@ -97,9 +122,24 @@ app.post("/api/invoices", async (req, res) => {
       RETURNING *
     `;
     const result = await pool.query(query, [
-      id, type, invoiceNumber, tableCode, zone || null, customerName || null, customerAddress || null,
-      cashierId || null, cashierName || null, JSON.stringify(items), subtotal, discountPct, discountValue,
-      taxPct, taxValue, Number(deliveryPrice) || 0, total, new Date(createdAt)
+      id,
+      type,
+      invoiceNumber,
+      tableCode,
+      zone || null,
+      customerName || null,
+      customerAddress || null,
+      cashierId || null,
+      cashierName || null,
+      JSON.stringify(items),
+      subtotal,
+      discountPct,
+      discountValue,
+      taxPct,
+      taxValue,
+      Number(deliveryPrice) || 0,
+      total,
+      new Date(createdAt),
     ]);
 
     const inv = result.rows[0];
@@ -121,16 +161,22 @@ app.post("/api/invoices", async (req, res) => {
       taxValue: Number(inv.tax_value),
       deliveryPrice: Number(inv.delivery_price || 0),
       total: Number(inv.total),
-      createdAt: inv.created_at ? new Date(inv.created_at).getTime() : Date.now(),
+      createdAt: inv.created_at
+        ? new Date(inv.created_at).getTime()
+        : Date.now(),
     });
   } catch (err) {
-    res.status(500).json({ error: "حدث خطأ أثناء حفظ الفاتورة", details: err.message });
+    res
+      .status(500)
+      .json({ error: "حدث خطأ أثناء حفظ الفاتورة", details: err.message });
   }
 });
 
 app.get("/api/invoices", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM invoices ORDER BY created_at DESC");
+    const result = await pool.query(
+      "SELECT * FROM invoices ORDER BY created_at DESC",
+    );
     const invoices = result.rows.map((inv) => ({
       id: inv.id,
       invoiceNumber: Number(inv.invoice_number),
@@ -149,7 +195,9 @@ app.get("/api/invoices", async (req, res) => {
       taxValue: Number(inv.tax_value),
       deliveryPrice: Number(inv.delivery_price || 0),
       total: Number(inv.total),
-      createdAt: inv.created_at ? new Date(inv.created_at).getTime() : Date.now(),
+      createdAt: inv.created_at
+        ? new Date(inv.created_at).getTime()
+        : Date.now(),
     }));
     res.json(invoices);
   } catch (err) {
@@ -161,12 +209,27 @@ app.get("/api/invoices", async (req, res) => {
 
 app.post("/api/shifts", async (req, res) => {
   const {
-    cashierId, cashierName, openedAt, closedAt, kitchenSales, barSales,
-    shishaSales, taxValue, discountValue, dineinSales, takeawaySales, deliverySales
+    cashierId,
+    cashierName,
+    openedAt,
+    closedAt,
+    kitchenSales,
+    barSales,
+    shishaSales,
+    taxValue,
+    discountValue,
+    dineinSales,
+    takeawaySales,
+    deliverySales,
   } = req.body;
 
   try {
-    const totalRevenue = (Number(kitchenSales) || 0) + (Number(barSales) || 0) + (Number(shishaSales) || 0) + (Number(taxValue) || 0) - (Number(discountValue) || 0);
+    const totalRevenue =
+      (Number(kitchenSales) || 0) +
+      (Number(barSales) || 0) +
+      (Number(shishaSales) || 0) +
+      (Number(taxValue) || 0) -
+      (Number(discountValue) || 0);
     const query = `
       INSERT INTO shifts (
         id, cashier_id, cashier_name, opened_at, closed_at, kitchen_sales, bar_sales, 
@@ -175,21 +238,34 @@ app.post("/api/shifts", async (req, res) => {
       RETURNING *
     `;
     const result = await pool.query(query, [
-      crypto.randomUUID(), cashierId, cashierName,
+      crypto.randomUUID(),
+      cashierId,
+      cashierName,
       openedAt ? new Date(Number(openedAt)) : new Date(),
       closedAt ? new Date(Number(closedAt)) : new Date(),
-      kitchenSales || 0, barSales || 0, shishaSales || 0, taxValue || 0, discountValue || 0, totalRevenue,
-      dineinSales || 0, takeawaySales || 0, deliverySales || 0
+      kitchenSales || 0,
+      barSales || 0,
+      shishaSales || 0,
+      taxValue || 0,
+      discountValue || 0,
+      totalRevenue,
+      dineinSales || 0,
+      takeawaySales || 0,
+      deliverySales || 0,
     ]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: "حدث خطأ أثناء حفظ الوردية", details: err.message });
+    res
+      .status(500)
+      .json({ error: "حدث خطأ أثناء حفظ الوردية", details: err.message });
   }
 });
 
 app.get("/api/shifts", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM shifts ORDER BY opened_at DESC");
+    const result = await pool.query(
+      "SELECT * FROM shifts ORDER BY opened_at DESC",
+    );
     const formattedShifts = result.rows.map((row) => ({
       id: row.id,
       cashierName: row.cashier_name || row.cashierName,
@@ -216,7 +292,9 @@ app.get("/api/shifts", async (req, res) => {
 
 app.get("/api/inventory", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM inventory_items ORDER BY name ASC");
+    const result = await pool.query(
+      "SELECT * FROM inventory_items ORDER BY name ASC",
+    );
     const formattedRows = result.rows.map((row) => ({
       id: row.id,
       department: row.department || "",
@@ -241,7 +319,23 @@ app.get("/api/inventory", async (req, res) => {
 });
 
 app.post("/api/inventory", async (req, res) => {
-  const { id, department, code, name, unit, qty, avgPrice, critical, conversionFactor, subUnitQty, subUnitType, kind, yieldDef, lastYieldDeltas, notes } = req.body;
+  const {
+    id,
+    department,
+    code,
+    name,
+    unit,
+    qty,
+    avgPrice,
+    critical,
+    conversionFactor,
+    subUnitQty,
+    subUnitType,
+    kind,
+    yieldDef,
+    lastYieldDeltas,
+    notes,
+  } = req.body;
   try {
     const query = `
       INSERT INTO inventory_items (
@@ -256,22 +350,47 @@ app.post("/api/inventory", async (req, res) => {
       RETURNING *
     `;
     const values = [
-      id, department || "", code || "", name, unit, Number(qty) || 0, Number(avgPrice) || 0, Number(critical) || 0,
-      Number(conversionFactor) || 1, Number(subUnitQty) || 0, subUnitType || null, kind || "standard",
-      yieldDef ? (typeof yieldDef === "string" ? yieldDef : JSON.stringify(yieldDef)) : null,
-      lastYieldDeltas ? (typeof lastYieldDeltas === "string" ? lastYieldDeltas : JSON.stringify(lastYieldDeltas)) : null,
-      notes || ""
+      id,
+      department || "",
+      code || "",
+      name,
+      unit,
+      Number(qty) || 0,
+      Number(avgPrice) || 0,
+      Number(critical) || 0,
+      Number(conversionFactor) || 1,
+      Number(subUnitQty) || 0,
+      subUnitType || null,
+      kind || "standard",
+      yieldDef
+        ? typeof yieldDef === "string"
+          ? yieldDef
+          : JSON.stringify(yieldDef)
+        : null,
+      lastYieldDeltas
+        ? typeof lastYieldDeltas === "string"
+          ? lastYieldDeltas
+          : JSON.stringify(lastYieldDeltas)
+        : null,
+      notes || "",
     ];
     const result = await pool.query(query, values);
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: "حدث خطأ أثناء إضافة الصنف للداتابيز", details: err.message });
+    res
+      .status(500)
+      .json({
+        error: "حدث خطأ أثناء إضافة الصنف للداتابيز",
+        details: err.message,
+      });
   }
 });
 
 app.delete("/api/inventory/:id", async (req, res) => {
   try {
-    await pool.query("DELETE FROM inventory_items WHERE id = $1", [req.params.id]);
+    await pool.query("DELETE FROM inventory_items WHERE id = $1", [
+      req.params.id,
+    ]);
     res.json({ success: true, message: "تم حذف الصنف بنجاح" });
   } catch (err) {
     res.status(500).json({ error: "حدث خطأ أثناء الحذف" });
@@ -287,7 +406,15 @@ app.post("/api/vouchers", async (req, res) => {
       INSERT INTO inventory_vouchers (id, type, date, supplier, department, lines, created_at)
       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *
     `;
-    const result = await pool.query(query, [id, type, date, supplier || null, department || null, JSON.stringify(lines), createdAt || Date.now()]);
+    const result = await pool.query(query, [
+      id,
+      type,
+      date,
+      supplier || null,
+      department || null,
+      JSON.stringify(lines),
+      createdAt || Date.now(),
+    ]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: "حدث خطأ أثناء حفظ الإذن" });
@@ -296,9 +423,15 @@ app.post("/api/vouchers", async (req, res) => {
 
 app.get("/api/vouchers", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM inventory_vouchers ORDER BY created_at DESC");
+    const result = await pool.query(
+      "SELECT * FROM inventory_vouchers ORDER BY created_at DESC",
+    );
     const formattedVouchers = result.rows.map((row) => ({
-      id: row.id, type: row.type, date: row.date, supplier: row.supplier, department: row.department,
+      id: row.id,
+      type: row.type,
+      date: row.date,
+      supplier: row.supplier,
+      department: row.department,
       lines: typeof row.lines === "string" ? JSON.parse(row.lines) : row.lines,
       createdAt: Number(row.created_at),
     }));
@@ -312,7 +445,9 @@ app.get("/api/vouchers", async (req, res) => {
 
 app.get("/api/dept-stock", async (req, res) => {
   try {
-    const result = await pool.query("SELECT item_id, department, qty, item_name FROM department_stock");
+    const result = await pool.query(
+      "SELECT item_id, department, qty, item_name FROM department_stock",
+    );
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: "حدث خطأ في جلب أرصدة الأقسام" });
@@ -327,7 +462,12 @@ app.post("/api/dept-stock", async (req, res) => {
       ON CONFLICT (item_id, department) DO UPDATE SET qty = EXCLUDED.qty, item_name = EXCLUDED.item_name
       RETURNING *
     `;
-    const result = await pool.query(query, [itemId, itemName || "غير محدد", department, Number(qty) || 0]);
+    const result = await pool.query(query, [
+      itemId,
+      itemName || "غير محدد",
+      department,
+      Number(qty) || 0,
+    ]);
     res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: "حدث خطأ أثناء تحديث المخزن الفرعي" });
@@ -338,13 +478,27 @@ app.post("/api/dept-stock", async (req, res) => {
 
 app.get("/api/meals", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM meals ORDER BY category, name ASC");
+    const result = await pool.query(
+      "SELECT * FROM meals ORDER BY category, name ASC",
+    );
     const formattedMeals = result.rows.map((row) => ({
-      id: row.id, name: row.name, department: row.department, category: row.category, kind: row.kind,
-      sellingPrice: Number(row.selling_price) || 0, wasteMargin: Number(row.waste_margin) || 0,
-      wasteMode: row.waste_mode, hasModifiers: row.has_modifiers,
-      ingredients: typeof row.ingredients === "string" ? JSON.parse(row.ingredients) : row.ingredients || [],
-      modifierGroups: typeof row.modifier_groups === "string" ? JSON.parse(row.modifier_groups) : row.modifier_groups || [],
+      id: row.id,
+      name: row.name,
+      department: row.department,
+      category: row.category,
+      kind: row.kind,
+      sellingPrice: Number(row.selling_price) || 0,
+      wasteMargin: Number(row.waste_margin) || 0,
+      wasteMode: row.waste_mode,
+      hasModifiers: row.has_modifiers,
+      ingredients:
+        typeof row.ingredients === "string"
+          ? JSON.parse(row.ingredients)
+          : row.ingredients || [],
+      modifierGroups:
+        typeof row.modifier_groups === "string"
+          ? JSON.parse(row.modifier_groups)
+          : row.modifier_groups || [],
     }));
     res.json(formattedMeals);
   } catch (err) {
@@ -353,7 +507,19 @@ app.get("/api/meals", async (req, res) => {
 });
 
 app.post("/api/meals", async (req, res) => {
-  const { id, name, department, category, kind, sellingPrice, wasteMargin, wasteMode, ingredients, hasModifiers, modifierGroups } = req.body;
+  const {
+    id,
+    name,
+    department,
+    category,
+    kind,
+    sellingPrice,
+    wasteMargin,
+    wasteMode,
+    ingredients,
+    hasModifiers,
+    modifierGroups,
+  } = req.body;
   try {
     const query = `
       INSERT INTO meals (id, name, department, category, kind, selling_price, waste_margin, waste_mode, ingredients, has_modifiers, modifier_groups)
@@ -363,7 +529,19 @@ app.post("/api/meals", async (req, res) => {
         ingredients = EXCLUDED.ingredients, has_modifiers = EXCLUDED.has_modifiers, modifier_groups = EXCLUDED.modifier_groups
       RETURNING *
     `;
-    await pool.query(query, [id, name, department, category || "", kind || "menu", Number(sellingPrice) || 0, Number(wasteMargin) || 0, wasteMode || "fixed", JSON.stringify(ingredients || []), hasModifiers || false, JSON.stringify(modifierGroups || [])]);
+    await pool.query(query, [
+      id,
+      name,
+      department,
+      category || "",
+      kind || "menu",
+      Number(sellingPrice) || 0,
+      Number(wasteMargin) || 0,
+      wasteMode || "fixed",
+      JSON.stringify(ingredients || []),
+      hasModifiers || false,
+      JSON.stringify(modifierGroups || []),
+    ]);
     res.status(201).json({ success: true, message: "تم حفظ الصنف بنجاح" });
   } catch (err) {
     res.status(500).json({ error: "حدث خطأ أثناء حفظ الصنف" });
@@ -383,11 +561,17 @@ app.delete("/api/meals/:id", async (req, res) => {
 
 app.get("/api/sales", async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM sales ORDER BY created_at DESC");
+    const result = await pool.query(
+      "SELECT * FROM sales ORDER BY created_at DESC",
+    );
     const formattedSales = result.rows.map((row) => ({
-      id: row.id, date: new Date(row.date).toISOString().slice(0, 10), department: row.department,
+      id: row.id,
+      date: new Date(row.date).toISOString().slice(0, 10),
+      department: row.department,
       lines: typeof row.lines === "string" ? JSON.parse(row.lines) : row.lines,
-      totalSales: Number(row.total_sales), totalCost: Number(row.total_cost), createdAt: new Date(row.created_at).getTime(),
+      totalSales: Number(row.total_sales),
+      totalCost: Number(row.total_cost),
+      createdAt: new Date(row.created_at).getTime(),
     }));
     res.json(formattedSales);
   } catch (err) {
@@ -396,19 +580,36 @@ app.get("/api/sales", async (req, res) => {
 });
 
 app.post("/api/sales", async (req, res) => {
-  const { id, date, department, lines, totalSales, totalCost, createdAt } = req.body;
+  // 🔥 السطر ده هيخلينا نشوف الداتا وصلت السيرفر أصلاً ولا لأ
+  console.log("📥 طلب إضافة مبيعات وصل للسيرفر:", req.body);
+
+  const { id, date, department, lines, totalSales, totalCost, createdAt } =
+    req.body;
   try {
     const query = `INSERT INTO sales (id, date, department, lines, total_sales, total_cost, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`;
-    await pool.query(query, [id, date, department, JSON.stringify(lines), Number(totalSales) || 0, Number(totalCost) || 0, new Date(createdAt)]);
+    await pool.query(query, [
+      id,
+      date,
+      department,
+      JSON.stringify(lines),
+      Number(totalSales) || 0,
+      Number(totalCost) || 0,
+      new Date(createdAt),
+    ]);
     res.status(201).json({ success: true, message: "تم حفظ المبيعات بنجاح" });
   } catch (err) {
-    res.status(500).json({ error: "حدث خطأ أثناء حفظ المبيعات" });
+    // 🔥 السطر ده هيفضح المشكلة لو الداتابيز رفضت الداتا
+    console.error("🚨 خطأ في قاعدة البيانات أثناء حفظ المبيعات:", err.message);
+    res
+      .status(500)
+      .json({ error: "حدث خطأ أثناء حفظ المبيعات", details: err.message });
   }
 });
 
 // --- مسارات الجرد الجديدة (Audits) عشان تسمّع من الفرونت إند ---
 app.post("/api/audits", async (req, res) => {
-  const { id, date, department, rows, shortageValue, penaltyValue, createdAt } = req.body;
+  const { id, date, department, rows, shortageValue, penaltyValue, createdAt } =
+    req.body;
   try {
     const query = `
       INSERT INTO audits (id, date, department, rows, shortage_value, penalty_value, created_at)
@@ -416,10 +617,20 @@ app.post("/api/audits", async (req, res) => {
       ON CONFLICT (date, department) DO UPDATE SET
         rows = EXCLUDED.rows, shortage_value = EXCLUDED.shortage_value, penalty_value = EXCLUDED.penalty_value
     `;
-    await pool.query(query, [id, date, department, JSON.stringify(rows), shortageValue, penaltyValue, new Date(createdAt)]);
+    await pool.query(query, [
+      id,
+      date,
+      department,
+      JSON.stringify(rows),
+      shortageValue,
+      penaltyValue,
+      new Date(createdAt),
+    ]);
     res.json({ success: true, message: "تم حفظ الجرد بنجاح" });
   } catch (err) {
-    res.status(500).json({ error: "خطأ في حفظ الجرد السيرفر", details: err.message });
+    res
+      .status(500)
+      .json({ error: "خطأ في حفظ الجرد السيرفر", details: err.message });
   }
 });
 

@@ -1407,7 +1407,8 @@ function aggregateDailySales(
 }
 
 /* ============== TAB 4: Results & Audit ============== */
-type ResultsView = "all" | "kitchen" | "bar" | "audit" | "shisha";
+// 1. شيلنا الـ shisha من الأنواع عشان مش عايزينها تظهر لوحدها في الأزرار
+type ResultsView = "all" | "kitchen" | "bar" | "audit";
 type TimeRange = "1d" | "3d" | "7d" | "30d" | "90d";
 
 function ResultsTab() {
@@ -1430,6 +1431,7 @@ function ResultsTab() {
             ? 30
             : 90;
 
+  // 2. فلترة المبيعات حسب التاريخ والقسم (الشيشة هتظهر جوة "الكل" تلقائياً)
   const filteredSales = useMemo(() => {
     const cutoff = new Date();
     cutoff.setHours(0, 0, 0, 0);
@@ -1439,30 +1441,58 @@ function ResultsTab() {
       if (s.date < cs) return false;
       if (view === "kitchen" && s.department !== "مطبخ") return false;
       if (view === "bar" && s.department !== "بار") return false;
-      if (view === "shisha" && s.department !== "شيشه") return false; // دي هتشتغل دلوقتي بعد ما عدلنا الـ store.ts      return true;
+      // ملحوظة: لو view === "all"، الشيشة والمطبخ والبار كلهم هيظهروا
+      return true;
     });
   }, [db.sales, rangeDays, view]);
 
-  const totalSales = clamp0(
-    filteredSales.reduce((s, x) => s + x.totalSales, 0),
-  );
-  const totalCost = clamp0(filteredSales.reduce((s, x) => s + x.totalCost, 0));
-  const profit = totalSales - totalCost; // can be negative
+  // 3. هنا السحر: دالة بتلف على المبيعات، تجيب الـ IDs، تبحث في الريسبي، وتحسب التكلفة والسعر لكل صنف
+  const aggregatedItems = useMemo(() => {
+    const map = new Map<
+      string,
+      { meal: Meal; qty: number; cost: number; price: number; dept: string }
+    >();
 
-  const chartData = useMemo(() => {
-    const days: { date: string; profit: number; sales: number }[] = [];
-    for (let i = rangeDays - 1; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const ds = d.toISOString().slice(0, 10);
-      const list = filteredSales.filter((s) => s.date === ds);
-      const sumS = list.reduce((a, b) => a + b.totalSales, 0);
-      const sumC = list.reduce((a, b) => a + b.totalCost, 0);
-      days.push({ date: ds, profit: sumS - sumC, sales: sumS });
-    }
-    return days;
-  }, [filteredSales, rangeDays]);
-  const maxAbs = Math.max(1, ...chartData.map((d) => Math.abs(d.profit)));
+    filteredSales.forEach((sale) => {
+      sale.lines.forEach((line) => {
+        const meal = db.meals.find((m) => m.id === line.mealId);
+        if (meal) {
+          // حساب سعر التصنيع الفعلي من المكونات
+          const expandMap = expandMealToBase(meal, db.meals, db.items);
+          let c = 0;
+          for (const [, info] of expandMap) c += info.cost;
+          const cost = round2(clamp0(c));
+
+          const existing = map.get(meal.id);
+          if (existing) {
+            existing.qty += line.qty;
+          } else {
+            map.set(meal.id, {
+              meal,
+              qty: line.qty,
+              cost,
+              price: meal.sellingPrice,
+              dept: sale.department, // حفظ القسم عشان نعرضه في الجدول للتمييز
+            });
+          }
+        }
+      });
+    });
+
+    // ترتيب الأصناف أبجدياً
+    return Array.from(map.values()).sort((a, b) =>
+      a.meal.name.localeCompare(b.meal.name, "ar"),
+    );
+  }, [filteredSales, db.meals, db.items]);
+
+  // حساب الإجماليات من الجدول المجمع
+  const totalSales = clamp0(
+    aggregatedItems.reduce((s, x) => s + x.price * x.qty, 0),
+  );
+  const totalCost = clamp0(
+    aggregatedItems.reduce((s, x) => s + x.cost * x.qty, 0),
+  );
+  const profit = totalSales - totalCost;
 
   function printEndOfDay() {
     setPrinting("endday");
@@ -1474,6 +1504,7 @@ function ResultsTab() {
 
   return (
     <div className="space-y-4">
+      {/* شريط الأزرار العلوي */}
       <div className="no-print flex flex-wrap items-center gap-2">
         <div className="flex gap-1 bg-secondary p-1 rounded-lg">
           {(
@@ -1481,7 +1512,6 @@ function ResultsTab() {
               { id: "all", label: "الكل" },
               { id: "kitchen", label: "المطبخ" },
               { id: "bar", label: "البار" },
-              { id: "shisha", label: "الشيشة" },
               { id: "audit", label: "الجرد" },
             ] as { id: ResultsView; label: string }[]
           ).map((t) => (
@@ -1527,43 +1557,86 @@ function ResultsTab() {
         <>
           <div className="no-print grid grid-cols-2 md:grid-cols-4 gap-3">
             <Stat label="إجمالي المبيعات" value={fmt2(totalSales) + " ج.م"} />
-            <Stat label="إجمالي التكلفة" value={fmt2(totalCost) + " ج.م"} />
             <Stat
-              label="صافي الربح/الخسارة"
+              label="إجمالي التكلفة (تصنيع)"
+              value={fmt2(totalCost) + " ج.م"}
+            />
+            <Stat
+              label="صافي الربح"
               value={fmt2(profit) + " ج.م"}
               highlight={profit >= 0 ? "text-success" : "text-destructive"}
             />
             <Stat
-              label="عدد عمليات البيع"
-              value={filteredSales.length.toString()}
+              label="عدد الأصناف المباعة"
+              value={aggregatedItems.length.toString()}
             />
           </div>
-          <div className="no-print bg-card border border-border rounded-xl p-4">
-            <h2 className="font-bold text-sm mb-3">
-              الربح اليومي خلال الفترة المختارة
-            </h2>
-            <div className="flex items-end gap-1 h-40 overflow-x-auto">
-              {chartData.map((d) => {
-                const h = (Math.abs(d.profit) / maxAbs) * 100;
-                const pos = d.profit >= 0;
-                return (
-                  <div
-                    key={d.date}
-                    className="flex-1 min-w-[28px] flex flex-col items-center gap-1"
-                  >
-                    <div className="text-[10px] font-medium">
-                      {fmt2(d.profit)}
-                    </div>
-                    <div
-                      className={`w-full rounded-t ${pos ? "bg-primary" : "bg-destructive"}`}
-                      style={{ height: `${h}%`, minHeight: "2px" }}
-                    />
-                    <div className="text-[10px] text-muted-foreground rotate-45 origin-top-right whitespace-nowrap mt-2">
-                      {d.date.slice(5)}
-                    </div>
-                  </div>
-                );
-              })}
+
+          {/* 4. الجدول الجديد اللي بيعرض الصنف، الكمية، وسعر التصنيع والبيع */}
+          <div className="no-print bg-card border border-border rounded-xl overflow-hidden mt-4">
+            <div className="p-4 border-b border-border bg-secondary/20">
+              <h2 className="font-bold text-sm">
+                تفاصيل المبيعات والتكاليف (بناءً على الريسبي)
+              </h2>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-secondary/50 text-xs">
+                  <tr>
+                    <th className="text-right p-3">الصنف</th>
+                    <th className="text-right p-3">القسم</th>
+                    <th className="text-right p-3">الكمية المباعة</th>
+                    <th className="text-right p-3">سعر التصنيع (للوحدة)</th>
+                    <th className="text-right p-3">سعر البيع (للوحدة)</th>
+                    <th className="text-right p-3">إجمالي التكلفة</th>
+                    <th className="text-right p-3">إجمالي المبيعات</th>
+                    <th className="text-right p-3">الربح</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aggregatedItems.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={8}
+                        className="p-8 text-center text-muted-foreground"
+                      >
+                        لا توجد بيانات مبيعات في هذه الفترة
+                      </td>
+                    </tr>
+                  ) : (
+                    aggregatedItems.map((row) => {
+                      const totalRowCost = row.cost * row.qty;
+                      const totalRowSales = row.price * row.qty;
+                      const rowProfit = totalRowSales - totalRowCost;
+                      return (
+                        <tr
+                          key={row.meal.id}
+                          className="border-t border-border hover:bg-secondary/10"
+                        >
+                          <td className="p-3 font-medium">{row.meal.name}</td>
+                          <td className="p-3 text-xs text-muted-foreground">
+                            {row.dept}
+                          </td>
+                          <td className="p-3 font-bold">{fmt2(row.qty)}</td>
+                          <td className="p-3 text-destructive">
+                            {fmt2(row.cost)}
+                          </td>
+                          <td className="p-3 text-primary">
+                            {fmt2(row.price)}
+                          </td>
+                          <td className="p-3">{fmt2(totalRowCost)}</td>
+                          <td className="p-3">{fmt2(totalRowSales)}</td>
+                          <td
+                            className={`p-3 font-bold ${rowProfit >= 0 ? "text-success" : "text-destructive"}`}
+                          >
+                            {fmt2(rowProfit)}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </>
@@ -1579,7 +1652,6 @@ function ResultsTab() {
     </div>
   );
 }
-
 /* --- Audit View (history + new audit per dept/date) --- */
 function AuditView() {
   const { db, addAudit } = useDB();

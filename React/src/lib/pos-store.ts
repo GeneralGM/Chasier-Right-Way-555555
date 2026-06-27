@@ -65,6 +65,7 @@ export const PAGE_SIZE = 20;
 export type TableState = "empty" | "active" | "printed";
 
 export interface OrderItem {
+  department: string;
   mealName: any;
   id: string;
   mealId: string;

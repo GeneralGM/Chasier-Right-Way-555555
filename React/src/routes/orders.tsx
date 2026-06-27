@@ -12,6 +12,7 @@ import {
   type SubDept,
   type Item,
   type ModifierGroup,
+  expandMealToBase,
 } from "@/lib/store";
 import {
   usePosDB,
@@ -964,6 +965,7 @@ function OrderEntryDialog({
       extras,
       modifiersSummary: summary,
       mealName: undefined,
+      department: "",
     };
     upsertOrder({ ...order, items: [...order.items, line], state: "active" });
   }
@@ -1116,6 +1118,56 @@ function OrderEntryDialog({
     if (db.updateDeptStock) {
       await db.updateDeptStock(updatedDeptStock);
     }
+    // ==========================================
+    // 💡 التعديل المتوافق مع نوع SaleEntry بالظبط
+    // ==========================================
+
+    // 1. حساب إجمالي البيع للعملية الحالية
+    const currentTotalSales = order.items.reduce(
+      (sum: number, item: any) => sum + item.price * item.qty,
+      0,
+    );
+
+    // لو مش متاحة أو صعبة الوصول هنا، حطها مؤقتاً 0 والجدول في النتائج كدة كدة بيحسبها لوحده
+    let currentTotalCost = 0;
+    if (typeof expandMealToBase === "function" && db.meals && db.items) {
+      order.items.forEach((item: any) => {
+        const meal = meals.find((m) => m.id === item.mealId);
+        if (meal) {
+          const expandMap = expandMealToBase(meal, meals, db.items);
+          let c = 0;
+          for (const [, info] of expandMap) c += info.cost;
+          currentTotalCost += c * item.qty;
+        }
+      });
+    }
+
+    // 3. بناء الأوبجكت بالمواصفات الكاملة المطلوبة
+    const newSale = {
+      id: "sale_" + Date.now(),
+      date: new Date().toISOString().slice(0, 10),
+      department: order.items[0]?.department || "مطبخ",
+      lines: order.items.map((item: any) => ({
+        mealId: item.mealId,
+        qty: item.qty,
+        price: item.price,
+      })),
+      // الثلاثة المطلوبة اللي كانت ناقصة ومسببة الخطأ 👇
+      totalSales: currentTotalSales,
+      totalCost: currentTotalCost,
+      createdAt: Date.now(),
+    };
+
+    // 4. الحفظ في الداتا بيس (باستخدام التايب كاستنج لضمان عدم اعتراض TS)
+    if ((db as any).setDb) {
+      (db as any).setDb((prev: any) => ({
+        ...prev,
+        sales: [...(prev.sales || []), newSale],
+      }));
+    } else if (db.sales) {
+      db.sales.push(newSale as any);
+    }
+    // ==========================================
 
     // لو السلة فاضية اقفل الأوردر وامسحه بلاش فواتير صفرية
     if (order.items.length === 0) {
@@ -2137,28 +2189,23 @@ function CheckoutDialog({
         createdAt: Date.now(),
       };
 
-      // 1. حفظ الفاتورة
+      // 1. حفظ الفاتورة على السيرفر
       await addInvoice(inv);
 
-      // 2. خصم الكميات محلياً (الميزة الأسطورية بتشتغل هنا في الـ LocalStorage)
+      // 2. خصم الكميات محلياً
       deductInventory();
 
-      // 🔥 3. الكود السحري: ترحيل خصم الجرامات والمكونات إلى الـ pgAdmin فوراً
-      // بعد تشغيل deductInventory، الكاش المحلى وتحديداً db.deptStock تم تحديثه بالأرقام الجديدة الفاضلة.
+      // 3. ترحيل خصم الجرامات والمكونات إلى الـ pgAdmin فوراً
       try {
-        // بنعمل تجميع لكل صنف ومكون اتمسح منه كمية عشان نبعته للسيرفر
         for (const line of currentOrder.items) {
           const meal = db.meals.find((m) => m.id === line.mealId);
           if (!meal || !meal.ingredients) continue;
 
-          const dept = meal.department; // المطبخ، البار، أو الشيشة
+          const dept = meal.department;
 
           for (const ing of meal.ingredients) {
-            // بنجيب المفتاح الفريد للصنف المخزني داخل القسم ده
             const key = deptKey(dept as SubDept, ing.itemId);
 
-            // بنجيب الكمية الجديدة المتبقية في المخزن الفرعي بعد عملية الخصم الحالية
-            // بنقراها من الـ localStorage اللي لسه مخصوم منه حالا عشان نرفع الرقم الفعلي المتبقي
             const freshDb = JSON.parse(
               localStorage.getItem("rest-inv-db-v1") || "{}",
             );
@@ -2166,11 +2213,9 @@ function CheckoutDialog({
             const remainingQty =
               nextDeptStock[key] !== undefined ? nextDeptStock[key] : 0;
 
-            // بنجيب اسم الصنف المخزني الأصلي عشان يفضل متسجل صح في الداتابيز
             const originalItem = db.items.find((i) => i.id === ing.itemId);
             const itemName = originalItem ? originalItem.name : "صنف مخزني";
 
-            // إرسال التحديث لجدول department_stock في السيرفر
             await fetch("http://localhost:5000/api/dept-stock", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -2178,7 +2223,7 @@ function CheckoutDialog({
                 itemId: ing.itemId,
                 itemName: itemName,
                 department: dept,
-                qty: remainingQty, // الكمية الجديدة الصافية بعد خصم الجرامات
+                qty: remainingQty,
               }),
             });
           }
@@ -2193,8 +2238,13 @@ function CheckoutDialog({
         );
       }
 
-      // 4. تسجيل المبيعات حسب الأقسام
-      const salesByDept: Record<string, { mealId: string; qty: number }[]> = {};
+      // =========================================================
+      // 🔥 4. تسجيل المبيعات وترحيلها إلى السيرفر (pgAdmin) لدعم الـ ResultsTab
+      // =========================================================
+      const salesByDept: Record<
+        string,
+        { mealId: string; qty: number; price: number }[]
+      > = {};
 
       for (const line of currentOrder.items) {
         const meal = db.meals.find((m) => m.id === line.mealId);
@@ -2214,16 +2264,83 @@ function CheckoutDialog({
           salesByDept[dept].push({
             mealId: line.mealId,
             qty: line.qty,
+            price: meal.sellingPrice || 0, // 🔥 سحبنا السعر من الـ meal مباشرة عشان الـ OrderItem ما فيهوش price
           });
         }
       }
-
       const todayStr = new Date().toISOString().slice(0, 10);
+
+      // تجهيز نسخة الـ LocalStorage للاحتياط التزاماً بالسرعة المحلية
+      const freshDbForSales = JSON.parse(
+        localStorage.getItem("rest-inv-db-v1") || "{}",
+      );
+      if (!freshDbForSales.sales) freshDbForSales.sales = [];
+
       for (const [deptName, deptLines] of Object.entries(salesByDept)) {
         if (deptLines.length > 0) {
-          addSale(todayStr, deptName as SubDept, deptLines);
+          // حساب إجمالي البيع للقسم الحالي
+          const totalSales = deptLines.reduce(
+            (sum, l) => sum + l.price * l.qty,
+            0,
+          );
+
+          // حساب إجمالي التكلفة بناءً على مكونات الريسبي
+          let totalCost = 0;
+          if (typeof expandMealToBase === "function" && db.items) {
+            for (const l of deptLines) {
+              const meal = db.meals.find((m) => m.id === l.mealId);
+              if (meal) {
+                const expandMap = expandMealToBase(meal, db.meals, db.items);
+                let c = 0;
+                for (const [, info] of expandMap) c += info.cost;
+                totalCost += c * l.qty;
+              }
+            }
+          }
+
+          // بناء أوبجكت المبيعات المتوافق بالملي مع الـ TypeScript والـ pgAdmin
+          const newSale = {
+            id: "sale_" + crypto.randomUUID().split("-")[0] + "_" + Date.now(),
+            date: todayStr,
+            department: deptName,
+            lines: deptLines,
+            totalSales: totalSales,
+            totalCost: totalCost,
+            createdAt: Date.now(),
+          };
+
+          // أ. الحفظ في الـ pgAdmin عن طريق الـ API الخاص بالسيرفر
+          try {
+            await fetch("http://localhost:5000/api/sales", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(newSale),
+            });
+            console.log(
+              `✅ تم ترحيل بيعة قسم [${deptName}] إلى pgAdmin بنجاح!`,
+            );
+          } catch (apiError) {
+            console.error("🚨 فشل ترحيل المبيعات للسيرفر:", apiError);
+          }
+
+          // ب. التحديث المحلي السريع عشان التبويبات تسمع فوراً بدون ريفريش
+          freshDbForSales.sales.push(newSale);
+          if (db.sales) {
+            db.sales.push(newSale as any);
+          }
+
+          // ج. استدعاء الدالة القديمة لضمان عدم كسر أي منطق آخر بالسيستم
+          try {
+            addSale(todayStr, deptName as SubDept, deptLines);
+          } catch (e) {
+            console.warn("addSale fallback notice:", e);
+          }
         }
       }
+
+      // حفظ أخير في اللوكال ستوريدج للحفاظ على المزامنة
+      localStorage.setItem("rest-inv-db-v1", JSON.stringify(freshDbForSales));
+      // =========================================================
 
       if (isTakeaway && currentOrder.customerName) {
         const c = pos.customers.find(

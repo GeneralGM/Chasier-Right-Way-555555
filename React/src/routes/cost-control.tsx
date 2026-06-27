@@ -2113,6 +2113,7 @@ function AuditReceiptPrint({
 }
 
 /* --- End of Day PDF (Kitchen | Bar split) --- */
+/* --- End of Day PDF (Kitchen | Bar split) --- */
 function EndOfDayPrint({ date }: { date: string }) {
   const { db } = useDB();
   const todaySales = db.sales.filter((s) => s.date === date);
@@ -2154,14 +2155,15 @@ function EndOfDayPrint({ date }: { date: string }) {
           </tr>
         </tbody>
       </table>
+
       <SalesPdfSection title="مبيعات المطبخ" rows={kRows} />
       <div style={{ borderTop: "2px solid #000", margin: "10px 0" }} />
-      <SalesPdfSection title="مبيعات البار" rows={bRows} />
-      <SalesPdfSection title="مبيعات المطبخ" rows={kRows} />
-      <div style={{ borderTop: "2px solid #000", margin: "10px 0" }} />
+
       <SalesPdfSection title="مبيعات البار" rows={bRows} />
       <div style={{ borderTop: "2px solid #000", margin: "10px 0" }} />
-      <SalesPdfSection title="مبيعات الشيشة" rows={sRows} /> {/* 👈 الشيشة */}
+
+      <SalesPdfSection title="مبيعات الشيشة" rows={sRows} />
+
       <h2 className="text-sm font-bold mt-3 mb-1">نتائج الجرد</h2>
       {todayAudits.length === 0 ? (
         <div className="text-xs">لم يتم إجراء جرد لهذا اليوم</div>
@@ -2178,57 +2180,48 @@ function EndOfDayPrint({ date }: { date: string }) {
             {todayAudits.map((a) => (
               <tr key={a.id}>
                 <td>{a.department}</td>
-                <td>{fmt2(a.shortageValue)}</td>
-                <td>{fmt2(a.penaltyValue)}</td>
+                <td>{fmt2(a.shortageValue)} ج.م</td>
+                <td>{fmt2(a.penaltyValue)} ج.م</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      <div className="flex justify-between mt-4 text-xs">
-        <div>اعتماد المسؤول: ____________</div>
-        <div>التوقيع: ____________</div>
-      </div>
     </div>
   );
 }
 
-function SalesPdfSection({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: { name: string; qty: number; price: number; total: number }[];
-}) {
-  const totalVal = clamp0(rows.reduce((s, r) => s + r.total, 0));
+// دالة مساعدة لطباعة جداول مبيعات الأقسام داخل تقرير نهاية اليوم بدون تكرار كود
+function SalesPdfSection({ title, rows }: { title: string; rows: any[] }) {
+  const totalQty = rows.reduce((s, r) => s + r.qty, 0);
+  const totalVal = rows.reduce((s, r) => s + r.total, 0);
   return (
-    <div>
-      <h2 className="text-sm font-bold mt-2 mb-1">{title}</h2>
+    <div className="my-2">
+      <h3 className="text-xs font-bold mb-1">{title}</h3>
       {rows.length === 0 ? (
-        <div className="text-xs">لا توجد مبيعات</div>
+        <div className="text-[10px] text-muted-foreground">لا توجد مبيعات</div>
       ) : (
-        <table className="print-table w-full">
+        <table className="print-table w-full text-[11px]">
           <thead>
             <tr>
-              <th style={{ width: "24px" }}>#</th>
-              <th>اسم الصنف</th>
-              <th style={{ width: "60px" }}>سعر الوحدة</th>
-              <th style={{ width: "60px" }}>الكمية</th>
-              <th style={{ width: "80px" }}>الإجمالي</th>
+              <th>الصنف</th>
+              <th>السعر</th>
+              <th>الكمية</th>
+              <th>الإجمالي</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td>{i + 1}</td>
+            {rows.map((r, idx) => (
+              <tr key={idx}>
                 <td>{r.name}</td>
                 <td>{fmt2(r.price)}</td>
                 <td>{fmt2(r.qty)}</td>
                 <td>{fmt2(r.total)}</td>
               </tr>
             ))}
-            <tr style={{ fontWeight: "bold", background: "#eee" }}>
-              <td colSpan={4}>إجمالي {title}</td>
+            <tr style={{ fontWeight: "bold", background: "#f5f5f5" }}>
+              <td colSpan={2}>الإجمالي</td>
+              <td>{fmt2(totalQty)}</td>
               <td>{fmt2(totalVal)}</td>
             </tr>
           </tbody>
@@ -2237,6 +2230,51 @@ function SalesPdfSection({
     </div>
   );
 }
+
+// function SalesPdfSection({
+//   title,
+//   rows,
+// }: {
+//   title: string;
+//   rows: { name: string; qty: number; price: number; total: number }[];
+// }) {
+//   const totalVal = clamp0(rows.reduce((s, r) => s + r.total, 0));
+//   return (
+//     <div>
+//       <h2 className="text-sm font-bold mt-2 mb-1">{title}</h2>
+//       {rows.length === 0 ? (
+//         <div className="text-xs">لا توجد مبيعات</div>
+//       ) : (
+//         <table className="print-table w-full">
+//           <thead>
+//             <tr>
+//               <th style={{ width: "24px" }}>#</th>
+//               <th>اسم الصنف</th>
+//               <th style={{ width: "60px" }}>سعر الوحدة</th>
+//               <th style={{ width: "60px" }}>الكمية</th>
+//               <th style={{ width: "80px" }}>الإجمالي</th>
+//             </tr>
+//           </thead>
+//           <tbody>
+//             {rows.map((r, i) => (
+//               <tr key={i}>
+//                 <td>{i + 1}</td>
+//                 <td>{r.name}</td>
+//                 <td>{fmt2(r.price)}</td>
+//                 <td>{fmt2(r.qty)}</td>
+//                 <td>{fmt2(r.total)}</td>
+//               </tr>
+//             ))}
+//             <tr style={{ fontWeight: "bold", background: "#eee" }}>
+//               <td colSpan={4}>إجمالي {title}</td>
+//               <td>{fmt2(totalVal)}</td>
+//             </tr>
+//           </tbody>
+//         </table>
+//       )}
+//     </div>
+//   );
+// }
 
 function Stat({
   label,

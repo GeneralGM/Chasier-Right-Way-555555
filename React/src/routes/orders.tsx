@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
@@ -2136,10 +2137,63 @@ function CheckoutDialog({
         createdAt: Date.now(),
       };
 
+      // 1. حفظ الفاتورة
       await addInvoice(inv);
 
+      // 2. خصم الكميات محلياً (الميزة الأسطورية بتشتغل هنا في الـ LocalStorage)
       deductInventory();
 
+      // 🔥 3. الكود السحري: ترحيل خصم الجرامات والمكونات إلى الـ pgAdmin فوراً
+      // بعد تشغيل deductInventory، الكاش المحلى وتحديداً db.deptStock تم تحديثه بالأرقام الجديدة الفاضلة.
+      try {
+        // بنعمل تجميع لكل صنف ومكون اتمسح منه كمية عشان نبعته للسيرفر
+        for (const line of currentOrder.items) {
+          const meal = db.meals.find((m) => m.id === line.mealId);
+          if (!meal || !meal.ingredients) continue;
+
+          const dept = meal.department; // المطبخ، البار، أو الشيشة
+
+          for (const ing of meal.ingredients) {
+            // بنجيب المفتاح الفريد للصنف المخزني داخل القسم ده
+            const key = deptKey(dept as SubDept, ing.itemId);
+
+            // بنجيب الكمية الجديدة المتبقية في المخزن الفرعي بعد عملية الخصم الحالية
+            // بنقراها من الـ localStorage اللي لسه مخصوم منه حالا عشان نرفع الرقم الفعلي المتبقي
+            const freshDb = JSON.parse(
+              localStorage.getItem("rest-inv-db-v1") || "{}",
+            );
+            const nextDeptStock = freshDb.deptStock || {};
+            const remainingQty =
+              nextDeptStock[key] !== undefined ? nextDeptStock[key] : 0;
+
+            // بنجيب اسم الصنف المخزني الأصلي عشان يفضل متسجل صح في الداتابيز
+            const originalItem = db.items.find((i) => i.id === ing.itemId);
+            const itemName = originalItem ? originalItem.name : "صنف مخزني";
+
+            // إرسال التحديث لجدول department_stock في السيرفر
+            await fetch("http://localhost:5000/api/dept-stock", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                itemId: ing.itemId,
+                itemName: itemName,
+                department: dept,
+                qty: remainingQty, // الكمية الجديدة الصافية بعد خصم الجرامات
+              }),
+            });
+          }
+        }
+        console.log(
+          "🚀 تم ترحيل وتثبيت خصم المكونات في pgAdmin بنجاح يا هندسة!",
+        );
+      } catch (stockError) {
+        console.error(
+          "🚨 خطأ أثناء ترحيل خصم المخازن الفرعية للسيرفر:",
+          stockError,
+        );
+      }
+
+      // 4. تسجيل المبيعات حسب الأقسام
       const salesByDept: Record<string, { mealId: string; qty: number }[]> = {};
 
       for (const line of currentOrder.items) {
@@ -2178,6 +2232,7 @@ function CheckoutDialog({
         if (c) incCustomerOrders(c.id);
       }
 
+      // 5. إشعار النجاح للمستخدم
       if (finalType === "delivery") {
         toast.success(
           `تم إنهاء أوردر التوصيل بنجاح 🛵 (+${finalDeliveryPrice} ج.م)`,

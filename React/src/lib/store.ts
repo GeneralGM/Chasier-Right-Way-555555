@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { sha256 } from "js-sha256";
 import { useEffect, useState, useCallback } from "react";
@@ -626,31 +627,36 @@ export function useDB() {
   //   syncInventoryFromServer();
   // }, []);
   // 1. الدالة دي هتجيب من السيرفر -> تحفظ في Local Storage -> تحدث الـ UI
+
   const syncFromServer = useCallback(async () => {
     try {
-      console.log("🔄 جاري سحب الأصناف وأرصدة الأقسام من الداتابيز...");
-      const [invRes, deptRes] = await Promise.all([
+      console.log("🔄 جاري سحب الأصناف، أرصدة الأقسام، الريسبي، والمبيعات...");
+      const [invRes, deptRes, mealsRes, salesRes] = await Promise.all([
         fetch("http://localhost:5000/api/inventory"),
         fetch("http://localhost:5000/api/dept-stock"),
+        fetch("http://localhost:5000/api/meals"),
+        fetch("http://localhost:5000/api/sales"), // 🌟 ضفنا مسار المبيعات هنا
       ]);
 
-      if (invRes.ok && deptRes.ok) {
+      if (invRes.ok && deptRes.ok && mealsRes.ok && salesRes.ok) {
         const serverItems = await invRes.json();
         const deptStockData = await deptRes.json();
-        const cur = load(); // قراءة الـ Local Storage الحالي
+        const serverMeals = await mealsRes.json();
+        const serverSales = await salesRes.json(); // 🌟 سحبنا المبيعات
+
+        const cur = load();
 
         cur.items = serverItems;
+        cur.meals = serverMeals;
+        cur.sales = serverSales; // 🌟 حطينا المبيعات في الكاش عشان ترسم الشارت
 
         const newDeptStock: Record<string, number> = {};
         deptStockData.forEach((row: any) => {
-          // 🔥 التعديل الأول: استخدام دالة deptKey عشان المفتاح يبقى (مطبخ_123) وتشوفه شاشة الكوست كنترول
           const key = deptKey(row.department as SubDept, row.item_id);
           newDeptStock[key] = Number(row.qty);
         });
-
         cur.deptStock = newDeptStock;
 
-        // الحفظ في Local Storage ثم تحديث State الـ React
         save(cur);
         setDb(cur);
       }
@@ -864,7 +870,7 @@ export function useDB() {
     [],
   );
 
-  const saveMeal = useCallback((meal: Meal) => {
+  const saveMeal = useCallback(async (meal: Meal) => {
     const cur = load();
     const m: Meal = {
       ...meal,
@@ -873,29 +879,67 @@ export function useDB() {
       wasteMode: "fixed",
       kind: meal.kind || "menu",
     };
+
+    // حفظ محلي سريع (عشان الـ UI يبقى سريع)
     const idx = cur.meals.findIndex((x) => x.id === m.id);
     if (idx >= 0) cur.meals[idx] = m;
     else cur.meals.push(m);
     save(cur);
+    setDb(cur);
+
+    // 🌟 إرسال للباك إند
+    try {
+      await fetch("http://localhost:5000/api/meals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(m),
+      });
+    } catch (e) {
+      console.error("❌ فشل حفظ الريسبي في السيرفر:", e);
+    }
   }, []);
 
-  const deleteMeal = useCallback((id: string) => {
+  const deleteMeal = useCallback(async (id: string) => {
     const cur = load();
     cur.meals = cur.meals.filter((m) => m.id !== id);
     save(cur);
+    setDb(cur);
+
+    // 🌟 حذف من الباك إند
+    try {
+      await fetch(`http://localhost:5000/api/meals/${id}`, {
+        method: "DELETE",
+      });
+    } catch (e) {
+      console.error("❌ فشل حذف الريسبي من السيرفر:", e);
+    }
   }, []);
 
-  const bulkAddMeals = useCallback((meals: Meal[]) => {
+  const bulkAddMeals = useCallback(async (meals: Meal[]) => {
     const cur = load();
-    cur.meals.push(
-      ...meals.map((m) => ({
-        ...m,
-        wasteMargin: 0,
-        wasteMode: "fixed" as const,
-        kind: m.kind || "menu",
-      })),
-    );
+    const formattedMeals = meals.map((m) => ({
+      ...m,
+      wasteMargin: 0,
+      wasteMode: "fixed" as const,
+      kind: m.kind || "menu",
+    }));
+
+    cur.meals.push(...formattedMeals);
     save(cur);
+    setDb(cur);
+
+    // 🌟 إرسال للباك إند بالدور (يفضل عمل مسار Bulk في الباك اند لو العدد ضخم جداً بس كدا هيشتغل تمام)
+    for (const m of formattedMeals) {
+      try {
+        await fetch("http://localhost:5000/api/meals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(m),
+        });
+      } catch (e) {
+        console.error("❌ فشل رفع أحد الأصناف:", e);
+      }
+    }
   }, []);
 
   const addSale = useCallback(

@@ -604,9 +604,8 @@ app.get("/api/dept-stock", async (req, res) => {
   }
 });
 
-// 2. تحديث رصيد صنف في قسم معين
+// تحديث أو إدخال رصيد صنف في قسم معين
 app.post("/api/dept-stock", async (req, res) => {
-  // 🌟 استلمنا الـ itemName من الفرونت إند
   const { itemId, itemName, department, qty } = req.body;
   try {
     const query = `
@@ -617,16 +616,187 @@ app.post("/api/dept-stock", async (req, res) => {
         item_name = EXCLUDED.item_name
       RETURNING *
     `;
-    await pool.query(query, [
+    const result = await pool.query(query, [
       itemId,
       itemName || "غير محدد",
       department,
       Number(qty) || 0,
     ]);
-    res.json({ success: true, message: "تم تحديث رصيد القسم بنجاح" });
+    res.json({
+      success: true,
+      message: "تم تحديث رصيد القسم بنجاح",
+      data: result.rows[0],
+    });
   } catch (err) {
     console.error("🚨 خطأ في تحديث رصيد القسم:", err);
-    res.status(500).json({ error: "حدث خطأ أثناء تعديل رصيد القسم" });
+    res.status(500).json({ error: "حدث خطأ أثناء تحديث المخزن الفرعي" });
+  }
+});
+
+// ==========================================
+// 🍔 مسارات الأصناف والريسبي (Meals / Recipes)
+// ==========================================
+
+// 1. جلب كل الأصناف والريسبي
+app.get("/api/meals", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM meals ORDER BY category, name ASC",
+    );
+
+    // تحويل البيانات لشكل يفهمه الفرونت إند
+    const formattedMeals = result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      department: row.department,
+      category: row.category,
+      kind: row.kind,
+      sellingPrice: Number(row.selling_price) || 0,
+      wasteMargin: Number(row.waste_margin) || 0,
+      wasteMode: row.waste_mode,
+      hasModifiers: row.has_modifiers,
+      // فك الـ JSON عشان الفرونت إند يقراه كمصفوفة
+      ingredients:
+        typeof row.ingredients === "string"
+          ? JSON.parse(row.ingredients)
+          : row.ingredients || [],
+      modifierGroups:
+        typeof row.modifier_groups === "string"
+          ? JSON.parse(row.modifier_groups)
+          : row.modifier_groups || [],
+    }));
+
+    res.json(formattedMeals);
+  } catch (err) {
+    console.error("🚨 خطأ في جلب الريسبي:", err);
+    res.status(500).json({ error: "حدث خطأ في جلب بيانات الأصناف" });
+  }
+});
+
+// 2. إضافة أو تحديث ريسبي (Meal)
+app.post("/api/meals", async (req, res) => {
+  const {
+    id,
+    name,
+    department,
+    category,
+    kind,
+    sellingPrice,
+    wasteMargin,
+    wasteMode,
+    ingredients,
+    hasModifiers,
+    modifierGroups,
+  } = req.body;
+
+  try {
+    const query = `
+      INSERT INTO meals (
+        id, name, department, category, kind, selling_price, 
+        waste_margin, waste_mode, ingredients, has_modifiers, modifier_groups
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        department = EXCLUDED.department,
+        category = EXCLUDED.category,
+        kind = EXCLUDED.kind,
+        selling_price = EXCLUDED.selling_price,
+        waste_margin = EXCLUDED.waste_margin,
+        waste_mode = EXCLUDED.waste_mode,
+        ingredients = EXCLUDED.ingredients,
+        has_modifiers = EXCLUDED.has_modifiers,
+        modifier_groups = EXCLUDED.modifier_groups
+      RETURNING *
+    `;
+
+    const values = [
+      id,
+      name,
+      department,
+      category || "",
+      kind || "menu",
+      Number(sellingPrice) || 0,
+      Number(wasteMargin) || 0,
+      wasteMode || "fixed",
+      JSON.stringify(ingredients || []),
+      hasModifiers || false,
+      JSON.stringify(modifierGroups || []),
+    ];
+
+    await pool.query(query, values);
+    res.status(201).json({ success: true, message: "تم حفظ الصنف بنجاح" });
+  } catch (err) {
+    console.error("🚨 خطأ في حفظ الريسبي:", err.message);
+    res.status(500).json({ error: "حدث خطأ أثناء حفظ الصنف" });
+  }
+});
+
+// 3. حذف ريسبي
+app.delete("/api/meals/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM meals WHERE id = $1", [req.params.id]);
+    res.json({ success: true, message: "تم حذف الصنف بنجاح" });
+  } catch (err) {
+    console.error("🚨 خطأ في حذف الريسبي:", err);
+    res.status(500).json({ error: "حدث خطأ أثناء الحذف" });
+  }
+});
+
+// ==========================================
+// 🛒 مسارات المبيعات (Sales)
+// ==========================================
+
+// 1. جلب كل المبيعات لعرضها في الجرد والتقارير
+app.get("/api/sales", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM sales ORDER BY created_at DESC",
+    );
+
+    const formattedSales = result.rows.map((row) => ({
+      id: row.id,
+      date: new Date(row.date).toISOString().slice(0, 10), // تحويل لـ YYYY-MM-DD
+      department: row.department,
+      // فك سطور المبيعات
+      lines: typeof row.lines === "string" ? JSON.parse(row.lines) : row.lines,
+      totalSales: Number(row.total_sales),
+      totalCost: Number(row.total_cost),
+      createdAt: new Date(row.created_at).getTime(),
+    }));
+
+    res.json(formattedSales);
+  } catch (err) {
+    console.error("🚨 خطأ في جلب المبيعات:", err);
+    res.status(500).json({ error: "حدث خطأ في جلب المبيعات" });
+  }
+});
+
+// 2. إضافة مبيعات جديدة (وحفظها في الأرشيف)
+app.post("/api/sales", async (req, res) => {
+  const { id, date, department, lines, totalSales, totalCost, createdAt } =
+    req.body;
+  try {
+    const query = `
+      INSERT INTO sales (id, date, department, lines, total_sales, total_cost, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `;
+    const values = [
+      id,
+      date,
+      department,
+      JSON.stringify(lines),
+      Number(totalSales) || 0,
+      Number(totalCost) || 0,
+      new Date(createdAt),
+    ];
+
+    await pool.query(query, values);
+    res.status(201).json({ success: true, message: "تم حفظ المبيعات بنجاح" });
+  } catch (err) {
+    console.error("🚨 خطأ في حفظ المبيعات:", err.message);
+    res.status(500).json({ error: "حدث خطأ أثناء حفظ المبيعات" });
   }
 });
 // ==========================================

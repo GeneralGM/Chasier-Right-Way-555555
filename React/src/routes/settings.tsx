@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
@@ -46,11 +47,16 @@ const printInvoice = (invoice: Invoice) => {
   const printWindow = window.open("", "_blank", "width=400,height=600");
   if (!printWindow) return;
 
-  // جلب قيمة التوصيل الآمنة
   const dPrice =
     Number(invoice.deliveryPrice) ||
     Number((invoice as any).delivery_price) ||
     0;
+
+  // تأمين فك الأري عشان لو جاية كنص من الداتابيز
+  const itemsArray =
+    typeof invoice.items === "string"
+      ? JSON.parse(invoice.items)
+      : invoice.items || [];
 
   const html = `
     <html>
@@ -74,9 +80,9 @@ const printInvoice = (invoice: Invoice) => {
         <div class="type-title">ORDER</div>
         
         <div class="meta">
-          <div>رقم الفاتورة: ${invoice.id.slice(0, 8)}</div>
+          <div>رقم الفاتورة: ${String(invoice.id).slice(0, 8)}</div>
           <div>التاريخ: ${new Date(invoice.createdAt).toLocaleString("ar-EG")}</div>
-          <div>النوع في النظام: ${invoice.type === "delivery" ? "توصيل" : invoice.type === "takeaway" ? "تيك أواي" : "صالة"}</div>
+          <div>النوع: ${invoice.type === "delivery" ? "توصيل" : invoice.type === "takeaway" ? "تيك أواي" : "صالة"}</div>
         </div>
 
         <table>
@@ -88,18 +94,32 @@ const printInvoice = (invoice: Invoice) => {
             </tr>
           </thead>
           <tbody>
-            ${invoice.items
-              .map((line) => {
-                const exStr = line.extras.length
-                  ? ` <span style="font-size:11px;color:#555;">(+${line.extras.map((e) => e.name).join(", ")})</span>`
-                  : "";
+            ${itemsArray
+              .map((line: any) => {
+                const exStr =
+                  line.extras && line.extras.length
+                    ? ` <span style="font-size:11px;color:#555;">(+${line.extras.map((e: any) => e.name || e.label).join(", ")})</span>`
+                    : "";
+
+                const displayName =
+                  line.mealName || line.name || "صنف غير معروف";
+                const lineTotal =
+                  (Number(line.unitPrice || line.price) +
+                    (line.extras
+                      ? line.extras.reduce(
+                          (s: number, e: any) => s + Number(e.price),
+                          0,
+                        )
+                      : 0)) *
+                  Number(line.qty);
+
                 return `
                 <tr>
-                  <td>${line.mealName}${exStr}</td>
+                  <td>${displayName}${exStr}</td>
                   <td style="text-align:center;">${line.qty}</td>
-                  <td style="text-align:left;">${((line.unitPrice + line.extras.reduce((s, e) => s + e.price, 0)) * line.qty).toFixed(2)} ج</td>
+                  <td style="text-align:left;">${lineTotal.toFixed(2)} ج</td>
                 </tr>
-              `;
+                `;
               })
               .join("")}
           </tbody>
@@ -445,7 +465,16 @@ function InvoicesTab() {
                   <td className="p-3 text-muted-foreground">
                     {inv.cashierName || "—"}
                   </td>
-                  <td className="p-3">{inv.items?.length || 0}</td>
+                  <td className="p-3">
+                    {(typeof inv.items === "string"
+                      ? JSON.parse(inv.items)
+                      : inv.items || []
+                    ).reduce(
+                      (sum: number, item: any) => sum + (Number(item.qty) || 1),
+                      0,
+                    )}
+                  </td>
+
                   <td className="p-3">{fmt2(inv.subtotal)}</td>
                   <td className="p-3">
                     {Math.floor(+fmt2(inv.discountPct || 0))}% &asymp;&nbsp;

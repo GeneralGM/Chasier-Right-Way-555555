@@ -92,10 +92,56 @@ function CostControlPage() {
     </div>
   );
 }
+function getAuditStats(dept: SubDept, db: any) {
+  // 1. نجيب آخر جرد اتعمل للقسم ده عشان ناخد تاريخه
+  const deptAudits = db.audits.filter((a: any) => a.department === dept);
+  const lastAudit = deptAudits.length > 0 ? deptAudits[0] : null;
+  const lastAuditDate = lastAudit ? lastAudit.createdAt : 0;
+
+  // 2. نجيب المبيعات اللي تمت بعد تاريخ آخر جرد
+  const recentSales = db.sales.filter(
+    (s: any) => s.department === dept && s.createdAt > lastAuditDate,
+  );
+
+  // 3. هنمشي على المبيعات ونحسب الهدر المسموح لكل صنف (Error Margin)
+  const stats = new Map<string, { soldQty: number; allowedWaste: number }>();
+
+  recentSales.forEach((sale: any) => {
+    sale.lines.forEach((line: any) => {
+      const meal = db.meals.find((m: any) => m.id === line.mealId);
+      if (!meal) return;
+
+      meal.ingredients.forEach((ing: any) => {
+        const item = db.items.find((i: any) => i.id === ing.itemId);
+        if (!item) return;
+
+        // تحويل الهدر للوحدة الأساسية (عشان لو الهدر بالجرام والمخزن بالكيلو)
+        const baseWaste = convertToBase(
+          ing.errorMargin || 0, // الهدر المسموح للوجبة الواحدة
+          ing.unit,
+          item.unit,
+          item.conversionFactor,
+          item.subUnitType,
+        );
+
+        // إجمالي الهدر المسموح = الهدر للوجبة × عدد الوجبات المباعة
+        const totalWaste = baseWaste * line.qty;
+
+        const current = stats.get(item.id) || { soldQty: 0, allowedWaste: 0 };
+        stats.set(item.id, {
+          soldQty: current.soldQty + line.qty,
+          allowedWaste: current.allowedWaste + totalWaste,
+        });
+      });
+    });
+  });
+
+  return { lastAuditDate, stats, recentSalesCount: recentSales.length };
+}
 
 /* ============== TAB 1: Department Inventory ============== */
+/* ============== TAB 1: Department Inventory ============== */
 function DeptStockTab() {
-  // استخدام قيم افتراضية لتفادي undefined
   const { db = { items: [], deptStock: {} }, setDeptStockQty } = useDB() || {};
   const [dept, setDept] = useState<SubDept>("مطبخ");
   const [pinFor, setPinFor] = useState<string | null>(null);
@@ -103,19 +149,13 @@ function DeptStockTab() {
   const [editVal, setEditVal] = useState<string>("");
 
   const rows = useMemo(() => {
-    // 1. استخراج آمن للبيانات مع ضمان مصفوفة فارغة للأصناف
     const items = (db as any)?.items || [];
-
-    // 2. حل مشكلة الـ Index Signature عن طريق تعريف نوع كائن المخزن بوضوح كـ Record
     const stock = ((db as any)?.deptStock as Record<string, number>) || {};
 
     return items.map((it: any) => {
-      // 3. توليد المفتاح بشكل آمن وضمان وجود id
       const key = it?.id ? deptKey(dept, it.id) : "";
-
       return {
         item: it,
-        // 4. قراءة القيمة بأمان تام وبدون أخطاء تيب سكريبت
         qty: clamp0(stock[key] || 0),
       };
     });
@@ -126,15 +166,18 @@ function DeptStockTab() {
   );
 
   function startAdjust(itemId: string, current: number) {
-    setPinFor(itemId);
+    setPinFor(itemId); // ده بيظهر شاشة الباسورد
     setEditVal(fmt2(current));
   }
+
   function onPinOk() {
-    setEditingId(pinFor);
-    setPinFor(null);
+    setEditingId(pinFor); // الباسورد صح؟ افتح وضع التعديل
+    setPinFor(null); // اقفل شاشة الباسورد
   }
+
   function saveAdjust(itemId: string) {
     const v = clamp0(parseFloat(editVal) || 0);
+    // هنا بننادي على الدالة اللي بتسيف في الداتا بيس
     if (setDeptStockQty) setDeptStockQty(dept, itemId, v);
     toast.success("تم تعديل الكمية");
     setEditingId(null);
@@ -142,7 +185,17 @@ function DeptStockTab() {
 
   return (
     <div className="space-y-4 no-print" dir="rtl">
-      {/*... الكود الخاص بالواجهة هنا كما هو ...*/}
+      {/* 🔴 التعديل الأول: إضافة شاشة طلب كلمة السر هنا 🔴 */}
+      {/* 🔴 التعديل الصحيح لاستدعاء شاشة الباسورد 🔴 */}
+      {pinFor && (
+        <PinPrompt
+          open={!!pinFor} // هيفضل مفتوح طول ما في itemId متسيف هنا
+          onSuccess={onPinOk}
+          onClose={() => setPinFor(null)} // بيقفل المودال لو داس بره أو داس إلغاء
+          onCancel={() => setPinFor(null)}
+        />
+      )}
+
       <div className="flex items-center gap-2 flex-wrap">
         {SUB_DEPTS.map((d) => (
           <button
@@ -179,14 +232,46 @@ function DeptStockTab() {
                 <tr key={r.item.id} className="border-t border-border">
                   <td className="p-3 font-mono text-xs">{r.item.code}</td>
                   <td className="p-3 font-medium">{r.item.name}</td>
-                  <td className="p-3 font-bold">{fmt2(r.qty)}</td>
+                  <td className="p-3 font-bold">
+                    {/* 🔴 التعديل التاني: إظهار مربع إدخال لو الصنف ده اللي بيتعدل 🔴 */}
+                    {editingId === r.item.id ? (
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={editVal}
+                        onChange={(e) => setEditVal(e.target.value)}
+                        className="w-24 h-8 px-2 rounded-md border border-input bg-background text-sm"
+                      />
+                    ) : (
+                      fmt2(r.qty)
+                    )}
+                  </td>
                   <td className="p-3">
-                    <button
-                      onClick={() => startAdjust(r.item.id, r.qty)}
-                      className="px-2 h-7 rounded bg-amber-100 text-xs"
-                    >
-                      تعديل
-                    </button>
+                    {/* 🔴 التعديل التالت: تبديل زرار التعديل بزرار الحفظ 🔴 */}
+                    {editingId === r.item.id ? (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => saveAdjust(r.item.id)}
+                          className="px-2 h-7 rounded bg-primary text-primary-foreground text-xs flex items-center gap-1"
+                        >
+                          <Save className="w-3 h-3" /> حفظ
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="px-2 h-7 rounded bg-secondary text-xs"
+                        >
+                          إلغاء
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => startAdjust(r.item.id, r.qty)}
+                        className="px-2 h-7 rounded bg-amber-100 text-xs text-amber-900"
+                      >
+                        تعديل الكمية
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))
@@ -1091,19 +1176,32 @@ function SalesTab() {
     });
   }
 
-  function submit() {
+  async function submit() {
+    // 👈 ضفنا async هنا
     const valid = lines.filter((l) => l.qty > 0);
     if (valid.length === 0) {
       toast.error("أدخل كمية مبيعات واحدة على الأقل");
       return;
     }
-    const res = addSale(date, dept, valid);
-    if (!res.ok) {
-      toast.error(res.error);
-      return;
+
+    try {
+      // 👈 ضفنا await هنا عشان نستنى النتيجة الفعلية اللي راجعة من الـ Promise
+      const res = await addSale(date, dept, valid);
+
+      if (!res.ok) {
+        // التايب سكريبت هنا هيفهم تلقائياً إن طالما ok بـ false يبقى الـ error موجود
+        toast.error(res.error);
+        return;
+      }
+
+      // التايب سكريبت هنا هيفهم تلقائياً إن طالما ok بـ true يبقى الـ sale موجود ومفيش خطأ
+      toast.success(`تم الحفظ. الإجمالي: ${fmt2(res.sale.totalSales)} ج.م`);
+      setLines([]);
+    } catch (err: any) {
+      // حماية إضافية لو الـ addSale ضربت خطأ غير متوقع في السيرفر أو الكود
+      toast.error("حدث خطأ غير متوقع أثناء الحفظ");
+      console.error(err);
     }
-    toast.success(`تم الحفظ. الإجمالي: ${fmt2(res.sale.totalSales)} ج.م`);
-    setLines([]);
   }
 
   function importExcel(file: File) {
@@ -1672,6 +1770,61 @@ function AuditView() {
     [db.audits, date, dept],
   );
 
+  // 1. تم نقل allowedWasteMap هنا للأعلى عشان الـ rows تقدر تعتمد عليها في الفلترة
+  const allowedWasteMap = useMemo(() => {
+    const map = new Map<string, number>();
+
+    function walk(mealId: any, multiplier: number, visited: Set<string>) {
+      const mealStrId = String(mealId);
+      if (visited.has(mealStrId)) return;
+      visited.add(mealStrId);
+
+      const meal = db.meals.find((m: any) => String(m.id) === mealStrId);
+      if (!meal) return;
+      if (!meal.ingredients) return;
+
+      for (const ing of meal.ingredients) {
+        if (ing.refKind === "meal") {
+          // بما إن qty رقم، هنستخدمه مباشرة ونحط 1 كقيمة افتراضية لو مش موجود
+          const ingQty = ing.qty ?? 1;
+          walk(ing.itemId, multiplier * ingQty, new Set(visited));
+        } else {
+          // بما إن errorMargin رقم أو undefined، هناخده مباشرة بـ clamp0
+          const grams = clamp0(ing.errorMargin || 0) * multiplier;
+          if (grams > 0) {
+            const itemStrId = String(ing.itemId);
+            map.set(itemStrId, (map.get(itemStrId) || 0) + grams);
+          }
+        }
+      }
+    }
+
+    for (const s of db.sales) {
+      if (!s.date) continue;
+
+      // 🌟 السطر السحري: تحويل تاريخ الفاتورة أياً كان شكله (ISO أو طابع زمني) إلى صيغة YYYY-MM-DD النظيفة
+      const cleanSaleDate = new Date(s.date).toLocaleDateString("en-CA");
+
+      // المقارنة الآن أصبحت آمنة 100% ومقاومة لفرق التوقيت
+      if (cleanSaleDate !== date) continue;
+
+      if (!s.lines) continue;
+
+      for (const ln of s.lines) {
+        const q = clamp0(ln.qty);
+        if (q <= 0) continue;
+
+        const meal = db.meals.find(
+          (m: any) => String(m.id) === String(ln.mealId),
+        );
+        if (meal && meal.department === dept) {
+          walk(ln.mealId, q, new Set());
+        }
+      }
+    }
+    return map;
+  }, [db.sales, db.meals, date, dept]);
+  // 2. تحديث الفلتر ليظهر الأصناف اللي ليها رصيد أو حصل عليها مبيعات وهدر اليوم
   const rows = useMemo(
     () =>
       db.items
@@ -1679,40 +1832,11 @@ function AuditView() {
           item: it,
           expected: clamp0(db.deptStock[deptKey(dept, it.id)] || 0),
         }))
-        .filter((r) => r.expected > 0),
-    [db.items, db.deptStock, dept],
+        .filter(
+          (r) => r.expected > 0 || (allowedWasteMap.get(r.item.id) || 0) > 0,
+        ),
+    [db.items, db.deptStock, dept, allowedWasteMap],
   );
-
-  // Per-ingredient allowed waste in GRAMS, derived ONLY from items inside meals actually sold today
-  // for this department. Formula: allowed[itemId] = Σ (saleQty * ingredient.errorMargin) across all
-  // sold meals' recipes (recursive through sub-meals, scaled by sub-meal qty multiplier).
-  const allowedWasteMap = useMemo(() => {
-    const map = new Map<string, number>();
-    function walk(mealId: string, multiplier: number, visited: Set<string>) {
-      if (visited.has(mealId)) return;
-      visited.add(mealId);
-      const meal = db.meals.find((m) => m.id === mealId);
-      if (!meal) return;
-      for (const ing of meal.ingredients) {
-        if (ing.refKind === "meal") {
-          walk(ing.itemId, multiplier * (ing.qty || 1), new Set(visited));
-        } else {
-          const grams = clamp0(ing.errorMargin || 0) * multiplier;
-          if (grams > 0)
-            map.set(ing.itemId, (map.get(ing.itemId) || 0) + grams);
-        }
-      }
-    }
-    for (const s of db.sales) {
-      if (s.date !== date || s.department !== dept) continue;
-      for (const ln of s.lines) {
-        const q = clamp0(ln.qty);
-        if (q <= 0) continue;
-        walk(ln.mealId, q, new Set());
-      }
-    }
-    return map;
-  }, [db.sales, db.meals, date, dept]);
 
   const soldCount = useMemo(() => {
     let n = 0;
@@ -1723,42 +1847,87 @@ function AuditView() {
     return n;
   }, [db.sales, date, dept]);
 
+  // 3. تحديث الفانكشن عشان تدعم لو الصنف نفسه بيتخزن بالجرام أو الملي في المخزن الرئيسي
   // Convert allowed grams → allowed in inventory units (only meaningful for weight/volume items).
   function allowedInInvUnits(unit: string, grams: number): number {
     if (unit === "كيلوجرام" || unit === "لتر") return grams / 1000;
-    return 0; // pieces/packs: no gram-based waste allowance
+    // لازم نضيف السطر ده عشان الهدر يتخصم لو الوحدة جرام أو مللي
+    if (unit === "جرام" || unit === "جم" || unit === "مللي" || unit === "مل")
+      return grams;
+    return 0;
   }
 
+  // 4. حل مشكلة الـ Empty String عند مسح الخانة وحساب العجز بدقة
   const { shortageValue, totalAllowedValue } = useMemo(() => {
     let sv = 0;
     let av = 0;
+
     for (const r of rows) {
-      const actual = clamp0(actuals[r.item.id] ?? r.expected.toString());
-      if (actual > r.expected) continue;
+      const inputVal = actuals[r.item.id];
+      const actual =
+        inputVal === undefined || inputVal === ""
+          ? r.expected
+          : clamp0(inputVal);
+
+      // إذا كان الفعلي أكبر من المتوقع، مفيش عجز
+      if (actual >= r.expected) continue;
+
+      // 1. العجز الخام بالكمية (مثلاً: 8.40 كيس)
       const rawShort = r.expected - actual;
-      if (rawShort <= 0) continue;
+
+      // 2. حساب قيمة العجز الإجمالية قبل الخصم (بالجنيه)
+      const totalItemShortageMoney = rawShort * r.item.avgPrice;
+
+      // 3. جلب الهدر المسموح بالجرام من المبيعات (مثلاً: 114 جرام)
       const allowedG = allowedWasteMap.get(r.item.id) || 0;
-      const allowedUnits = Math.min(
-        allowedInInvUnits(r.item.unit, allowedG),
-        rawShort,
+
+      // 4. تحويل الهدر المسموح لقيمة مالية (تمن الـ 114 جرام دول كام جنيه؟)
+      // بنقسم على 1000 لو الصنف بالكيلو/اللتر/الكيس عشان نجيب سعر الجرام الواحد ونضربه في كمية الهدر
+      const unitClean = String(r.item.unit || "")
+        .trim()
+        .toLowerCase();
+      const isBigUnit =
+        unitClean.includes("كيلو") ||
+        unitClean.includes("كجم") ||
+        unitClean.includes("لتر") ||
+        unitClean.includes("كيس") ||
+        unitClean.includes("kg") ||
+        unitClean.includes("l");
+
+      const allowedPricePerGram = isBigUnit
+        ? r.item.avgPrice / 1000
+        : r.item.avgPrice;
+      const allowedMoneyValue = allowedG * allowedPricePerGram;
+
+      // 5. الطرح المباشر والصافي اللي أنت عايزه (قيمة العجز بالفلوس - قيمة الهدر بالفلوس)
+      const finalItemShortageMoney = Math.max(
+        0,
+        totalItemShortageMoney - allowedMoneyValue,
       );
-      const effShort = Math.max(0, rawShort - allowedUnits);
-      sv += effShort * r.item.avgPrice;
-      av += allowedUnits * r.item.avgPrice;
+
+      // تجميع الإجماليات للسيستم تحت
+      sv += finalItemShortageMoney; // العجز الصافي بالفلوس
+      av += Math.min(allowedMoneyValue, totalItemShortageMoney); // المسموح المخصوم بالفلوس
     }
+
     return { shortageValue: sv, totalAllowedValue: av };
   }, [actuals, rows, allowedWasteMap]);
 
   const penalty = Math.max(0, shortageValue);
 
+  // 5. تعديل بناء الجرد ليتناسب مع الإصلاحات السابقة وعدم تزييف الزيادات (Surplus)
   function buildAudit(): AuditEntry {
     const auditRows = rows.map((r) => {
-      let actual = clamp0(actuals[r.item.id] ?? r.expected.toString());
-      if (actual > r.expected) actual = r.expected;
+      const inputVal = actuals[r.item.id];
+      const actual =
+        inputVal === undefined || inputVal === ""
+          ? r.expected
+          : clamp0(inputVal);
+
       return {
         itemId: r.item.id,
         expected: r.expected,
-        actual,
+        actual, // تم إلغاء السقف الافتراضي هنا عشان لو فيه زيادة تتسجل في الـ الرو صح والمخزن يتعدل بها
         match: actual === r.expected,
       };
     });
@@ -1773,21 +1942,33 @@ function AuditView() {
     };
   }
 
-  function doSave(audit: AuditEntry, overwrite: boolean) {
-    const res = addAudit(audit, { overwrite, deduct: true });
-    if (!res.ok) {
-      if (res.error === "duplicate") {
-        setPendingOverwrite(audit);
+  // ضفنا كلمة async هنا
+  async function doSave(audit: AuditEntry, overwrite: boolean) {
+    try {
+      // ضفنا كلمة await هنا عشان نستنى الرد الفعلي من السيرفر
+      const res = await addAudit(audit, { overwrite, deduct: true });
+
+      if (!res.ok) {
+        if (res.error === "duplicate") {
+          setPendingOverwrite(audit);
+          return;
+        }
+        // لو فيه خطأ تاني جاي من السيرفر يظهر للمستخدم
+        toast.error(res.error || "حدث خطأ أثناء حفظ الجرد");
         return;
       }
+
+      toast.success("تم حفظ الجرد وخصم العجز من المخزون");
+      setActuals({});
+      setPrintReceipt(audit);
+      setTimeout(() => {
+        window.print();
+        setTimeout(() => setPrintReceipt(null), 500);
+      }, 150);
+    } catch (err) {
+      console.error(err);
+      toast.error("فشل الاتصال بالسيرفر لحفظ الجرد");
     }
-    toast.success("تم حفظ الجرد وخصم العجز من المخزون");
-    setActuals({});
-    setPrintReceipt(audit);
-    setTimeout(() => {
-      window.print();
-      setTimeout(() => setPrintReceipt(null), 500);
-    }, 150);
   }
 
   function saveNew() {
@@ -1806,7 +1987,6 @@ function AuditView() {
       setTimeout(() => setPrintChecklist(false), 500);
     }, 100);
   }
-
   return (
     <div className="space-y-4">
       <div className="no-print bg-card border border-border rounded-xl p-4 flex flex-wrap items-end gap-3">
@@ -1970,27 +2150,37 @@ function AuditView() {
               </tbody>
             </table>
           </div>
-          <div className="flex flex-wrap items-center gap-4 border-t border-border pt-3 text-sm">
+          <div className="flex flex-wrap items-center gap-6 border-t border-border pt-4 text-sm">
             <div>
-              قيمة العجز (بعد خصم الهدر المسموح):{" "}
-              <strong className="text-destructive">
+              العجز الصافي:{" "}
+              <strong className="text-destructive font-bold text-base">
                 {fmt2(shortageValue)} ج.م
               </strong>
             </div>
+
             <div>
-              الأصناف المباعة اليوم: <strong>{soldCount}</strong> • قيمة الهدر
-              المسموح المُحتسبة: <strong>{fmt2(totalAllowedValue)} ج.م</strong>
+              المسموح المخصوم:{" "}
+              <strong className="text-green-600 font-bold text-base">
+                {fmt2(totalAllowedValue)} ج.م
+              </strong>
             </div>
+
+            <div className="text-muted-foreground">
+              مبيعات اليوم:{" "}
+              <strong className="text-foreground">{soldCount} صنف</strong>
+            </div>
+
             {penalty > 0 && (
-              <div className="px-3 py-1.5 rounded-md bg-destructive/10 text-destructive font-bold">
-                هذا القسم يتحمل غرامة قدرها {fmt2(penalty)} جنيه
+              <div className="px-3 py-1.5 rounded-md bg-destructive/10 text-destructive font-bold border border-destructive/20 animate-pulse">
+                ⚠️ الغرامة المطلوبة: {fmt2(penalty)} ج.م
               </div>
             )}
+
             <button
               onClick={saveNew}
-              className="ms-auto h-10 px-4 rounded-md bg-primary text-primary-foreground text-sm font-medium flex items-center gap-2"
+              className="ms-auto h-10 px-5 rounded-md bg-primary hover:bg-primary/95 text-primary-foreground text-sm font-semibold flex items-center gap-2 transition-colors shadow-sm"
             >
-              <Save className="w-4 h-4" /> حفظ الجرد وخصم العجز
+              <Save className="w-4 h-4" /> ترحيل وحفظ الجرد
             </button>
           </div>
         </div>

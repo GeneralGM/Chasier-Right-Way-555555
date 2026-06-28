@@ -943,11 +943,13 @@ export function useDB() {
   }, []);
 
   const addSale = useCallback(
-    (
+    async (
       date: string,
       department: SubDept,
       lines: SaleLine[],
-    ): { ok: true; sale: SaleEntry } | { ok: false; error: string } => {
+    ): Promise<
+      { ok: true; sale: SaleEntry } | { ok: false; error: string }
+    > => {
       const cur = load();
       const deductions = new Map<string, number>();
       let totalSales = 0;
@@ -982,10 +984,8 @@ export function useDB() {
           };
         }
       }
-      for (const [itemId, qty] of deductions) {
-        const k = deptKey(department, itemId);
-        cur.deptStock[k] = round2(clamp0((cur.deptStock[k] || 0) - qty));
-      }
+
+      // تجهيز بيانات البيع
       const sale: SaleEntry = {
         id: crypto.randomUUID(),
         date,
@@ -995,23 +995,75 @@ export function useDB() {
         totalCost: round2(clamp0(totalCost)),
         createdAt: Date.now(),
       };
+
+      // 1. ترحيل البيانات للسيرفر أولاً للتأكد من حفظها في الداتا بيس
+      try {
+        const response = await fetch("http://localhost:5000/api/sales", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sale),
+        });
+
+        if (!response.ok) {
+          return {
+            ok: false,
+            error: "فشل تسجيل المبيعات في خادم قاعدة البيانات",
+          };
+        }
+      } catch (err) {
+        console.error("❌ فشل الاتصال بالسيرفر لحفظ البيع:", err);
+        return {
+          ok: false,
+          error: "خطأ في الاتصال بالسيرفر، لم يتم حفظ العملية.",
+        };
+      }
+
+      // 2. تحديث المخزون المحلي والـ Local Storage بعد نجاح حفظ السيرفر
+      for (const [itemId, qty] of deductions) {
+        const k = deptKey(department, itemId);
+        cur.deptStock[k] = round2(clamp0((cur.deptStock[k] || 0) - qty));
+      }
+
       cur.sales.unshift(sale);
       save(cur);
+      setDb(cur); // تحديث الـ React State لو موجودة
+
       return { ok: true, sale };
     },
     [],
   );
 
   const addAudit = useCallback(
-    (
+    async (
       audit: AuditEntry,
       opts: { overwrite?: boolean; deduct?: boolean } = {},
-    ): { ok: true; audit: AuditEntry } | { ok: false; error: "duplicate" } => {
+    ): Promise<
+      | { ok: true; audit: AuditEntry }
+      | { ok: false; error: "duplicate" | string }
+    > => {
       const cur = load();
       const prior = cur.audits.find(
         (a) => a.date === audit.date && a.department === audit.department,
       );
       if (prior && !opts.overwrite) return { ok: false, error: "duplicate" };
+
+      // 1. ترحيل الجرد للسيرفر ليتم حفظه أو تحديثه بناءً على الـ ON CONFLICT في الباك إند
+      try {
+        const response = await fetch("http://localhost:5000/api/audits", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(audit),
+        });
+
+        if (!response.ok) {
+          return { ok: false, error: "فشل حفظ الجرد في قاعدة البيانات" };
+        }
+      } catch (err) {
+        console.error("❌ فشل الاتصال بالسيرفر لحفظ الجرد:", err);
+        return { ok: false, error: "خطأ في الاتصال بالسيرفر" };
+      }
+
+      // 2. التعامل المحلي مع الـ Overwrite وإرجاع الكميات المخصومة سابقاً
       if (prior) {
         for (const r of prior.rows) {
           if (r.expected > r.actual) {
@@ -1023,6 +1075,8 @@ export function useDB() {
         }
         cur.audits = cur.audits.filter((a) => a.id !== prior.id);
       }
+
+      // 3. تطبيق الخصم الجديد محلياً لو خيار الـ deduct مفعّل
       if (opts.deduct) {
         for (const r of audit.rows) {
           if (r.expected > r.actual) {
@@ -1033,8 +1087,11 @@ export function useDB() {
           }
         }
       }
+
       cur.audits.unshift(audit);
       save(cur);
+      setDb(cur); // تحديث الـ React State لو موجودة
+
       return { ok: true, audit };
     },
     [],
@@ -1046,7 +1103,7 @@ export function useDB() {
       const cur = load();
       const safeQty = Math.max(0, newQty); // التأكد إن الكمية مش بالسالب
 
-      // 🔥 التعديل الثاني: تجهيز المفتاح بنفس طريقتك القياسية (مطبخ_123)
+      // تجهيز المفتاح القياسي (مطبخ_123)
       const key = deptKey(dept, itemId);
 
       // 3. تحديث الكمية في الكاش المحلي والـ Local Storage فوراً
@@ -1054,7 +1111,7 @@ export function useDB() {
       save(cur);
       setDb(cur);
 
-      // 🔥 التعديل الثالث: هنجيب اسم الصنف عشان نبعته للسيرفر بناءً على كود الباك إند
+      // جلب اسم الصنف لإرساله للسيرفر
       const itemName =
         cur.items.find((i) => i.id === itemId)?.name || "غير محدد";
 

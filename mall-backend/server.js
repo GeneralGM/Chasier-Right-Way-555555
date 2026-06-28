@@ -5,6 +5,7 @@ import pg from "pg";
 const { Pool } = pg;
 import dotenv from "dotenv";
 import crypto from "crypto";
+// require("dotenv").config();
 
 dotenv.config();
 
@@ -377,12 +378,10 @@ app.post("/api/inventory", async (req, res) => {
     const result = await pool.query(query, values);
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res
-      .status(500)
-      .json({
-        error: "حدث خطأ أثناء إضافة الصنف للداتابيز",
-        details: err.message,
-      });
+    res.status(500).json({
+      error: "حدث خطأ أثناء إضافة الصنف للداتابيز",
+      details: err.message,
+    });
   }
 });
 
@@ -562,11 +561,13 @@ app.delete("/api/meals/:id", async (req, res) => {
 app.get("/api/sales", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT * FROM sales ORDER BY created_at DESC",
+      "SELECT id, date::text, department, lines, total_sales, total_cost, created_at FROM sales ORDER BY created_at DESC",
     );
+
     const formattedSales = result.rows.map((row) => ({
       id: row.id,
-      date: new Date(row.date).toISOString().slice(0, 10),
+      // 🌟 السحر هنا: date::text خلت التاريخ ييجي '2026-06-28' نص صريح ومستحيل يتغير بسبب التوقيت
+      date: row.date,
       department: row.department,
       lines: typeof row.lines === "string" ? JSON.parse(row.lines) : row.lines,
       totalSales: Number(row.total_sales),
@@ -575,6 +576,7 @@ app.get("/api/sales", async (req, res) => {
     }));
     res.json(formattedSales);
   } catch (err) {
+    console.error("🚨 خطأ في جلب المبيعات:", err.message);
     res.status(500).json({ error: "حدث خطأ في جلب المبيعات" });
   }
 });
@@ -606,7 +608,7 @@ app.post("/api/sales", async (req, res) => {
   }
 });
 
-// --- مسارات الجرد الجديدة (Audits) عشان تسمّع من الفرونت إند ---
+// --- مسار الجرد (Audits) ---
 app.post("/api/audits", async (req, res) => {
   const { id, date, department, rows, shortageValue, penaltyValue, createdAt } =
     req.body;
@@ -614,8 +616,12 @@ app.post("/api/audits", async (req, res) => {
     const query = `
       INSERT INTO audits (id, date, department, rows, shortage_value, penalty_value, created_at)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
-      ON CONFLICT (date, department) DO UPDATE SET
-        rows = EXCLUDED.rows, shortage_value = EXCLUDED.shortage_value, penalty_value = EXCLUDED.penalty_value
+      ON CONFLICT (date, department) 
+      DO UPDATE SET 
+        rows = EXCLUDED.rows,
+        shortage_value = EXCLUDED.shortage_value,
+        penalty_value = EXCLUDED.penalty_value,
+        created_at = EXCLUDED.created_at;
     `;
     await pool.query(query, [
       id,
@@ -626,23 +632,12 @@ app.post("/api/audits", async (req, res) => {
       penaltyValue,
       new Date(createdAt),
     ]);
-    res.json({ success: true, message: "تم حفظ الجرد بنجاح" });
+    res.status(201).json({ success: true, message: "تم تسجيل الجرد بنجاح" });
   } catch (err) {
-    res
-      .status(500)
-      .json({ error: "خطأ في حفظ الجرد السيرفر", details: err.message });
+    console.error("🚨 خطأ في تسجيل الجرد:", err.message);
+    res.status(500).json({ error: "خطأ في السيرفر" });
   }
 });
-
-app.get("/api/audits", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM audits ORDER BY date DESC");
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: "خطأ في جلب بيانات الجرد" });
-  }
-});
-
 const PORT = 5000;
 app.listen(PORT, () => {
   console.log(`🔥 السيرفر شغال زي الفل على بورت ${PORT}`);

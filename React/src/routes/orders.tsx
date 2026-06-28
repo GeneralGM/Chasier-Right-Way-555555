@@ -970,23 +970,23 @@ function OrderEntryDialog({
     upsertOrder({ ...order, items: [...order.items, line], state: "active" });
   }
 
-  const getMaxQty = (meal: any, db: any) => {
-    // 1. حدد القسم اللي الوجبة دي بتطلع منه (مثلاً "بار")
+  const getMaxQty = (meal: any, db: any, currentQty: number = 0) => {
     const department = meal.department;
 
-    // 2. احسب لكل مكون أقصى كمية نقدر ننتجها
     const limits = meal.ingredients.map((ing: any) => {
-      // نجيب الرصيد من الـ deptStock
-      // المفتاح في الـ deptStock عبارة عن "القسم::الـ ID بتاع المكون"
       const stockKey = `${department}::${ing.itemId}`;
-      const availableStock = db.deptStock[stockKey] || 0; // الرصيد المتاح بالكيلو
 
-      // نحول الرصيد لـ "جرام" عشان نقسمه على الكمية المطلوبة بالجرام
-      // (الرصيد بالكيلو * 1000) / الكمية المطلوبة بالجرام
+      // الرصيد الحالي في المخزن
+      const stockInDb = db.deptStock[stockKey] || 0;
+
+      // 💡 السر هنا: بنرجع الكمية اللي الوجبة دي سحباها حالياً للمخزن "حسابياً فقط"
+      // عشان نعرف الإجمالي الحقيقي المتاح للوجبة دي من البداية
+      const currentIngWeightInKg = (currentQty * ing.qty) / 1000;
+      const availableStock = stockInDb + currentIngWeightInKg;
+
       return Math.floor((availableStock * 1000) / ing.qty);
     });
 
-    // 3. أقل رقم هو ده اللي يحدد أقصى عدد وجبات نقدر نطلعه
     return Math.min(...limits);
   };
 
@@ -1567,7 +1567,7 @@ function OrderEntryDialog({
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => changeQty(l.id, l.qty - 1)}
-                          className="w-6 h-6 rounded bg-secondary"
+                          className="w-9 h-9 rounded bg-secondary"
                         >
                           -
                         </button>
@@ -1586,11 +1586,12 @@ function OrderEntryDialog({
                             const clampedValue = Math.min(val, maxQty);
                             changeQty(l.id, clampedValue);
                           }}
+                          readOnly
                         />
 
                         <button
                           onClick={() => changeQty(l.id, l.qty + 1)}
-                          className="w-6 h-6 rounded bg-secondary"
+                          className="w-9 h-9 rounded bg-secondary"
                         >
                           +
                         </button>
@@ -2074,6 +2075,9 @@ function PrintDialog({
           }
           setPinOpen(false);
           setPendingDiscount(null);
+        }}
+        onCancel={function (): void {
+          throw new Error("Function not implemented.");
         }}
       />
     </>

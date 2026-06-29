@@ -1858,60 +1858,67 @@ function AuditView() {
   }
 
   // 4. حل مشكلة الـ Empty String عند مسح الخانة وحساب العجز بدقة
-  const { shortageValue, totalAllowedValue } = useMemo(() => {
-    let sv = 0;
-    let av = 0;
+  const { shortageValue, totalAllowedValue, totalItemShortageMoney } =
+    useMemo(() => {
+      let sv = 0;
+      let av = 0;
+      let rv = 0;
 
-    for (const r of rows) {
-      const inputVal = actuals[r.item.id];
-      const actual =
-        inputVal === undefined || inputVal === ""
-          ? r.expected
-          : clamp0(inputVal);
+      for (const r of rows) {
+        const inputVal = actuals[r.item.id];
+        const actual =
+          inputVal === undefined || inputVal === ""
+            ? r.expected
+            : clamp0(inputVal);
 
-      // إذا كان الفعلي أكبر من المتوقع، مفيش عجز
-      if (actual >= r.expected) continue;
+        // إذا كان الفعلي أكبر من المتوقع، مفيش عجز
+        if (actual >= r.expected) continue;
 
-      // 1. العجز الخام بالكمية (مثلاً: 8.40 كيس)
-      const rawShort = r.expected - actual;
+        // 1. العجز الخام بالكمية (مثلاً: 8.40 كيس)
+        const rawShort = r.expected - actual;
 
-      // 2. حساب قيمة العجز الإجمالية قبل الخصم (بالجنيه)
-      const totalItemShortageMoney = rawShort * r.item.avgPrice;
+        // 2. حساب قيمة العجز الإجمالية قبل الخصم (بالجنيه)
+        const totalItemShortageMoney = rawShort * r.item.avgPrice;
 
-      // 3. جلب الهدر المسموح بالجرام من المبيعات (مثلاً: 114 جرام)
-      const allowedG = allowedWasteMap.get(r.item.id) || 0;
+        // 3. جلب الهدر المسموح بالجرام من المبيعات (مثلاً: 114 جرام)
+        const allowedG = allowedWasteMap.get(r.item.id) || 0;
 
-      // 4. تحويل الهدر المسموح لقيمة مالية (تمن الـ 114 جرام دول كام جنيه؟)
-      // بنقسم على 1000 لو الصنف بالكيلو/اللتر/الكيس عشان نجيب سعر الجرام الواحد ونضربه في كمية الهدر
-      const unitClean = String(r.item.unit || "")
-        .trim()
-        .toLowerCase();
-      const isBigUnit =
-        unitClean.includes("كيلو") ||
-        unitClean.includes("كجم") ||
-        unitClean.includes("لتر") ||
-        unitClean.includes("كيس") ||
-        unitClean.includes("kg") ||
-        unitClean.includes("l");
+        // 4. تحويل الهدر المسموح لقيمة مالية (تمن الـ 114 جرام دول كام جنيه؟)
+        // بنقسم على 1000 لو الصنف بالكيلو/اللتر/الكيس عشان نجيب سعر الجرام الواحد ونضربه في كمية الهدر
+        const unitClean = String(r.item.unit || "")
+          .trim()
+          .toLowerCase();
+        const isBigUnit =
+          unitClean.includes("كيلو") ||
+          unitClean.includes("كجم") ||
+          unitClean.includes("لتر") ||
+          unitClean.includes("كيس") ||
+          unitClean.includes("kg") ||
+          unitClean.includes("l");
 
-      const allowedPricePerGram = isBigUnit
-        ? r.item.avgPrice / 1000
-        : r.item.avgPrice;
-      const allowedMoneyValue = allowedG * allowedPricePerGram;
+        const allowedPricePerGram = isBigUnit
+          ? r.item.avgPrice / 1000
+          : r.item.avgPrice;
+        const allowedMoneyValue = allowedG * allowedPricePerGram;
 
-      // 5. الطرح المباشر والصافي اللي أنت عايزه (قيمة العجز بالفلوس - قيمة الهدر بالفلوس)
-      const finalItemShortageMoney = Math.max(
-        0,
-        totalItemShortageMoney - allowedMoneyValue,
-      );
+        // 5. الطرح المباشر والصافي اللي أنت عايزه (قيمة العجز بالفلوس - قيمة الهدر بالفلوس)
+        const finalItemShortageMoney = Math.max(
+          0,
+          totalItemShortageMoney - allowedMoneyValue,
+        );
 
-      // تجميع الإجماليات للسيستم تحت
-      sv += finalItemShortageMoney; // العجز الصافي بالفلوس
-      av += Math.min(allowedMoneyValue, totalItemShortageMoney); // المسموح المخصوم بالفلوس
-    }
+        // تجميع الإجماليات للسيستم تحت
+        rv += totalItemShortageMoney; // العجز الاصلي باقرب رقم عشري
+        sv += finalItemShortageMoney; // العجز الصافي بالفلوس
+        av += Math.min(allowedMoneyValue, totalItemShortageMoney); // المسموح المخصوم بالفلوس
+      }
 
-    return { shortageValue: sv, totalAllowedValue: av };
-  }, [actuals, rows, allowedWasteMap]);
+      return {
+        shortageValue: sv,
+        totalAllowedValue: av,
+        totalItemShortageMoney: rv,
+      };
+    }, [actuals, rows, allowedWasteMap]);
 
   const penalty = Math.max(0, shortageValue);
 
@@ -2152,14 +2159,14 @@ function AuditView() {
           </div>
           <div className="flex flex-wrap items-center gap-6 border-t border-border pt-4 text-sm">
             <div>
-              العجز الصافي:{" "}
+              العجز الكلي:{" "}
               <strong className="text-destructive font-bold text-base">
-                {fmt2(shortageValue)} ج.م
+                {fmt2(totalItemShortageMoney)} ج.م
               </strong>
             </div>
 
             <div>
-              المسموح المخصوم:{" "}
+              مسموح ب:{" "}
               <strong className="text-green-600 font-bold text-base">
                 {fmt2(totalAllowedValue)} ج.م
               </strong>

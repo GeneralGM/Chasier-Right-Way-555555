@@ -632,8 +632,15 @@ app.post("/api/sales", async (req, res) => {
 app.post("/api/audits", async (req, res) => {
   const { id, date, department, rows, shortageValue, penaltyValue, createdAt } =
     req.body;
+
+  // هنستخدم Transaction عشان نضمن إن حفظ الجرد وتحديث المخزن بيتموا مع بعض
+  const client = await pool.connect();
+
   try {
-    const query = `
+    await client.query("BEGIN"); // بداية العملية
+
+    // 1. تسجيل الجرد في جدول audits (نفس كودك الأصلي)
+    const auditQuery = `
       INSERT INTO audits (id, date, department, rows, shortage_value, penalty_value, created_at)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
       ON CONFLICT (date, department) 
@@ -643,7 +650,7 @@ app.post("/api/audits", async (req, res) => {
         penalty_value = EXCLUDED.penalty_value,
         created_at = EXCLUDED.created_at;
     `;
-    await pool.query(query, [
+    await client.query(auditQuery, [
       id,
       date,
       department,
@@ -652,12 +659,55 @@ app.post("/api/audits", async (req, res) => {
       penaltyValue,
       new Date(createdAt),
     ]);
-    res.status(201).json({ success: true, message: "تم تسجيل الجرد بنجاح" });
+
+    // 2. السحر هنا: تحديث المخازن الفرعية بالكميات الفعلية
+    for (const item of rows) {
+      // item.actual هي الكمية اللي اليوزر دخلها بإيده في الجرد
+      const updateStockQuery = `
+        UPDATE department_stock 
+        SET qty = $1 
+        WHERE item_id = $2 AND department = $3;
+      `;
+      await client.query(updateStockQuery, [
+        item.actual,
+        item.itemId,
+        department,
+      ]);
+    }
+
+    await client.query("COMMIT"); // تأكيد حفظ كل التعديلات
+    res
+      .status(201)
+      .json({ success: true, message: "تم تسجيل الجرد وتحديث المخازن بنجاح" });
   } catch (err) {
-    console.error("🚨 خطأ في تسجيل الجرد:", err.message);
-    res.status(500).json({ error: "خطأ في السيرفر" });
+    await client.query("ROLLBACK"); // لو حصل أي مشكلة، ارجع في كل حاجة
+    console.error("🚨 خطأ في تسجيل الجرد وتحديث المخزن:", err.message);
+    res.status(500).json({ error: "خطأ في السيرفر أثناء معالجة الجرد" });
+  } finally {
+    client.release(); // لازم نقفل الاتصال
   }
 });
+app.get("/api/audits", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM audits ORDER BY created_at DESC",
+    );
+    const formattedAudits = result.rows.map((row) => ({
+      id: row.id,
+      date: row.date,
+      department: row.department,
+      rows: typeof row.rows === "string" ? JSON.parse(row.rows) : row.rows,
+      shortageValue: Number(row.shortage_value) || 0,
+      penaltyValue: Number(row.penalty_value) || 0,
+      createdAt: new Date(row.created_at).getTime(),
+    }));
+    res.json(formattedAudits);
+  } catch (err) {
+    console.error("🚨 خطأ في جلب الجرد:", err.message);
+    res.status(500).json({ error: "حدث خطأ أثناء جلب الجرد" });
+  }
+});
+/////////////////////////////////////////////////
 const PORT = 5000;
 app.listen(PORT, () => {
   console.log(`🔥 السيرفر شغال زي الفل على بورت ${PORT}`);

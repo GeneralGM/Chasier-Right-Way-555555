@@ -1530,13 +1530,18 @@ function OrderEntryDialog({
           </div>
 
           {/* Right: cart */}
-          <div className="w-80 flex flex-col bg-secondary/30">
-            <div className="p-3 border-b border-border">
-              <h3 className="font-bold">السلة ({order.items.length})</h3>
+          <div className="w-80 flex flex-col bg-secondary/30 h-full overflow-hidden">
+            {/* الهيدر: ثابت */}
+            <div className="p-3 border-b border-border shrink-0">
+              <h3 className="font-bold text-sm">
+                السلة ({order.items.length})
+              </h3>
             </div>
-            <div className="flex-1 overflow-auto p-2 space-y-2">
+
+            {/* منطقة المنتجات: فيها السكرول وصغرنا المسافات */}
+            <div className="flex-1 overflow-y-auto min-h-0 max-h-[360px] p-2 space-y-1.5">
               {order.items.length === 0 ? (
-                <p className="text-center text-muted-foreground text-sm p-6">
+                <p className="text-center text-muted-foreground text-xs p-6">
                   السلة فارغة — اختر صنف للإضافة.
                 </p>
               ) : (
@@ -1546,28 +1551,30 @@ function OrderEntryDialog({
                   return (
                     <div
                       key={l.id}
-                      className="bg-card border border-border rounded-lg p-2 text-sm"
+                      // صغرنا البادينج وحجم الخط هنا
+                      className="bg-card border border-border rounded-md p-1.5 text-xs shadow-sm"
                     >
-                      <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start justify-between gap-1.5">
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate">{l.name}</div>
                           {l.modifiersSummary && (
-                            <div className="text-[10px] text-muted-foreground">
+                            <div className="text-[10px] text-muted-foreground mt-0.5">
                               {l.modifiersSummary}
                             </div>
                           )}
                         </div>
                         <button
                           onClick={() => removeLine(l.id)}
-                          className="text-destructive p-1"
+                          className="text-destructive hover:bg-destructive/10 p-1 rounded transition-colors"
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      <div className="flex items-center gap-1">
+
+                      <div className="flex items-center gap-1 mt-2">
                         <button
                           onClick={() => changeQty(l.id, l.qty - 1)}
-                          className="w-9 h-9 rounded bg-secondary"
+                          className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
                         >
                           -
                         </button>
@@ -1575,7 +1582,7 @@ function OrderEntryDialog({
                         <input
                           type="number"
                           value={l.qty}
-                          className="w-12 text-center border rounded"
+                          className="w-10 h-7 text-center text-xs border rounded bg-background"
                           onChange={(e) => {
                             const val = parseFloat(e.target.value) || 0;
                             const meal = db.meals.find(
@@ -1591,7 +1598,7 @@ function OrderEntryDialog({
 
                         <button
                           onClick={() => changeQty(l.id, l.qty + 1)}
-                          className="w-9 h-9 rounded bg-secondary"
+                          className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
                         >
                           +
                         </button>
@@ -1601,7 +1608,9 @@ function OrderEntryDialog({
                 })
               )}
             </div>
-            <div className="p-3 border-t border-border space-y-1 text-sm">
+
+            {/* منطقة الإجمالي: ثابتة تحت */}
+            <div className="p-3 border-t border-border space-y-1 text-xs shrink-0 bg-background/50">
               <Row label="المجموع" value={fmt2(totals.subtotal)} />
               <Row
                 label={`الخصم (${order.discountPct}%)`}
@@ -1613,10 +1622,12 @@ function OrderEntryDialog({
               />
               <Row label="الإجمالي" value={fmt2(totals.total)} bold />
             </div>
-            <DialogFooter className="p-3 border-t border-border">
+
+            {/* الفوتر وزرار الحفظ: ثابت */}
+            <DialogFooter className="p-3 border-t border-border shrink-0">
               <Button
                 onClick={() => handleSaveAndDeduct(order.tableCode)}
-                className={`w-full ${order.zone === "takeaway" ? "bg-green-600 hover:bg-green-700 text-white" : ""}`}
+                className={`w-full text-sm h-10 ${order.zone === "takeaway" ? "bg-green-600 hover:bg-green-700 text-white" : ""}`}
               >
                 {order.zone === "takeaway"
                   ? "ضرب الأوردر وإنهاء الفاتورة"

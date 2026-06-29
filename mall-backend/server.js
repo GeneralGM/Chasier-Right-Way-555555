@@ -208,6 +208,8 @@ app.get("/api/invoices", async (req, res) => {
 
 // --- مسارات الورديات (Shifts) ---
 
+// --- مسارات الورديات المعدلة بالكامل لتتوافق مع الـ bigint ---
+
 app.post("/api/shifts", async (req, res) => {
   const {
     cashierId,
@@ -225,12 +227,20 @@ app.post("/api/shifts", async (req, res) => {
   } = req.body;
 
   try {
+    const safeCashierId = String(cashierId || "0");
+    const safeCashierName = String(cashierName || "كاشير غير معروف");
+
+    // إجبار التواريخ تتخزن كأرقام بملي الثواني (تطابق الـ bigint عندك في الداتابيز)
+    const finalOpenedAt = openedAt ? Number(openedAt) : Date.now();
+    const finalClosedAt = closedAt ? Number(closedAt) : Date.now();
+
     const totalRevenue =
       (Number(kitchenSales) || 0) +
       (Number(barSales) || 0) +
       (Number(shishaSales) || 0) +
       (Number(taxValue) || 0) -
       (Number(discountValue) || 0);
+
     const query = `
       INSERT INTO shifts (
         id, cashier_id, cashier_name, opened_at, closed_at, kitchen_sales, bar_sales, 
@@ -238,27 +248,34 @@ app.post("/api/shifts", async (req, res) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING *
     `;
+
     const result = await pool.query(query, [
       crypto.randomUUID(),
-      cashierId,
-      cashierName,
-      openedAt ? new Date(Number(openedAt)) : new Date(),
-      closedAt ? new Date(Number(closedAt)) : new Date(),
-      kitchenSales || 0,
-      barSales || 0,
-      shishaSales || 0,
-      taxValue || 0,
-      discountValue || 0,
-      totalRevenue,
-      dineinSales || 0,
-      takeawaySales || 0,
-      deliverySales || 0,
+      safeCashierId,
+      safeCashierName,
+      finalOpenedAt,
+      finalClosedAt,
+      Number(kitchenSales) || 0,
+      Number(barSales) || 0,
+      Number(shishaSales) || 0,
+      Number(taxValue) || 0,
+      Number(discountValue) || 0,
+      Number(totalRevenue) || 0,
+      Number(dineinSales) || 0,
+      Number(takeawaySales) || 0,
+      Number(deliverySales) || 0,
     ]);
-    res.status(201).json(result.rows[0]);
+
+    // نرجع البيانات للفرونت إند بشكل منسق ومفهوم
+    const row = result.rows[0];
+    res.status(201).json({
+      ...row,
+      openedAt: Number(row.opened_at),
+      closedAt: Number(row.closed_at),
+    });
   } catch (err) {
-    res
-      .status(500)
-      .json({ error: "حدث خطأ أثناء حفظ الوردية", details: err.message });
+    console.error("❌ خطأ الداتابيز:", err.message);
+    res.status(500).json({ error: "حدث خطأ أثناء حفظ الوردية" });
   }
 });
 
@@ -267,12 +284,14 @@ app.get("/api/shifts", async (req, res) => {
     const result = await pool.query(
       "SELECT * FROM shifts ORDER BY opened_at DESC",
     );
+
+    // التحويل السحري: بنمسك رقم الـ bigint ونأكد إنه يتحول لرقم عادي في الجافاسكريبت عشان الفرونت إند يشوف التاريخ صح!
     const formattedShifts = result.rows.map((row) => ({
       id: row.id,
-      cashierName: row.cashier_name || row.cashierName,
-      openedAt: row.opened_at ? new Date(row.opened_at).getTime() : Date.now(),
-      closedAt: row.closed_at ? new Date(row.closed_at).getTime() : null,
-      status: row.status,
+      cashierName: row.cashier_name,
+      cashierId: row.cashier_id,
+      openedAt: row.opened_at ? Number(row.opened_at) : Date.now(),
+      closedAt: row.closed_at ? Number(row.closed_at) : null,
       kitchenSales: Number(row.kitchen_sales) || 0,
       barSales: Number(row.bar_sales) || 0,
       shishaSales: Number(row.shisha_sales) || 0,
@@ -283,6 +302,7 @@ app.get("/api/shifts", async (req, res) => {
       takeawaySales: Number(row.takeaway_sales) || 0,
       deliverySales: Number(row.delivery_sales) || 0,
     }));
+
     res.json(formattedShifts);
   } catch (err) {
     res.status(500).json({ error: "حدث خطأ أثناء جلب الورديات" });

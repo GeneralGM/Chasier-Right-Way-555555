@@ -161,10 +161,15 @@ function save(db: PosDB) {
 }
 
 export function usePosDB() {
-  const [db, setDb] = useState<PosDB>(load);
+  // 1. نبدأ بالديفولت عشان نتجنب أخطاء الريفريش
+  const [db, setDb] = useState<PosDB>(defaultDB);
   const [isLoadingEmployees] = useState(false);
 
   useEffect(() => {
+    // 2. نجبر الكود يقرأ اللوكل ستوريدج بمجرد ما الصفحة تفتح ويحط الشيفت المفتوح
+    const initialDb = load();
+    setDb(initialDb);
+
     const r = () => setDb(load());
     window.addEventListener("pos-update", r);
     window.addEventListener("storage", r);
@@ -412,11 +417,11 @@ export function usePosDB() {
       takeawaySales: number;
       deliverySales: number;
     }) => {
-      const activeShift = db.shift;
+      const activeShift = load().shift; // 🌟 التعديل هنا: نقرأ مباشرة من الـ localStorage لضمان أحدث داتا
 
       if (!activeShift) {
         toast.error("لا يوجد وردية مفتوحة لإغلاقها!");
-        return;
+        return false;
       }
 
       const closedShiftData = {
@@ -439,28 +444,25 @@ export function usePosDB() {
           throw new Error("فشل الحفظ على السيرفر");
         }
 
-        // 🌟 استلام البيانات الفعلية المحفوظة من السيرفر (عشان ناخد الـ ID اللي اتعمل في الداتابيز)
         const savedShiftFromServer = await res.json();
-
         const cur = load();
 
-        // دمج الشفت الجديد المقفل في أول مصفوفة الورديات محلياً
         cur.shifts = [savedShiftFromServer, ...cur.shifts];
-        // تصفير الشفت الحالي المفتوح
-        cur.shift = null;
+        cur.shift = null; // 🌟 تصفير الشيفت صراحة
 
-        // حفظ التحديث في الكاش الرئيسي والاحتياطي لضمان السرعة والمزامنة
         save(cur);
         localStorage.setItem("pos_shifts", JSON.stringify(cur.shifts));
         setDb(cur);
 
         toast.success(`🎉 تم إغلاق الوردية وحفظها بنجاح في الداتابيز والكاش!`);
+        return true; // 🌟 نرجع true عشان الفرونت إند يعرف إنه نجح ويقفل الشاشة فوراً
       } catch (err) {
         console.error("❌ خطأ أثناء إغلاق الشفت بالسيرفر:", err);
         toast.error("حدث خطأ أثناء الاتصال بالسيرفر لحفظ بيانات الوردية");
+        return false;
       }
     },
-    [db],
+    [],
   );
 
   const incCustomerOrders = useCallback((id?: string) => {
@@ -544,9 +546,7 @@ export function usePosDB() {
   useEffect(() => {
     async function syncServerToLocalStorage() {
       try {
-        console.log(
-          "🔄 جاري مزامنة وتحديث البيانات من pgAdmin إلى الـ LocalStorage...",
-        );
+        console.log("🔄 جاري مزامنة وتحديث البيانات من السيرفر...");
 
         const [invoicesRes, shiftsRes, employeesRes] = await Promise.all([
           fetch("http://localhost:5000/api/invoices"),
@@ -559,22 +559,21 @@ export function usePosDB() {
           const shifts = await shiftsRes.json();
           const employees = await employeesRes.json();
 
-          // 💾 تحديث مفاتيح الكاش الفرعية
           localStorage.setItem("pos_invoices", JSON.stringify(invoices));
           localStorage.setItem("pos_shifts", JSON.stringify(shifts));
           localStorage.setItem("pos_employees", JSON.stringify(employees));
 
-          // 🌟 تحديث كاش الـ Store الرئيسي (rest-pos-db-v1) عشان لو فتحت صفحة الإعدادات تلاقي الوردية نزلت فوراً
+          // 💾 بنجيب الكاش الحالي عشان نحافظ على الشيفت المفتوح من غير ما يطير
           const cur = load();
           cur.shifts = shifts;
           cur.employees = employees;
-          // تدمج الفواتير برضه لو حابب
+
+          // 🛠️ رجعنا الفواتير زي ما كانت عشان صفحة الطلبات متبوظش
           cur.invoices = invoices;
+
           save(cur);
 
-          console.log(
-            "✅ تمت المزامنة بنجاح! الورديات متطابقة الآن تماماً مع pgAdmin.",
-          );
+          console.log("✅ تمت المزامنة بنجاح وصفحة الطلبات رجعت تمام.");
         }
       } catch (error) {
         console.error("❌ فشل تحديث الكاش المحلى من السيرفر:", error);

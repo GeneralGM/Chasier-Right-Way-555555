@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo } from "react"; // 👈 شلنا الـ useState لأننا مش محتاجين range
 import { useDB } from "@/lib/store";
 import { usePosDB } from "@/lib/pos-store.ts";
 import { fmt2, clamp0 } from "@/lib/format";
@@ -19,29 +19,25 @@ import {
   LogOut,
   Bike,
 } from "lucide-react";
-import { toast } from "sonner";
+// شلنا الـ toast لو مش مستخدمة تحت
 
 export const Route = createFileRoute("/reports")({
   head: () => ({ meta: [{ title: "التقارير - تقفيل الشيفت" }] }),
   component: ReportsPage,
 });
 
-type Range = "today" | "week";
-
 function ReportsPage() {
   const { db } = useDB();
   const { db: pos, closeShift } = usePosDB();
-  const [range, setRange] = useState<Range>("today");
 
-  const fromTs = useMemo(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    if (range === "week") d.setDate(d.getDate() - 6);
-    return d.getTime();
-  }, [range]);
+  // 🌟 الحل السحري 1: فواتير الشيفت الحالي فقط!
+  // بنجيب الفواتير اللي اتعملت بعد وقت فتح الشيفت المفتوح حالياً، ملناش دعوة باليوم ولا التاريخ.
+  const currentShiftInvoices = useMemo(() => {
+    if (!pos.shift) return []; // لو مفيش شيفت مفتوح، مفيش فواتير هتتعرض
+    return pos.invoices.filter((inv) => inv.createdAt >= pos.shift!.openedAt);
+  }, [pos.invoices, pos.shift]);
 
-  const invoices = pos.invoices.filter((i) => i.createdAt >= fromTs);
-
+  // 🌟 الحل السحري 2: الحسابات بتتم على فواتير الشيفت الحالي فقط
   const stats = useMemo(() => {
     let kitchen = 0,
       bar = 0,
@@ -53,16 +49,14 @@ function ReportsPage() {
       discount = 0,
       tax = 0;
 
-    for (const inv of invoices) {
+    for (const inv of currentShiftInvoices) {
       subtotal += inv.subtotal;
       discount += inv.discountValue;
       tax += inv.taxValue;
 
-      // 🌟 السطر السحري: بيضمن يقرأ التوصيل لو اسمه deliveryPrice أو delivery_price من الداتابيز
       const deliveryFee =
         Number(inv.deliveryPrice) || Number((inv as any).delivery_price) || 0;
 
-      // هنا بنجمع رسوم التوصيل عشان تظهر في الكارت بتاعها
       deliveryFeesOnly += deliveryFee;
 
       if (inv.type === "takeaway") {
@@ -88,7 +82,6 @@ function ReportsPage() {
       }
     }
 
-    // الإيرادات زي ما هي بالظبط بناءً على رغبتك ومن غير ما يدخل فيها التوصيل
     const finalNetCash = kitchen + bar + shisha + tax - discount;
 
     return {
@@ -97,19 +90,19 @@ function ReportsPage() {
       shisha: clamp0(shisha),
       takeaway: clamp0(takeawayOnly),
       deliveryTotal: clamp0(deliveryOnly),
-      deliveryFees: clamp0(deliveryFeesOnly), // 🌟 دي اللي هتظهر الـ 500 ج في الكارت بناءً على الداتابيز
+      deliveryFees: clamp0(deliveryFeesOnly),
       subtotal: clamp0(subtotal),
       discount: clamp0(discount),
       tax: clamp0(tax),
       total: clamp0(finalNetCash),
       revenues: clamp0(finalNetCash),
     };
-  }, [invoices, db.meals]);
+  }, [currentShiftInvoices, db.meals]); // 👈 ربطنا الـ useMemo بالـ currentShiftInvoices
+
   async function closeShiftAndLogout() {
     window.print();
 
-    // 🌟 حطينا await عشان نستنى السيرفر يرد، لو نجح هيمسح الوردية، لو فشل مش هيمسحها
-    await closeShift({
+    const isSuccess = await closeShift({
       kitchenSales: stats.kitchen,
       barSales: stats.bar,
       shishaSales: stats.shisha,
@@ -120,30 +113,26 @@ function ReportsPage() {
       deliverySales: stats.deliveryTotal,
     });
 
-    // شيلنا الـ toast من هنا عشان متطلعش رسالة كدابة لو السيرفر واقع
+    if (isSuccess) {
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    }
   }
 
   return (
     <div dir="rtl" className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2 no-print">
         <div>
-          <h1 className="text-2xl font-bold">التقارير</h1>
+          <h1 className="text-2xl font-bold">إيراد الشيفت الحالي</h1>
           <p className="text-sm text-muted-foreground">
-            تقفيلة الشيفت اليومية ومتابعة المبيعات.
+            {pos.shift
+              ? `مفتوح بواسطة: ${pos.shift.cashierName}`
+              : "لا يوجد شيفت مفتوح"}
           </p>
         </div>
         <div className="flex gap-2">
-          <div className="flex bg-secondary rounded-lg p-1">
-            {(["today", "week"] as Range[]).map((r) => (
-              <button
-                key={r}
-                onClick={() => setRange(r)}
-                className={`px-3 h-8 rounded-md text-sm ${range === r ? "bg-card shadow-sm" : "text-muted-foreground"}`}
-              >
-                {r === "today" ? "اليوم" : "هذا الأسبوع"}
-              </button>
-            ))}
-          </div>
+          {/* 👈 شلنا زراير اليوم والأسبوع لأنها بتلخبط منطق الشيفتات */}
           {pos.shift && (
             <Button
               onDoubleClick={closeShiftAndLogout}
@@ -158,6 +147,7 @@ function ReportsPage() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {/* الكروت زي ما هي بالضبط بتعرض الداتا الصح دلوقتي */}
         <Card
           icon={DollarSign}
           label="الإيرادات"
@@ -220,7 +210,7 @@ function ReportsPage() {
           <Wallet className="w-10 h-10 opacity-80" />
           <div className="flex-1">
             <p className="text-sm opacity-80">
-              التوتال النهائي (Net Cash in Drawer)
+              التوتال النهائي للشيفت (Net Cash in Drawer)
             </p>
             <p className="text-4xl font-bold mt-1">
               {fmt2(stats.total)}{" "}
@@ -228,7 +218,8 @@ function ReportsPage() {
             </p>
           </div>
           <div className="text-sm opacity-80 text-end">
-            <div>{invoices.length} فاتورة</div>
+            <div>{currentShiftInvoices.length} فاتورة</div>{" "}
+            {/* 👈 بنعد فواتير الشيفت بس */}
             {pos.shift && <div>الكاشير: {pos.shift.cashierName}</div>}
           </div>
         </div>
@@ -236,7 +227,7 @@ function ReportsPage() {
 
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <div className="p-3 border-b border-border bg-secondary/40 text-sm font-medium">
-          آخر الفواتير
+          فواتير الشيفت الحالي
         </div>
         <table className="w-full text-sm">
           <thead className="bg-secondary/20 text-xs">
@@ -249,17 +240,18 @@ function ReportsPage() {
             </tr>
           </thead>
           <tbody>
-            {invoices.length === 0 ? (
+            {currentShiftInvoices.length === 0 ? (
               <tr>
                 <td
                   colSpan={5}
                   className="p-6 text-center text-muted-foreground"
                 >
-                  لا توجد فواتير في هذه الفترة.
+                  لا توجد فواتير في هذا الشيفت.
                 </td>
               </tr>
             ) : (
-              invoices.slice(0, 20).map((inv) => (
+              // 🌟 الحل السحري 3: الجدول بيعرض فواتير الشيفت الحالي فقط!
+              currentShiftInvoices.slice(0, 50).map((inv) => (
                 <tr key={inv.id} className="border-t border-border">
                   <td className="p-2 text-xs text-muted-foreground">
                     {new Date(inv.createdAt).toLocaleTimeString("ar-EG")}
@@ -292,6 +284,7 @@ function ReportsPage() {
   );
 }
 
+// دالة Card ثابتة زي ما هي متعدلش فيها حاجة
 function Card({
   icon: Icon,
   label,

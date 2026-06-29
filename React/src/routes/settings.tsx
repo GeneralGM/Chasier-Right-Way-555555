@@ -153,60 +153,6 @@ const printInvoice = (invoice: Invoice) => {
   printWindow.document.close();
 };
 
-// function SettingsPage() {
-//   const [tab, setTab] = useState<Tab>("invoices");
-//   // مخزن لحفظ الشيفتات القادمة من الداتابيز
-//   const [dbShifts, setDbShifts] = useState<any[]>([]);
-
-//   // جلب الشيفتات من السيرفر بورت 5000
-//   useEffect(() => {
-//     const loadShifts = async () => {
-//       try {
-//         const res = await fetch("http://localhost:5000/api/shifts");
-//         if (res.ok) {
-//           const data = await res.json();
-//           setDbShifts(data); // حفظ البيانات في الستيت
-//         }
-//       } catch (err) {
-//         console.error("خطأ أثناء تحميل الشيفتات في الإعدادات:", err);
-//       }
-//     };
-
-//     if (tab === "shifts") {
-//       loadShifts();
-//     }
-//   }, [tab]);
-
-//   return (
-//     <div dir="rtl" className="space-y-4">
-//       <div>
-//         <h1 className="text-2xl font-bold flex items-center gap-2">
-//           <SettingsIcon className="w-6 h-6" /> الإعدادات
-//         </h1>
-//         <p className="text-sm text-muted-foreground">
-//           أرشيف الفواتير وإعدادات النظام.
-//         </p>
-//       </div>
-//       <div className="flex gap-1 bg-secondary p-1 rounded-lg w-fit">
-//         <button
-//           onClick={() => setTab("invoices")}
-//           className={`px-4 h-9 rounded-md text-sm font-medium flex items-center gap-2 ${tab === "invoices" ? "bg-card shadow-sm" : "text-muted-foreground"}`}
-//         >
-//           <Receipt className="w-4 h-4" /> الفواتير
-//         </button>
-//         <button
-//           onClick={() => setTab("shifts")}
-//           className={`px-4 h-9 rounded-md text-sm font-medium flex items-center gap-2 ${tab === "shifts" ? "bg-card shadow-sm" : "text-muted-foreground"}`}
-//         >
-//           <Clock className="w-4 h-4" /> الشيفتات
-//         </button>
-//       </div>
-//       {tab === "invoices" && <InvoicesTab />}
-//       {/* ✅ تعديل 1: قمنا بتمرير الشيفتات القادمة من السيرفر إلى المكون */}
-//       {tab === "shifts" && <ShiftsTab dbShifts={dbShifts} />}
-//     </div>
-//   );
-// }
 function SettingsPage() {
   const [tab, setTab] = useState<Tab>("invoices");
 

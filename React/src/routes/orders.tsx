@@ -293,7 +293,7 @@ function PosScreen() {
             deliverySales: 0,
           })
         }
-        cashierName={pos.shift!.cashierName}
+        cashierName={pos.shift?.cashierName || "جاري التحميل..."}
         zoneTabs={<ZoneTabs zone={zone} setZone={setZone} />}
       >
         <TakeawayView onOpenOrder={(code) => setOpenOrder(code)} />
@@ -324,7 +324,7 @@ function PosScreen() {
           deliverySales: 0,
         })
       }
-      cashierName={pos.shift!.cashierName}
+      cashierName={pos.shift?.cashierName || "جاري التحميل..."}
       zoneTabs={<ZoneTabs zone={zone} setZone={setZone} />}
     >
       {/* Top: search */}

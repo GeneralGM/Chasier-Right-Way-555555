@@ -199,6 +199,7 @@ export interface AuditEntry {
 export type DeptStock = Record<string, number>;
 
 interface DB {
+  shift: any;
   orders: any;
   updateDeptStock: any;
   items: Item[];

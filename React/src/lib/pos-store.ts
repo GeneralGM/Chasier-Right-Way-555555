@@ -183,6 +183,16 @@ export function usePosDB() {
     async (name: string, role: EmployeeRole, pin: string) => {
       const cur = load();
       const pinHash = await hashPin(pin);
+
+      // 🔍 التحقق من تكرار الـ PIN قبل الإضافة لمنع الأخطاء
+      const isDuplicate = cur.employees.some((emp) => emp.pinHash === pinHash);
+      if (isDuplicate) {
+        toast.error(
+          "عذراً، هذا الرقم السري مستخدم بالفعل لموظف آخر! اختر رقماً مختلفاً.",
+        );
+        return; // بيوقف التنفيذ ومبيضيفش حاجة
+      }
+
       cur.employees.push({
         id: crypto.randomUUID(),
         name: name.trim(),
@@ -200,9 +210,24 @@ export function usePosDB() {
     const cur = load();
     const e = cur.employees.find((x) => x.id === id);
     if (!e) return;
+
+    // 🔍 لو المستخدم بيعدل الـ PIN، نتحقق إنه مش متكرر مع موظف تاني غير نفسه
+    if (patch.newPin) {
+      const newHash = await hashPin(patch.newPin);
+      const isDuplicate = cur.employees.some(
+        (emp) => emp.pinHash === newHash && emp.id !== id,
+      );
+
+      if (isDuplicate) {
+        toast.error("عذراً، الرقم السري الجديد مستخدم بالفعل لموظف آخر!");
+        return; // بيوقف التعديل
+      }
+      e.pinHash = newHash;
+    }
+
     if (patch.name !== undefined) e.name = patch.name.trim();
     if (patch.role !== undefined) e.role = patch.role;
-    if (patch.newPin) e.pinHash = await hashPin(patch.newPin);
+
     save(cur);
     setDb(cur);
     toast.success("تم التحديث بنجاح");

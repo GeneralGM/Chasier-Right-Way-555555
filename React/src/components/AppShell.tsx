@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { logout } from "@/lib/store";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import ActionGate from "@/components/ui/ActionGate";
 const warehouseNav = [
   { to: "/", label: "لوحة التحكم", icon: LayoutDashboard },
   { to: "/inventory", label: "المخزون", icon: Package },
@@ -74,20 +75,25 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <nav className="hidden md:flex items-center gap-1">
             <div className="relative" ref={dropdownRef}>
-              <button
-                onClick={() => setWarehouseOpen((v) => !v)}
-                className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition ${
-                  isWarehouseRoute
-                    ? "bg-primary text-primary-foreground"
-                    : "text-foreground hover:bg-secondary"
-                }`}
+              <ActionGate
+                requiredRole="محاسب"
+                actionName="فتح المخزن و ظهور كل العناصر"
+                onSuccess={() => setWarehouseOpen((v) => !v)}
               >
-                <Warehouse className="w-4 h-4" />
-                المخزن
-                <ChevronDown
-                  className={`w-3.5 h-3.5 transition ${warehouseOpen ? "rotate-180" : ""}`}
-                />
-              </button>
+                <button
+                  className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition ${
+                    isWarehouseRoute
+                      ? "bg-primary text-primary-foreground"
+                      : "text-foreground hover:bg-secondary"
+                  }`}
+                >
+                  <Warehouse className="w-4 h-4" />
+                  المخزن
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 transition ${warehouseOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+              </ActionGate>
               {warehouseOpen && (
                 <div className="absolute end-0 mt-1 w-56 bg-card border border-border rounded-lg shadow-lg py-1 z-40">
                   {warehouseNav.map((n) => {

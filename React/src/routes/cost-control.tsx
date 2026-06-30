@@ -26,6 +26,7 @@ import { fmt2, round2, cleanNumInput, clamp0 } from "@/lib/format";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { PrintAuditSheet } from "@/components/PrintAudit";
 import { PinPrompt } from "@/components/PinPrompt";
+import ActionGate from "@/components/ui/ActionGate";
 import {
   Plus,
   Trash2,
@@ -60,7 +61,6 @@ function CostControlPage() {
   const tabs: { id: TabId; label: string; icon: any }[] = [
     { id: "stock", label: "مخزن الأقسام", icon: Boxes },
     { id: "recipes", label: "الأصناف والريسبي", icon: ChefHat },
-    { id: "sales", label: "المبيعات", icon: ShoppingCart },
     { id: "results", label: "النتائج والجرد", icon: ClipboardCheck },
   ];
   return (
@@ -74,10 +74,32 @@ function CostControlPage() {
       <div className="no-print flex flex-wrap gap-1 bg-secondary p-1 rounded-lg w-fit">
         {tabs.map((t) => {
           const Icon = t.icon;
+
+          // الدالة اللي هتتنفذ عند الضغط
+          const handlePress = () => setTab(t.id);
+
+          // لو التبويبة محتاجة حماية
+          if (t.id === "results") {
+            return (
+              <ActionGate
+                key={t.id}
+                requiredRole="مدير"
+                onSuccess={handlePress}
+              >
+                <button
+                  className={`px-4 h-9 rounded-md text-sm font-medium flex items-center gap-2 transition ${tab === t.id ? "bg-card shadow-sm" : "text-muted-foreground"}`}
+                >
+                  <Icon className="w-4 h-4" /> {t.label}
+                </button>
+              </ActionGate>
+            );
+          }
+
+          // التبويبات العادية
           return (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={handlePress}
               className={`px-4 h-9 rounded-md text-sm font-medium flex items-center gap-2 transition ${tab === t.id ? "bg-card shadow-sm" : "text-muted-foreground"}`}
             >
               <Icon className="w-4 h-4" /> {t.label}
@@ -87,7 +109,6 @@ function CostControlPage() {
       </div>
       {tab === "stock" && <DeptStockTab />}
       {tab === "recipes" && <RecipesTab />}
-      {tab === "sales" && <SalesTab />}
       {tab === "results" && <ResultsTab />}
     </div>
   );
@@ -140,7 +161,6 @@ function getAuditStats(dept: SubDept, db: any) {
 }
 
 /* ============== TAB 1: Department Inventory ============== */
-/* ============== TAB 1: Department Inventory ============== */
 function DeptStockTab() {
   const { db = { items: [], deptStock: {} }, setDeptStockQty } = useDB() || {};
   const [dept, setDept] = useState<SubDept>("مطبخ");
@@ -166,7 +186,8 @@ function DeptStockTab() {
   );
 
   function startAdjust(itemId: string, current: number) {
-    setPinFor(itemId); // ده بيظهر شاشة الباسورد
+    // setPinFor(itemId); // ❌ امسح أو الغي السطر ده عشان ميتكررش الباسوورد
+    setEditingId(itemId); //  تفعيل وضع التعديل للسطر ده مباشرة
     setEditVal(fmt2(current));
   }
 
@@ -248,15 +269,16 @@ function DeptStockTab() {
                     )}
                   </td>
                   <td className="p-3">
-                    {/* 🔴 التعديل التالت: تبديل زرار التعديل بزرار الحفظ 🔴 */}
+                    {/* إذا كان السطر في حالة تعديل، اظهر أزرار الحفظ والإلغاء */}
                     {editingId === r.item.id ? (
                       <div className="flex gap-2">
                         <button
-                          onClick={() => saveAdjust(r.item.id)}
                           className="px-2 h-7 rounded bg-primary text-primary-foreground text-xs flex items-center gap-1"
+                          onClick={() => saveAdjust(r.item.id)}
                         >
                           <Save className="w-3 h-3" /> حفظ
                         </button>
+
                         <button
                           onClick={() => setEditingId(null)}
                           className="px-2 h-7 rounded bg-secondary text-xs"
@@ -265,12 +287,15 @@ function DeptStockTab() {
                         </button>
                       </div>
                     ) : (
-                      <button
-                        onClick={() => startAdjust(r.item.id, r.qty)}
-                        className="px-2 h-7 rounded bg-amber-100 text-xs text-amber-900"
+                      /* إذا لم يكن في حالة تعديل، اظهر زرار التعديل محمي بباسوورد المدير */
+                      <ActionGate
+                        requiredRole="مدير"
+                        onSuccess={() => startAdjust(r.item.id, r.qty)}
                       >
-                        تعديل الكمية
-                      </button>
+                        <button className="px-2 h-7 rounded bg-amber-100 text-xs text-amber-900">
+                          تعديل الكمية
+                        </button>
+                      </ActionGate>
                     )}
                   </td>
                 </tr>
@@ -1150,325 +1175,6 @@ function MealDialog({
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-/* ============== TAB 3: Sales ============== */
-function SalesTab() {
-  const { db, addSale } = useDB();
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [dept, setDept] = useState<SubDept>("مطبخ");
-  const [lines, setLines] = useState<SaleLine[]>([]);
-  const [printing, setPrinting] = useState<"depts" | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const deptMeals = db.meals.filter(
-    (m) => m.department === dept && (m.kind || "menu") === "menu",
-  );
-
-  function setQty(mealId: string, qty: number) {
-    const q = clamp0(qty);
-    setLines((ls) => {
-      const others = ls.filter((l) => l.mealId !== mealId);
-      if (q > 0) return [...others, { mealId, qty: q }];
-      return others;
-    });
-  }
-
-  async function submit() {
-    // 👈 ضفنا async هنا
-    const valid = lines.filter((l) => l.qty > 0);
-    if (valid.length === 0) {
-      toast.error("أدخل كمية مبيعات واحدة على الأقل");
-      return;
-    }
-
-    try {
-      // 👈 ضفنا await هنا عشان نستنى النتيجة الفعلية اللي راجعة من الـ Promise
-      const res = await addSale(date, dept, valid);
-
-      if (!res.ok) {
-        // التايب سكريبت هنا هيفهم تلقائياً إن طالما ok بـ false يبقى الـ error موجود
-        toast.error(res.error);
-        return;
-      }
-
-      // التايب سكريبت هنا هيفهم تلقائياً إن طالما ok بـ true يبقى الـ sale موجود ومفيش خطأ
-      toast.success(`تم الحفظ. الإجمالي: ${fmt2(res.sale.totalSales)} ج.م`);
-      setLines([]);
-    } catch (err: any) {
-      // حماية إضافية لو الـ addSale ضربت خطأ غير متوقع في السيرفر أو الكود
-      toast.error("حدث خطأ غير متوقع أثناء الحفظ");
-      console.error(err);
-    }
-  }
-
-  function importExcel(file: File) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target!.result as ArrayBuffer);
-        const wb = XLSX.read(data, { type: "array" });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        const json: any[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-        const newLines: SaleLine[] = [];
-        let skipped = 0;
-        for (const row of json) {
-          const itemName = String(
-            row["الصنف"] || row["اسم الصنف"] || row["الوجبة"] || "",
-          ).trim();
-          const qty = clamp0(parseFloat(row["الكمية"]) || 0);
-          if (!itemName || qty <= 0) {
-            skipped++;
-            continue;
-          }
-          const meal =
-            deptMeals.find((m) => m.name.trim() === itemName) ||
-            deptMeals.find(
-              (m) =>
-                m.name.trim().includes(itemName) ||
-                itemName.includes(m.name.trim()),
-            );
-          if (!meal) {
-            skipped++;
-            continue;
-          }
-          const existing = newLines.find((l) => l.mealId === meal.id);
-          if (existing) existing.qty += qty;
-          else newLines.push({ mealId: meal.id, qty });
-        }
-        if (newLines.length === 0) {
-          toast.error("لم يتم استيراد أي صف.");
-          return;
-        }
-        setLines(newLines);
-        toast.success(
-          `تم تحميل ${newLines.length} صف ${skipped > 0 ? `(تخطي ${skipped})` : ""}.`,
-        );
-      } catch (err: any) {
-        toast.error("فشل قراءة الملف: " + err.message);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  }
-
-  const totalSales = clamp0(
-    lines.reduce((s, l) => {
-      const m = db.meals.find((x) => x.id === l.mealId);
-      return s + (m?.sellingPrice || 0) * l.qty;
-    }, 0),
-  );
-
-  function printDepts() {
-    setPrinting("depts");
-    setTimeout(() => {
-      window.print();
-      setTimeout(() => setPrinting(null), 500);
-    }, 100);
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="no-print bg-card border border-border rounded-xl p-4 flex flex-wrap items-end gap-3">
-        <label className="block">
-          <span className="text-xs mb-1 block">التاريخ</span>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="h-10 px-3 rounded-md border border-input bg-background text-sm"
-          />
-        </label>
-        <label className="block min-w-[180px]">
-          <span className="text-xs mb-1 block">القسم</span>
-          <SearchableSelect
-            options={SUB_DEPTS.map((d) => ({ value: d, label: d }))}
-            value={dept}
-            onChange={(v) => {
-              setDept(v as SubDept);
-              setLines([]);
-            }}
-          />
-        </label>
-        <button
-          onClick={() => fileRef.current?.click()}
-          className="h-10 px-3 rounded-md border border-input text-sm flex items-center gap-2 hover:bg-secondary"
-        >
-          <Upload className="w-4 h-4" /> استيراد Excel (الصنف، الكمية)
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".xlsx,.xls,.csv"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) importExcel(f);
-            e.target.value = "";
-          }}
-        />
-        <button
-          onClick={printDepts}
-          className="h-10 px-3 rounded-md border border-input text-sm flex items-center gap-2 hover:bg-secondary"
-        >
-          <Printer className="w-4 h-4" /> طباعة مبيعات الأقسام (PDF)
-        </button>
-        <div className="ms-auto text-sm">
-          إجمالي المبيعات:{" "}
-          <strong className="text-primary text-lg">{fmt2(totalSales)}</strong>{" "}
-          ج.م
-        </div>
-      </div>
-
-      <div className="no-print bg-card border border-border rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-secondary/50 text-xs">
-            <tr>
-              <th className="text-right p-3">اسم الصنف</th>
-              <th className="text-right p-3">سعر البيع</th>
-
-              <th className="text-right p-3">الكمية المباعة</th>
-              <th className="text-right p-3">الإجمالي</th>
-            </tr>
-          </thead>
-          <tbody>
-            {deptMeals.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={4}
-                  className="p-8 text-center text-muted-foreground"
-                >
-                  لا توجد أصناف للبيع في {dept}
-                </td>
-              </tr>
-            ) : (
-              deptMeals.map((m) => {
-                const ln = lines.find((l) => l.mealId === m.id);
-                const qty = ln?.qty || 0;
-                return (
-                  <tr key={m.id} className="border-t border-border">
-                    <td className="p-3 font-medium">{m.name}</td>
-                    <td className="p-3">{fmt2(m.sellingPrice)}</td>
-
-                    <td className="p-3">
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        value={qty || ""}
-                        onChange={(e) =>
-                          setQty(m.id, clamp0(cleanNumInput(e.target.value)))
-                        }
-                        className="w-24 h-9 px-2 rounded-md border border-input bg-background text-sm"
-                      />
-                    </td>
-                    <td className="p-3 font-bold">
-                      {fmt2(m.sellingPrice * qty)}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="no-print flex justify-end">
-        <button
-          onClick={submit}
-          className="px-5 h-11 rounded-lg bg-primary text-primary-foreground font-medium flex items-center gap-2"
-        >
-          <Save className="w-4 h-4" /> حفظ المبيعات وخصم المخزون
-        </button>
-      </div>
-
-      {printing === "depts" && (
-        <div className="print-area">
-          <DeptsSalesPrint date={date} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DeptsSalesPrint({ date }: { date: string }) {
-  const { db } = useDB();
-
-  // 👈 غيرنا "مطبخ" لـ "kitchen" و "بار" لـ "bar"
-  const dayKitchen = aggregateDailySales(db.sales, date, "مطبخ", db.meals);
-  const dayBar = aggregateDailySales(db.sales, date, "بار", db.meals);
-  const dayShisha = aggregateDailySales(db.sales, date, "شيشه", db.meals);
-
-  return (
-    <div>
-      <SalesSection
-        title="مبيعات المطبخ (الطعام)"
-        date={date}
-        rows={dayKitchen}
-      />
-      <div style={{ pageBreakBefore: "always" }} />
-      <SalesSection
-        title="مبيعات البار (المشروبات)"
-        date={date}
-        rows={dayBar}
-      />
-      <div style={{ pageBreakBefore: "always" }} />
-      <SalesSection title="مبيعات الشيشة" date={date} rows={dayShisha} />
-    </div>
-  );
-}
-
-function SalesSection({
-  title,
-  date,
-  rows,
-}: {
-  title: string;
-  date: string;
-  rows: { name: string; qty: number; price: number; total: number }[];
-}) {
-  const totalQty = rows.reduce((s, r) => s + r.qty, 0);
-  const totalVal = clamp0(rows.reduce((s, r) => s + r.total, 0));
-  return (
-    <div className="print-voucher">
-      <div className="text-center border-b border-black pb-2 mb-2">
-        <h1 className="text-base font-bold">{title}</h1>
-        <div className="text-xs">التاريخ: {date}</div>
-      </div>
-      {rows.length === 0 ? (
-        <div className="text-center text-sm py-6">
-          لا توجد مبيعات لهذا القسم في هذا التاريخ
-        </div>
-      ) : (
-        <table className="print-table w-full">
-          <thead>
-            <tr>
-              <th style={{ width: "30px" }}>#</th>
-              <th>اسم الصنف</th>
-              <th style={{ width: "70px" }}>سعر الوحدة</th>
-              <th style={{ width: "70px" }}>الكمية</th>
-              <th style={{ width: "100px" }}>الإجمالي</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td>{i + 1}</td>
-                <td>{r.name}</td>
-                <td>{fmt2(r.price)}</td>
-                <td>{fmt2(r.qty)}</td>
-                <td>{fmt2(r.total)}</td>
-              </tr>
-            ))}
-            <tr style={{ fontWeight: "bold", background: "#eee" }}>
-              <td colSpan={3}>الإجمالي</td>
-              <td>{fmt2(totalQty)}</td>
-              <td>{fmt2(totalVal)}</td>
-            </tr>
-          </tbody>
-        </table>
-      )}
     </div>
   );
 }

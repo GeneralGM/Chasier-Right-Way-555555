@@ -47,12 +47,21 @@ app.get("/api/test", (req, res) => {
 
 app.post("/api/employees", async (req, res) => {
   console.log("📥 بيانات الموظف الجديد وصلت للسيرفر:", req.body);
+
   const { name, role } = req.body;
-  const pinHash = req.body.pinHash || req.body.pin || req.body.password || "";
+
+  // 🌟 تأمين استقبال الـ PIN بجميع الأشكال الممكنة عشان مفيش صفحة تبوظ
+  const pinHash =
+    req.body.pinHash ||
+    req.body.pin_hash ||
+    req.body.pin ||
+    req.body.password ||
+    "";
   const id = req.body.id || crypto.randomUUID();
 
+  // التحقق من وجود البيانات الأساسية
   if (!name || !pinHash) {
-    return res.status(400).json({ error: "الاسم والرقم السري مطلوبان" });
+    return res.status(400).json({ message: "الاسم والرقم السري مطلوبان" });
   }
 
   try {
@@ -61,20 +70,32 @@ app.post("/api/employees", async (req, res) => {
       VALUES ($1, $2, $3, $4)
       RETURNING id, name, role, pin_hash AS "pinHash"
     `;
+
     const result = await pool.query(query, [
       id,
       name,
       role || "cashier",
       pinHash,
     ]);
+
+    // 🌟 توحيد الـ Response بكل المسميات الممكنة عشان الصفحات التانية متقفلش أو تضرب
     res.status(201).json({
       ...result.rows[0],
-      pin: result.rows[0].pinHash,
+      pinHash: result.rows[0].pinHash, // للشاشات الجديدة
+      pin_hash: result.rows[0].pinHash, // للاحتياط
+      pin: result.rows[0].pinHash, // للشاشات القديمة
     });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ error: "حدث خطأ في قاعدة البيانات", details: err.message });
+  } catch (error) {
+    // 🔍 الكود 23505 في بوسطجرس معناه تكرار حقل فريد (Unique Violation)
+    if (error.code === "23505") {
+      return res.status(400).json({
+        message:
+          "عذراً، هذا الرقم السري مستخدم بالفعل لموظف آخر! اختر رقماً مختلفاً.",
+      });
+    }
+
+    console.error("❌ خطأ سيرفر داخلي:", error);
+    res.status(500).json({ message: "حدث خطأ داخلي في السيرفر" });
   }
 });
 

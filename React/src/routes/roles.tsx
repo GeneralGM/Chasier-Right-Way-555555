@@ -1,7 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
 import { toast } from "sonner";
-import { usePosDB, type Employee, type EmployeeRole } from "@/lib/pos-store.ts";
+import { usePosDB, type Employee } from "@/lib/pos-store.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -12,19 +13,52 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { PinPrompt } from "@/components/PinPrompt";
-import { Plus, Eye, EyeOff, Pencil, Trash2, Fingerprint } from "lucide-react";
+import {
+  Plus,
+  Eye,
+  EyeOff,
+  Pencil,
+  Trash2,
+  Fingerprint,
+  Users,
+  ShieldAlert,
+  Lock,
+} from "lucide-react";
+
+// 🌟 استدعاء مكون الحماية
+import ActionGate from "@/components/ui/ActionGate";
 
 export const Route = createFileRoute("/roles")({
   head: () => ({ meta: [{ title: "بصمات الموظفين - الصلاحيات" }] }),
   component: RolesPage,
 });
 
+// 🌟 جدول أوزان الصلاحيات للمقارنة الذكية
+const ROLE_WEIGHTS: Record<string, number> = {
+  مالك: 5,
+  owner: 5,
+  مبرمج: 4,
+  developer: 4,
+  مدير: 3,
+  manager: 3,
+  محاسب: 2,
+  accountant: 2,
+  كاشير: 1,
+  cashier: 1,
+  "كابتن صالة": 1,
+  waiter: 1,
+};
+
 function RolesPage() {
   const { db, addEmployee, updateEmployee, deleteEmployee } = usePosDB();
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [pinFor, setPinFor] = useState<string | null>(null);
-  const [editing, setEditing] = useState<Employee | "new" | null>(null);
+  const [editing, setEditing] = useState<any | null>(null);
 
+  // 🌟 تعديل الـ Type لـ any لمنع التضارب مع الـ ActionGate
+  const [currentOperator, setCurrentOperator] = useState<any | null>(null);
+
+  const [activeTab, setActiveTab] = useState<"staff" | "management">("staff");
   const [serverEmployees, setServerEmployees] = useState<Employee[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -46,15 +80,31 @@ function RolesPage() {
     fetchEmployeesFromPostgres();
   }, []);
 
-  // 🌟 دمج الموظفين من الداتابيز والـ LocalStorage عشان محدش يختفي
   const employeesList = useMemo(() => {
     const map = new Map();
-    // نحط موظفين السيرفر الأول
     serverEmployees.forEach((e) => map.set(e.name, e));
-    // نحط موظفين اللوكال ستوريدج عليهم (لو فيه تكرار بالاسم هيتحدث)
     db.employees.forEach((e) => map.set(e.name, e));
     return Array.from(map.values());
   }, [serverEmployees, db.employees]);
+
+  const displayedEmployees = employeesList.filter((e) => {
+    if (activeTab === "staff") {
+      return (
+        e.role === "كاشير" || e.role === "كابتن صالة" || e.role === "cashier"
+      );
+    } else {
+      return (
+        e.role === "محاسب" ||
+        e.role === "مدير" ||
+        e.role === "مبرمج" ||
+        e.role === "مالك" ||
+        e.role === "accountant" ||
+        e.role === "manager" ||
+        e.role === "developer" ||
+        e.role === "owner"
+      );
+    }
+  });
 
   function toggleEye(id: string) {
     if (revealed[id]) {
@@ -65,21 +115,119 @@ function RolesPage() {
       setPinFor(id);
     }
   }
+  // 🌟 دالة منفصلة ومنظمة لإضافة وتعديل الموظفين
+  const handleSaveEmployee = async (data: {
+    name: string;
+    role: any;
+    pin?: string;
+  }) => {
+    try {
+      // 1. حالة إضافة موظف جديد
+      if (editing === "new") {
+        const response = await fetch("http://localhost:5000/api/employees", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: data.name,
+            role: data.role,
+            pinHash: data.pin,
+          }),
+        });
+
+        // لو السيرفر تمام والداتا بيس وافقت
+        if (response.ok) {
+          const savedEmp = await response.json();
+
+          // حفظ في اللوكل ستوريدج وتحديث الحالة
+          await addEmployee(savedEmp.name, savedEmp.role, savedEmp.pinHash);
+          setServerEmployees((prev) => [...prev, savedEmp]);
+          toast.success("تم الإضافة في السيرفر بنجاح");
+        }
+        // لو السيرفر رجع خطأ (زي الباسوورد المكرر)
+        else {
+          const errorData = await response.json().catch(() => ({}));
+          console.log("❌ السيرفر رجع خطأ كامل هنا:", errorData);
+          // هيعرض الرسالة العربي اللي جاية من الباك إند
+          toast.error(
+            errorData.message || `خطأ من السيرفر بكود: ${response.status}`,
+          );
+        }
+      }
+
+      // 2. حالة تعديل موظف حالي
+      else {
+        await updateEmployee((editing as Employee).id, {
+          name: data.name,
+          role: data.role,
+          newPin: data.pin || undefined,
+        });
+        toast.success("تم التحديث بنجاح");
+      }
+    } catch (err) {
+      console.error("Error saving employee:", err);
+      toast.error("خطأ في الاتصال بقاعدة البيانات");
+    } finally {
+      // قفل الشاشة وتصفير البيانات في كل الأحوال
+      setEditing(null);
+      setCurrentOperator(null);
+    }
+  };
 
   return (
     <div dir="rtl" className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Fingerprint className="w-6 h-6" /> بصمات الموظفين
+            <Fingerprint className="w-6 h-6" /> إدارة الصلاحيات
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            إدارة الكاشيرين وكباتن الصالة والأكواد السرية.
+            إدارة صلاحيات التشغيل والإدارة والأكواد السرية.
           </p>
         </div>
-        <Button onClick={() => setEditing("new")} className="gap-2">
-          <Plus className="w-4 h-4" /> إضافة موظف
-        </Button>
+
+        <ActionGate
+          requiredRole="محاسب"
+          actionName="إضافة موظف جديد"
+          onSuccess={(operator: any) => {
+            setCurrentOperator(operator);
+            setEditing("new");
+          }}
+        >
+          <Button className="gap-2">
+            <Plus className="w-4 h-4" /> إضافة موظف
+          </Button>
+        </ActionGate>
+      </div>
+
+      <div className="flex gap-2 p-1 bg-secondary/30 rounded-lg w-fit">
+        <button
+          onClick={() => setActiveTab("staff")}
+          className={`flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${
+            activeTab === "staff"
+              ? "bg-primary text-primary-foreground shadow"
+              : "hover:bg-secondary"
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          التشغيل (كاشير و كابتن)
+        </button>
+
+        <ActionGate
+          requiredRole="محاسب"
+          actionName="فتح بيانات الإدارة"
+          onSuccess={() => setActiveTab("management")}
+        >
+          <button
+            className={`flex items-center gap-2 px-6 py-2 rounded-md text-sm font-medium transition-all ${
+              activeTab === "management"
+                ? "bg-primary text-primary-foreground shadow"
+                : "hover:bg-secondary"
+            }`}
+          >
+            <ShieldAlert className="w-4 h-4" />
+            الإدارة العليا (محاسب ومدير)
+          </button>
+        </ActionGate>
       </div>
 
       <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -102,25 +250,25 @@ function RolesPage() {
                   جاري جلب الموظفين من قاعدة البيانات (pgAdmin)...
                 </td>
               </tr>
-            ) : employeesList.length === 0 ? (
+            ) : displayedEmployees.length === 0 ? (
               <tr>
                 <td
                   colSpan={4}
                   className="p-8 text-center text-muted-foreground"
                 >
-                  لا يوجد موظفون — أضف أول كاشير للبدء.
+                  لا يوجد موظفون في هذا القسم.
                 </td>
               </tr>
             ) : (
-              employeesList.map((e) => (
+              displayedEmployees.map((e) => (
                 <tr key={e.id} className="border-t border-border">
                   <td className="p-3 font-medium">{e.name}</td>
                   <td className="p-3">
                     <span
                       className={`px-2 py-0.5 rounded text-xs ${
-                        e.role === "كاشير"
+                        e.role === "كاشير" || e.role === "كابتن صالة"
                           ? "bg-primary/10 text-primary"
-                          : "bg-amber-100 text-amber-700"
+                          : "bg-red-100 text-red-700 font-bold"
                       }`}
                     >
                       {e.role}
@@ -128,42 +276,74 @@ function RolesPage() {
                   </td>
                   <td className="p-3 font-mono">
                     <div className="flex items-center gap-2">
-                      <span className="tracking-widest">
-                        {revealed[e.id] ? e.pinHash || e.pin || "####" : "####"}
-                      </span>
-                      <button
-                        onClick={() => toggleEye(e.id)}
-                        className="text-muted-foreground hover:text-foreground"
-                      >
-                        {revealed[e.id] ? (
-                          <EyeOff className="w-4 h-4" />
-                        ) : (
-                          <Eye className="w-4 h-4" />
-                        )}
-                      </button>
+                      {/* لو الحساب مبرمج أو مالك هيعرض علامات حجب ومش هيظهر زرار العين نهائياً */}
+                      {e.role === "مبرمج" ||
+                      e.role === "developer" ||
+                      e.role === "مالك" ||
+                      e.role === "owner" ? (
+                        <span className="tracking-widest text-muted-foreground/60 selection:bg-transparent">
+                          ••••
+                        </span>
+                      ) : (
+                        <>
+                          <span className="tracking-widest">
+                            {revealed[e.id]
+                              ? e.pinHash || e.pin || "####"
+                              : "####"}
+                          </span>
+                          <button
+                            onClick={() => toggleEye(e.id)}
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            {revealed[e.id] ? (
+                              <EyeOff className="w-4 h-4" />
+                            ) : (
+                              <Eye className="w-4 h-4" />
+                            )}
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                   <td className="p-3">
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => setEditing(e)}
-                        className="p-1.5 rounded hover:bg-secondary"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm(`حذف ${e.name}؟`)) {
-                            // للحذف من اللوكال ستوريدج (يفضل ربطها بالسيرفر لاحقاً)
-                            deleteEmployee(e.id);
-                            toast.success("تم الحذف محلياً");
-                          }
-                        }}
-                        className="p-1.5 rounded hover:bg-destructive/10 text-destructive"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {e.role === "مبرمج" ||
+                    e.role === "developer" ||
+                    e.role === "مالك" ||
+                    e.role === "owner" ? (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1 font-medium text-amber-600 selection:bg-transparent">
+                        <Lock className="w-3 h-3" /> نظام محمي
+                      </span>
+                    ) : (
+                      <div className="flex gap-1">
+                        <ActionGate
+                          requiredRole={e.role as any}
+                          actionName={`تعديل بيانات ${e.name}`}
+                          onSuccess={(operator: any) => {
+                            setCurrentOperator(operator);
+                            setEditing(e);
+                          }}
+                        >
+                          <button className="p-1.5 rounded hover:bg-secondary">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        </ActionGate>
+
+                        <ActionGate
+                          requiredRole={e.role as any}
+                          actionName={`حذف الموظف ${e.name}`}
+                          onSuccess={() => {
+                            if (confirm(`حذف ${e.name}؟`)) {
+                              deleteEmployee(e.id);
+                              toast.success("تم الحذف محلياً");
+                            }
+                          }}
+                        >
+                          <button className="p-1.5 rounded hover:bg-destructive/10 text-destructive">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </ActionGate>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))
@@ -181,56 +361,20 @@ function RolesPage() {
           if (pinFor) setRevealed((r) => ({ ...r, [pinFor]: true }));
           setPinFor(null);
         }}
+        onCancel={() => setPinFor(null)}
       />
 
       {editing && (
         <EmployeeDialog
           employee={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
-          onSave={async (data) => {
-            try {
-              if (editing === "new") {
-                // 🌟 إرسال الموظف الجديد لقاعدة البيانات (السيرفر)
-                const res = await fetch("http://localhost:5000/api/employees", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    name: data.name,
-                    role: data.role,
-                    pinHash: data.pin,
-                  }),
-                });
-
-                if (res.ok) {
-                  const savedEmp = await res.json();
-                  // 🌟 حفظ في اللوكال ستوريدج بعد نجاح السيرفر
-                  await addEmployee(
-                    savedEmp.name,
-                    savedEmp.role,
-                    savedEmp.pinHash,
-                  );
-                  toast.success("تم الإضافة في السيرفر بنجاح");
-
-                  // تحديث القائمة فوراً
-                  setServerEmployees((prev) => [...prev, savedEmp]);
-                } else {
-                  toast.error("فشل الحفظ في السيرفر!");
-                }
-              } else {
-                await updateEmployee((editing as Employee).id, {
-                  name: data.name,
-                  role: data.role,
-                  newPin: data.pin || undefined,
-                });
-                toast.success("تم التحديث");
-              }
-            } catch (err) {
-              console.error(err);
-              toast.error("خطأ في الاتصال بقاعدة البيانات");
-            } finally {
-              setEditing(null);
-            }
+          activeTab={activeTab}
+          operator={currentOperator}
+          onClose={() => {
+            setEditing(null);
+            setCurrentOperator(null);
           }}
+          // 🌟 سطر واحد نضيف ومقروء وباصينا فيه الدالة اللي فوق
+          onSave={handleSaveEmployee}
         />
       )}
     </div>
@@ -239,15 +383,32 @@ function RolesPage() {
 
 function EmployeeDialog({
   employee,
+  activeTab,
+  operator,
   onClose,
   onSave,
 }: {
-  employee: Employee | null;
+  employee: any;
+  activeTab: "staff" | "management";
+  operator: any;
   onClose: () => void;
-  onSave: (d: { name: string; role: EmployeeRole; pin?: string }) => void;
+  onSave: (d: { name: string; role: any; pin?: string }) => void;
 }) {
   const [name, setName] = useState(employee?.name || "");
-  const [role, setRole] = useState<EmployeeRole>(employee?.role || "كاشير");
+
+  const operatorWeight = ROLE_WEIGHTS[operator?.role || "مبرمج"] || 4;
+
+  const baseRoles =
+    activeTab === "staff"
+      ? ["كاشير", "كابتن صالة"]
+      : ["محاسب", "مدير", "مبرمج"];
+
+  const availableRoles = baseRoles.filter(
+    (r) => (ROLE_WEIGHTS[r] || 0) <= operatorWeight,
+  );
+
+  const [role, setRole] = useState<any>(employee?.role || availableRoles[0]);
+
   const [pin, setPin] = useState("");
   const [pin2, setPin2] = useState("");
   const [err, setErr] = useState("");
@@ -259,6 +420,11 @@ function EmployeeDialog({
     if (!employee && (!pin || pin.length < 4))
       return setErr("كلمة السر يجب أن تكون 4 خانات على الأقل");
     if (pin && pin !== pin2) return setErr("كلمة السر غير متطابقة");
+
+    if ((ROLE_WEIGHTS[role] || 0) > operatorWeight) {
+      return setErr("خطأ أمني: لا يمكنك تعيين رتبة أعلى من صلاحياتك الحالية!");
+    }
+
     onSave({ name, role, pin: pin || undefined });
   }
 
@@ -274,18 +440,30 @@ function EmployeeDialog({
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <label className="text-xs font-medium">الوظيفة</label>
-            <div className="flex gap-2 mt-1">
-              {(["كاشير", "كابتن صالة"] as EmployeeRole[]).map((r) => (
-                <button
-                  type="button"
-                  key={r}
-                  onClick={() => setRole(r)}
-                  className={`flex-1 h-9 rounded-md text-sm ${role === r ? "bg-primary text-primary-foreground" : "bg-secondary"}`}
-                >
-                  {r}
-                </button>
-              ))}
+            <label className="text-xs font-medium">
+              الوظيفة المتاحة برتبتك
+            </label>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {availableRoles.length === 0 ? (
+                <p className="text-xs text-destructive font-medium">
+                  ليس لديك صلاحية لإضافة موظفين في هذا القسم.
+                </p>
+              ) : (
+                availableRoles.map((r) => (
+                  <button
+                    type="button"
+                    key={r}
+                    onClick={() => setRole(r)}
+                    className={`flex-1 min-w-[80px] h-9 rounded-md text-sm transition-colors ${
+                      role === r
+                        ? "bg-primary text-primary-foreground font-bold"
+                        : "bg-secondary hover:bg-secondary/80"
+                    }`}
+                  >
+                    {r}
+                  </button>
+                ))
+              )}
             </div>
           </div>
           <div>
@@ -308,12 +486,14 @@ function EmployeeDialog({
               onChange={(e) => setPin2(e.target.value.replace(/^-+/, ""))}
             />
           </div>
-          {err && <p className="text-xs text-destructive">{err}</p>}
+          {err && <p className="text-xs text-destructive font-medium">{err}</p>}
           <DialogFooter className="gap-2">
             <Button type="button" variant="outline" onClick={onClose}>
               إلغاء
             </Button>
-            <Button type="submit">حفظ</Button>
+            <Button type="submit" disabled={availableRoles.length === 0}>
+              حفظ
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

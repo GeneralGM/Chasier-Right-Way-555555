@@ -730,6 +730,6 @@ app.get("/api/audits", async (req, res) => {
 });
 /////////////////////////////////////////////////
 const PORT = 5000;
-app.listen(PORT, () => {
-  console.log(`🔥 السيرفر شغال زي الفل على بورت ${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server is running on all network interfaces on port ${PORT}`);
 });

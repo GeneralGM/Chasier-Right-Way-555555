@@ -290,14 +290,16 @@ function defaultDB(): DB {
   ];
   // 🔥 التعديل: إزالة المفاتيح المكررة التي كانت تمسح البيانات
   return {
-    orders: undefined,
-    updateDeptStock: undefined,
+    orders: undefined as any,
+    updateDeptStock: undefined as any,
     items,
     vouchers: [],
     deptStock: {},
     meals: [],
     sales: [],
     audits: [],
+    shift: null, // 🌟 الـ shift مطلوب في الـ DB
+    // shift: [], // 🌟 حطينا المصفوفة الاحتياطية للورديات
   };
 }
 
@@ -319,6 +321,7 @@ function migrate(db: any): DB {
     meals: Array.isArray(db.meals) ? db.meals : [],
     sales: Array.isArray(db.sales) ? db.sales : [],
     audits: Array.isArray(db.audits) ? db.audits : [],
+    shift: db.shift !== undefined ? db.shift : base.shift, // 🌟 مابين الـ shift القديم أو الديفولت
   };
   for (const it of out.items) {
     if (!it.code) it.code = nextCode(out.items.filter((x) => x.code));
@@ -446,14 +449,15 @@ export function useDB() {
     typeof window !== "undefined"
       ? load()
       : {
-          orders: undefined,
-          updateDeptStock: undefined,
+          orders: undefined as any,
+          updateDeptStock: undefined as any,
           items: [],
           vouchers: [],
           deptStock: {},
           meals: [],
           sales: [],
           audits: [],
+          shift: null, // 🌟 ضفنا الـ shift هنا عشان التايب سكريبت يرتاح
         },
   );
   useEffect(() => {

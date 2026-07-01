@@ -1,7 +1,7 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // src/lib/api.ts
-const BASE_URL = "http://localhost:5000/api"; // 🔥 أضفنا /api هنا بس!
+const BASE_URL = "http://192.168.1.21:5000/api"; // اكتب الـ IP بتاعك هنا وبورت السيرفر
 export async function fetchEmployees() {
   const res = await fetch(`${BASE_URL}/employees`);
   if (!res.ok) throw new Error("فشل جلب الموظفين");

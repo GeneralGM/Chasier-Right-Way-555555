@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
@@ -32,6 +33,7 @@ export const Route = createFileRoute("/roles")({
   head: () => ({ meta: [{ title: "بصمات الموظفين - الصلاحيات" }] }),
   component: RolesPage,
 });
+const API_BASE_URL = "http://192.168.1.15:5000";
 
 // 🌟 جدول أوزان الصلاحيات للمقارنة الذكية
 const ROLE_WEIGHTS: Record<string, number> = {
@@ -66,7 +68,7 @@ function RolesPage() {
     async function fetchEmployeesFromPostgres() {
       try {
         setIsLoading(true);
-        const response = await fetch("http://localhost:5000/api/employees");
+        const response = await fetch("http://192.168.1.21:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -124,7 +126,7 @@ function RolesPage() {
     try {
       // 1. حالة إضافة موظف جديد
       if (editing === "new") {
-        const response = await fetch("http://localhost:5000/api/employees", {
+        const response = await fetch(`${API_BASE_URL}/api/employees`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

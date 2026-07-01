@@ -1,4 +1,6 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   Package,
@@ -39,6 +41,29 @@ export function AppShell({ children }: { children: ReactNode }) {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const isWarehouseRoute = warehouseNav.some((n) => n.to === pathname);
+  const [deviceType, setDeviceType] = useState<"main" | "micros">("main");
+  const navigate = useNavigate(); // 🌟 تعريف الـ navigate
+
+  useEffect(() => {
+    fetch("http://192.168.1.21:5000/api/device-check")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.deviceType === "micros") {
+          setDeviceType("micros");
+          // 🌟 بنسجلها هنا في المتغير العالمي للويندوز عشان أي صفحة تشوفها
+          (window as any).isMicrosDevice = true;
+
+          if (pathname !== "/orders") {
+            navigate({ to: "/orders" });
+          }
+        } else {
+          // لو مش ميكروس بتبقى false
+          (window as any).isMicrosDevice = false;
+        }
+      })
+      .catch((err) => console.error("Error checking device IP:", err));
+  }, [pathname, navigate]);
+  const isMicros = deviceType === "micros";
 
   useEffect(() => {
     setWarehouseOpen(false);
@@ -73,80 +98,98 @@ export function AppShell({ children }: { children: ReactNode }) {
               </p>
             </div>
           </div>
+
+          {/* 💻 القائمة الخاصة بالشاشات الكبيرة (Desktop) */}
           <nav className="hidden md:flex items-center gap-1">
-            <div className="relative" ref={dropdownRef}>
-              <ActionGate
-                requiredRole="محاسب"
-                actionName="فتح المخزن و ظهور كل العناصر"
-                onSuccess={() => setWarehouseOpen((v) => !v)}
-              >
-                <button
-                  className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition ${
-                    isWarehouseRoute
-                      ? "bg-primary text-primary-foreground"
-                      : "text-foreground hover:bg-secondary"
-                  }`}
+            {/* 🔴 إخفاء زرار وقائمة "المخزن" بالكامل لو الجهاز ميكروس */}
+            {!isMicros && (
+              <div className="relative" ref={dropdownRef}>
+                <ActionGate
+                  requiredRole="محاسب"
+                  actionName="فتح المخزن و ظهور كل العناصر"
+                  onSuccess={() => setWarehouseOpen((v) => !v)}
                 >
-                  <Warehouse className="w-4 h-4" />
-                  المخزن
-                  <ChevronDown
-                    className={`w-3.5 h-3.5 transition ${warehouseOpen ? "rotate-180" : ""}`}
-                  />
-                </button>
-              </ActionGate>
-              {warehouseOpen && (
-                <div className="absolute end-0 mt-1 w-56 bg-card border border-border rounded-lg shadow-lg py-1 z-40">
-                  {warehouseNav.map((n) => {
-                    const active = pathname === n.to;
-                    const Icon = n.icon;
-                    return (
-                      <Link
-                        key={n.to}
-                        to={n.to}
-                        className={`px-3 py-2 text-sm flex items-center gap-2 transition ${
-                          active
-                            ? "bg-primary text-primary-foreground"
-                            : "text-foreground hover:bg-secondary"
-                        }`}
-                      >
-                        <Icon className="w-4 h-4" />
-                        {n.label}
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            {primaryNav.map((n) => {
-              const active = pathname === n.to;
-              const Icon = n.icon;
-              return (
-                <Link
-                  key={n.to}
-                  to={n.to}
-                  className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition ${
-                    active
-                      ? "bg-primary text-primary-foreground"
-                      : "text-foreground hover:bg-secondary"
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  {n.label}
-                </Link>
-              );
-            })}
+                  <button
+                    className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition ${
+                      isWarehouseRoute
+                        ? "bg-primary text-primary-foreground"
+                        : "text-foreground hover:bg-secondary"
+                    }`}
+                  >
+                    <Warehouse className="w-4 h-4" />
+                    المخزن
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 transition ${warehouseOpen ? "rotate-180" : ""}`}
+                    />
+                  </button>
+                </ActionGate>
+                {warehouseOpen && (
+                  <div className="absolute end-0 mt-1 w-56 bg-card border border-border rounded-lg shadow-lg py-1 z-40">
+                    {warehouseNav.map((n) => {
+                      const active = pathname === n.to;
+                      const Icon = n.icon;
+                      return (
+                        <Link
+                          key={n.to}
+                          to={n.to}
+                          className={`px-3 py-2 text-sm flex items-center gap-2 transition ${
+                            active
+                              ? "bg-primary text-primary-foreground"
+                              : "text-foreground hover:bg-secondary"
+                          }`}
+                        >
+                          <Icon className="w-4 h-4" />
+                          {n.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 🟢 فلترة القائمة الرئيسية (Primary Navigation) */}
+            {primaryNav
+              .filter((n) => !isMicros || n.to === "/orders") // 🌟 لو ميكروس، عدي صفحة الطلبات بس
+              .map((n) => {
+                const active = pathname === n.to;
+                const Icon = n.icon;
+                return (
+                  <Link
+                    key={n.to}
+                    to={n.to}
+                    className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition ${
+                      active
+                        ? "bg-primary text-primary-foreground"
+                        : "text-foreground hover:bg-secondary"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {n.label}
+                  </Link>
+                );
+              })}
           </nav>
-          <button
-            onClick={logout}
-            className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md text-destructive hover:bg-destructive/10"
-            title="تسجيل خروج"
-          >
-            <LogOut className="w-4 h-4" />
-            <span className="hidden sm:inline">خروج</span>
-          </button>
+
+          {/* 🔴 زرار الخروج يظهر فقط للجهاز الرئيسي ويختفي تماماً من التابلت */}
+          {!isMicros && (
+            <button
+              onClick={logout}
+              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md text-destructive hover:bg-destructive/10"
+              title="تسجيل خروج"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">خروج</span>
+            </button>
+          )}
         </div>
+
+        {/* 📱 القائمة الخاصة بالشاشات الصغيرة / التابلت (Mobile Navbar) */}
         <nav className="md:hidden flex overflow-x-auto gap-1 px-3 pb-2 border-t border-border pt-2">
-          {[...warehouseNav, ...primaryNav].map((n) => {
+          {[
+            ...(!isMicros ? warehouseNav : []), // 🔴 لو ميكروس امسح مصفوفة المخزن تماماً
+            ...primaryNav.filter((n) => !isMicros || n.to === "/orders"), // 🌟 لو ميكروس سيب الطلبات بس[cite: 1]
+          ].map((n) => {
             const active = pathname === n.to;
             const Icon = n.icon;
             return (

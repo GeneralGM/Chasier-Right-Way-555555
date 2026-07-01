@@ -728,6 +728,29 @@ app.get("/api/audits", async (req, res) => {
     res.status(500).json({ error: "حدث خطأ أثناء جلب الجرد" });
   }
 });
+///////////////////////////////////////////////// IP /////////////////////////////////////////////////
+// 🖥️ قائمة بالـ IPs الثابتة لأجهزة الميكروس في المول
+const MICROS_IPS = [
+  "192.168.1.100", // تابلت 1
+  "192.168.1.101", // تابلت 2
+  "::ffff:192.168.1.100", // الصيغة اللي ساعات الويندوز بيقرا بيها الـ IPv4
+  "::ffff:192.168.1.101",
+];
+
+// 🔍 API سريعة الفرونت إند يكلمها أول ما يفتح عشان يعرف نفسه إيه
+app.get("/api/device-check", (req, res) => {
+  // جلب الـ IP بتاع الجهاز اللي باعت الطلب حالياً
+  const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+
+  // نتحقق هل الـ IP ده موجود في قائمة الميكروس؟
+  const isMicros = MICROS_IPS.includes(clientIp);
+
+  res.json({
+    ip: clientIp,
+    deviceType: isMicros ? "micros" : "main",
+  });
+});
+
 /////////////////////////////////////////////////
 const PORT = 5000;
 app.listen(PORT, "0.0.0.0", () => {

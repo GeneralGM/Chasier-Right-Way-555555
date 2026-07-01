@@ -90,7 +90,7 @@ function ShiftLogin() {
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch("http://localhost:5000/api/employees");
+        const response = await fetch("http://192.168.1.21:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -201,6 +201,7 @@ function PosScreen() {
   const [transferOpen, setTransferOpen] = useState(false);
   const [printOrder, setPrintOrder] = useState<string | null>(null);
   const [checkoutConfirm, setCheckoutConfirm] = useState<string | null>(null);
+  const isMicros = (window as any).isMicrosDevice === true;
 
   const currentZone = ZONES.find((z) => z.id === zone)!;
   useEffect(() => {
@@ -381,7 +382,7 @@ function PosScreen() {
                 <span className="font-bold text-lg">{code}</span>
                 {st !== "empty" && (
                   <span className="text-[10px] uppercase tracking-wide">
-                    {st === "active" ? "نشط" : "مطبوع"}
+                    {st === "active" ? "" : "مطبوع"}
                   </span>
                 )}
               </button>
@@ -400,27 +401,31 @@ function PosScreen() {
           <Button onClick={actionOpen} className="h-16 text-base gap-2">
             <Plus className="w-5 h-5" /> فتح
           </Button>
-          <Button
-            onClick={actionPrint}
-            variant="secondary"
-            className="h-16 text-base gap-2"
-          >
-            <Printer className="w-5 h-5" /> طباعة
-          </Button>
-          <Button
-            onClick={() => setTransferOpen(true)}
-            variant="secondary"
-            className="h-16 text-base gap-2"
-          >
-            <ArrowLeftRight className="w-5 h-5" /> تحويل
-          </Button>
-          <Button
-            onClick={actionCheckout}
-            variant="destructive"
-            className="h-16 text-base gap-2"
-          >
-            <CheckCircle2 className="w-5 h-5" /> إنهاء
-          </Button>
+          {!isMicros && (
+            <>
+              <Button
+                onClick={actionPrint}
+                variant="secondary"
+                className="h-16 text-base gap-2"
+              >
+                <Printer className="w-5 h-5" /> طباعة
+              </Button>
+              <Button
+                onClick={() => setTransferOpen(true)}
+                variant="secondary"
+                className="h-16 text-base gap-2"
+              >
+                <ArrowLeftRight className="w-5 h-5" /> تحويل
+              </Button>
+              <Button
+                onClick={actionCheckout}
+                variant="destructive"
+                className="h-16 text-base gap-2"
+              >
+                <CheckCircle2 className="w-5 h-5" /> إنهاء
+              </Button>
+            </>
+          )}
         </aside>
       </div>
 
@@ -498,13 +503,24 @@ function ZoneTabs({
   zone: ZoneId;
   setZone: (z: ZoneId) => void;
 }) {
+  const isMicros = (window as any).isMicrosDevice === true;
+
+  // 🔍 بنفلتر التابات: لو ميكروس، بنخفي الـ takeaway والـ others، لو مش ميكروس بنعرض كله عادي
+  const allowedZones = isMicros
+    ? ZONES.filter((z) => z.id !== "takeaway" && z.id !== "others")
+    : ZONES;
+
   return (
     <div className="flex gap-1 overflow-x-auto px-2">
-      {ZONES.map((z) => (
+      {allowedZones.map((z) => (
         <button
           key={z.id}
           onClick={() => setZone(z.id)}
-          className={`shrink-0 px-3 h-10 rounded-md text-sm font-medium transition ${zone === z.id ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground hover:bg-secondary/80"}`}
+          className={`shrink-0 px-3 h-10 rounded-md text-sm font-medium transition ${
+            zone === z.id
+              ? "bg-primary text-primary-foreground"
+              : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+          }`}
         >
           {z.label}
         </button>
@@ -1219,7 +1235,7 @@ function OrderEntryDialog({
       };
 
       try {
-        const response = await fetch("http://localhost:5000/api/invoices", {
+        const response = await fetch("http://192.168.1.21:5000/api/invoices", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(inv),
@@ -1292,7 +1308,7 @@ function OrderEntryDialog({
     };
 
     try {
-      const response = await fetch("http://localhost:5000/api/invoices", {
+      const response = await fetch("http://192.168.1.21:5000/api/invoices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(inv),
@@ -2231,7 +2247,7 @@ function CheckoutDialog({
             const originalItem = db.items.find((i) => i.id === ing.itemId);
             const itemName = originalItem ? originalItem.name : "صنف مخزني";
 
-            await fetch("http://localhost:5000/api/dept-stock", {
+            await fetch("http://192.168.1.21:5000/api/dept-stock", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -2326,7 +2342,7 @@ function CheckoutDialog({
 
           // أ. الحفظ في الـ pgAdmin عن طريق الـ API الخاص بالسيرفر
           try {
-            await fetch("http://localhost:5000/api/sales", {
+            await fetch("http://192.168.1.21:5000/api/sales", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(newSale),

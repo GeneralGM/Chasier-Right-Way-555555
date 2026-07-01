@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useCallback, useEffect, useState } from "react";
 import { round2, clamp0 } from "./format";
@@ -319,7 +320,7 @@ export function usePosDB() {
 
       // 🌟 السحر هنا: إرسال الفاتورة فوراً لقاعدة البيانات (pgAdmin) مهما كان نوعها (صالة / تيك أواي / دليفري)
       try {
-        const response = await fetch("http://localhost:5000/api/invoices", {
+        const response = await fetch("http://192.168.1.21:5000/api/invoices", {
           method: "POST",
           mode: "cors",
           headers: { "Content-Type": "application/json" },
@@ -458,7 +459,7 @@ export function usePosDB() {
       };
 
       try {
-        const res = await fetch("http://localhost:5000/api/shifts", {
+        const res = await fetch("http://192.168.1.21:5000/api/shifts", {
           method: "POST",
           mode: "cors",
           headers: { "Content-Type": "application/json" },
@@ -574,9 +575,9 @@ export function usePosDB() {
         console.log("🔄 جاري مزامنة وتحديث البيانات من السيرفر...");
 
         const [invoicesRes, shiftsRes, employeesRes] = await Promise.all([
-          fetch("http://localhost:5000/api/invoices"),
-          fetch("http://localhost:5000/api/shifts"),
-          fetch("http://localhost:5000/api/employees"),
+          fetch("http://192.168.1.21:5000/api/invoices"),
+          fetch("http://192.168.1.21:5000/api/shifts"),
+          fetch("http://192.168.1.21:5000/api/employees"),
         ]);
 
         if (invoicesRes.ok && shiftsRes.ok && employeesRes.ok) {

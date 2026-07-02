@@ -43,7 +43,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [deviceType, setDeviceType] = useState<"main" | "micros">("main");
   const navigate = useNavigate(); // 🌟 تعريف الـ navigate
   useEffect(() => {
-    fetch("http://192.168.1.21:5000/api/device-check")
+    fetch("http://192.168.100.195:5000/api/device-check")
       .then((res) => res.json())
       .then((data) => {
         // 🔍 شيلنا الـ alert وخليناها console.log صامت في الخلفية للاحتياط

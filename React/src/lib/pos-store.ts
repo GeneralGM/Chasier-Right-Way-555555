@@ -186,19 +186,31 @@ export function usePosDB() {
   useEffect(() => {
     const fetchActiveOrders = async () => {
       try {
-        const res = await fetch("http://192.168.1.21:5000/api/pos/orders");
-        const serverOrders = await res.json();
+        // جلب الطاولات والشيفت مع بعض
+        const [ordersRes, shiftRes] = await Promise.all([
+          fetch("http://192.168.100.195:5000/api/pos/orders"),
+          fetch("http://192.168.100.195:5000/api/pos/shift"),
+        ]);
+
+        const serverOrders = await ordersRes.json();
+        const serverShift = await shiftRes.json();
 
         const cur = load();
 
-        // 🧠 الحماية هنا: لو السيرفر راجع فاضي (مثلاً بعد فصل الكهرباء) والـ LocalStorage فيه طاولات مفتوحة
+        // 🌟 منطق الشيفت الإجباري:
+        if (serverShift && serverShift.openedAt) {
+          cur.shift = serverShift; // لو السيرفر فيه شيفت، افتح فوراً
+        } else {
+          cur.shift = null; // لو السيرفر مفيهوش شيفت، اقفل واطرد المستخدم
+        }
+
+        // الحماية بتاعة الطاولات اللي كانت عندك زي ما هي
         if (
           Object.keys(serverOrders).length === 0 &&
           Object.keys(cur.orders || {}).length > 0
         ) {
-          // نرفع الطاولات المحلية الحالية للسيرفر عشان نرجّع حالته زي ما كانت
           for (const tableCode in cur.orders) {
-            await fetch("http://192.168.1.21:5000/api/pos/orders/upsert", {
+            await fetch("http://192.168.100.195:5000/api/pos/orders/upsert", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -208,13 +220,12 @@ export function usePosDB() {
             });
           }
         } else {
-          // لو السيرفر شغال تمام وفيه داتا، بنحدث الفرونت إند عادي
           cur.orders = serverOrders;
           save(cur);
           setDb(cur);
         }
       } catch (err) {
-        console.error("🚨 خطأ أثناء جلب الطاولات النشطة:", err);
+        console.error("🚨 خطأ أثناء المزامنة:", err);
       }
     };
 
@@ -343,7 +354,7 @@ export function usePosDB() {
 
     // 2️⃣ إرسال التحديث للسيرفر في الخلفية عشان الأجهزة التانية لقطه
     try {
-      await fetch("http://192.168.1.21:5000/api/pos/orders/upsert", {
+      await fetch("http://192.168.100.195:5000/api/pos/orders/upsert", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -365,7 +376,7 @@ export function usePosDB() {
 
     // 2️⃣ إبلاغ السيرفر بمسح الطاولة عشان تتشال من عند الميكروس برضه
     try {
-      await fetch("http://192.168.1.21:5000/api/pos/orders/clear", {
+      await fetch("http://192.168.100.195:5000/api/pos/orders/clear", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableCode }),
@@ -391,12 +402,15 @@ export function usePosDB() {
 
       // 🌟 السحر هنا: إرسال الفاتورة فوراً لقاعدة البيانات (pgAdmin) مهما كان نوعها (صالة / تيك أواي / دليفري)
       try {
-        const response = await fetch("http://192.168.1.21:5000/api/invoices", {
-          method: "POST",
-          mode: "cors",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fullInvoice),
-        });
+        const response = await fetch(
+          "http://192.168.100.195:5000/api/invoices",
+          {
+            method: "POST",
+            mode: "cors",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(fullInvoice),
+          },
+        );
 
         if (response.ok) {
           console.log("✅ تم حفظ الفاتورة بنجاح في قاعدة البيانات PostgreSQL!");
@@ -495,10 +509,24 @@ export function usePosDB() {
 
   const openShift = useCallback(
     async (cashierId: string, cashierName: string) => {
+      const shiftData = { cashierId, cashierName, openedAt: Date.now() };
+
+      // 1. الحفظ محلياً
       const cur = load();
-      cur.shift = { cashierId, cashierName, openedAt: Date.now() };
+      cur.shift = shiftData;
       save(cur);
       setDb(cur);
+
+      // 2. إبلاغ السيرفر عشان يفتح أجهزة الميكروس
+      try {
+        await fetch("http://192.168.100.195:5000/api/pos/shift/open", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(shiftData),
+        });
+      } catch (err) {
+        console.error("🚨 خطأ في إرسال الشيفت للسيرفر", err);
+      }
     },
     [],
   );
@@ -530,7 +558,7 @@ export function usePosDB() {
       };
 
       try {
-        const res = await fetch("http://192.168.1.21:5000/api/shifts", {
+        const res = await fetch("http://192.168.100.195:5000/api/shifts", {
           method: "POST",
           mode: "cors",
           headers: { "Content-Type": "application/json" },
@@ -640,14 +668,14 @@ export function usePosDB() {
     [],
   );
 
-// تحديث مزامنة الداتابيز مع اللوكال ستوريدج
+  // تحديث مزامنة الداتابيز مع اللوكال ستوريدج
   useEffect(() => {
     async function syncServerToLocalStorage() {
       try {
         const [invoicesRes, shiftsRes, employeesRes] = await Promise.all([
-          fetch("http://192.168.1.21:5000/api/invoices"),
-          fetch("http://192.168.1.21:5000/api/shifts"),
-          fetch("http://192.168.1.21:5000/api/employees"),
+          fetch("http://192.168.100.195:5000/api/invoices"),
+          fetch("http://192.168.100.195:5000/api/shifts"),
+          fetch("http://192.168.100.195:5000/api/employees"),
         ]);
 
         if (invoicesRes.ok && shiftsRes.ok && employeesRes.ok) {
@@ -660,7 +688,7 @@ export function usePosDB() {
           cur.shifts = shifts;
           cur.employees = employees;
           cur.invoices = invoices;
-          
+
           save(cur); // دالة save بتعمل dispatch لـ 'pos-update'
           setDb(cur); // مهم جداً عشان الـ UI يحس بالتحديث ويغير الـ 6 فواتير
         }
@@ -671,7 +699,7 @@ export function usePosDB() {
 
     // استدعاء المزامنة أول مرة
     syncServerToLocalStorage();
-    
+
     // اختياري: لو عايز الفواتير تسمع بين الأجهزة كل 10 ثواني
     const interval = setInterval(syncServerToLocalStorage, 10000);
     return () => clearInterval(interval);

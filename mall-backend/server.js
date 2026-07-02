@@ -319,6 +319,8 @@ app.post("/api/shifts", async (req, res) => {
     // إجبار التواريخ تتخزن كأرقام بملي الثواني (تطابق الـ bigint عندك في الداتابيز)
     const finalOpenedAt = openedAt ? Number(openedAt) : Date.now();
     const finalClosedAt = closedAt ? Number(closedAt) : Date.now();
+    
+    currentActiveShift = null;
 
     const totalRevenue =
       (Number(kitchenSales) || 0) +
@@ -797,6 +799,7 @@ app.get("/api/audits", async (req, res) => {
 // 🖥️ قائمة بالـ IPs الثابتة لأجهزة الميكروس في المول
 const MICROS_IPS = [
   "192.168.1.32", // تابلت 1
+  "192.168.100.205", // تابلت 2
 ];
 
 // 🔍 API سريعة الفرونت إند يكلمها أول ما يفتح عشان يعرف نفسه إيه
@@ -818,6 +821,16 @@ app.get("/api/device-check", (req, res) => {
 
 // كائن لتخزين الطلبات النشطة لكل الطاولات المفتوحة في الميموري
 let activeOrders = {};
+let currentActiveShift = null;
+
+// جلب الشيفت الحالي
+app.get("/api/pos/shift", (req, res) => res.json(currentActiveShift || {}));
+
+// فتح شيفت جديد (من الجهاز الرئيسي)
+app.post("/api/pos/shift/open", (req, res) => {
+  currentActiveShift = req.body;
+  res.json({ success: true });
+});
 
 // 1️⃣ جلب جميع الطاولات المفتوحة حالياً (كل الأجهزة بتنادي المسار ده بشكل دوري)
 app.get("/api/pos/orders", (req, res) => {

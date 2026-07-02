@@ -342,7 +342,14 @@ function InvoicesTab() {
               <th className="text-right p-3">المجموع</th>
               <th className="text-right p-3">الخصم</th>
               <th className="text-right p-3">الضريبة</th>
-              <th className="text-right p-3">التوصيل</th>
+              {/* 🌟 تعديل ديناميكي لعمود الكابتن والتوصيل */}
+              {sub === "dinein" ? (
+                <th className="text-right p-3 text-blue-600 font-bold">
+                  كابتن
+                </th>
+              ) : (
+                <th className="text-right p-3">التوصيل</th>
+              )}
               <th className="text-right p-3">الإجمالي</th>
               <th className="text-right p-3">طباعة</th>
             </tr>
@@ -427,11 +434,20 @@ function InvoicesTab() {
                     {fmt2(inv.discountValue)}
                   </td>
                   <td className="p-3">{fmt2(inv.taxValue)}</td>
-                  <td className="p-3 font-medium text-amber-600">
-                    {inv.deliveryPrice && inv.deliveryPrice > 0
-                      ? `${fmt2(inv.deliveryPrice)} ج.م`
-                      : "—"}
-                  </td>
+
+                  {/* 🌟 خلية الكابتن أو التوصيل حسب حالة الصالة */}
+                  {sub === "dinein" ? (
+                    <td className="p-3 font-bold text-blue-600">
+                      {inv.captainName || "—"}
+                    </td>
+                  ) : (
+                    <td className="p-3 font-medium text-amber-600">
+                      {inv.deliveryPrice && inv.deliveryPrice > 0
+                        ? `${fmt2(inv.deliveryPrice)} ج.م`
+                        : "—"}
+                    </td>
+                  )}
+
                   <td className="p-3 font-bold text-emerald-600">
                     {fmt2(inv.total)}
                   </td>

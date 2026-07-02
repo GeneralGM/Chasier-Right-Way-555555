@@ -640,11 +640,10 @@ export function usePosDB() {
     [],
   );
 
+// تحديث مزامنة الداتابيز مع اللوكال ستوريدج
   useEffect(() => {
     async function syncServerToLocalStorage() {
       try {
-        console.log("🔄 جاري مزامنة وتحديث البيانات من السيرفر...");
-
         const [invoicesRes, shiftsRes, employeesRes] = await Promise.all([
           fetch("http://192.168.1.21:5000/api/invoices"),
           fetch("http://192.168.1.21:5000/api/shifts"),
@@ -656,28 +655,26 @@ export function usePosDB() {
           const shifts = await shiftsRes.json();
           const employees = await employeesRes.json();
 
-          localStorage.setItem("pos_invoices", JSON.stringify(invoices));
-          localStorage.setItem("pos_shifts", JSON.stringify(shifts));
-          localStorage.setItem("pos_employees", JSON.stringify(employees));
-
-          // 💾 بنجيب الكاش الحالي عشان نحافظ على الشيفت المفتوح من غير ما يطير
           const cur = load();
+          // تحديث اللوكال ستوريدج بالداتا اللي جاية من الداتابيز
           cur.shifts = shifts;
           cur.employees = employees;
-
-          // 🛠️ رجعنا الفواتير زي ما كانت عشان صفحة الطلبات متبوظش
           cur.invoices = invoices;
-
-          save(cur);
-
-          console.log("✅ تمت المزامنة بنجاح وصفحة الطلبات رجعت تمام.");
+          
+          save(cur); // دالة save بتعمل dispatch لـ 'pos-update'
+          setDb(cur); // مهم جداً عشان الـ UI يحس بالتحديث ويغير الـ 6 فواتير
         }
       } catch (error) {
         console.error("❌ فشل تحديث الكاش المحلى من السيرفر:", error);
       }
     }
 
+    // استدعاء المزامنة أول مرة
     syncServerToLocalStorage();
+    
+    // اختياري: لو عايز الفواتير تسمع بين الأجهزة كل 10 ثواني
+    const interval = setInterval(syncServerToLocalStorage, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   return {

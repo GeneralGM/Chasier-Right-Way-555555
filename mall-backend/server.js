@@ -274,6 +274,7 @@ app.get("/api/invoices", async (req, res) => {
       customerAddress: inv.customer_address,
       cashierId: inv.cashier_id,
       cashierName: inv.cashier_name,
+      captainName: inv.captain_name || null,
       items: typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items,
       subtotal: Number(inv.subtotal),
       discountPct: Number(inv.discount_pct),
@@ -319,7 +320,7 @@ app.post("/api/shifts", async (req, res) => {
     // إجبار التواريخ تتخزن كأرقام بملي الثواني (تطابق الـ bigint عندك في الداتابيز)
     const finalOpenedAt = openedAt ? Number(openedAt) : Date.now();
     const finalClosedAt = closedAt ? Number(closedAt) : Date.now();
-    
+
     currentActiveShift = null;
 
     const totalRevenue =

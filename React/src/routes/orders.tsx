@@ -2106,7 +2106,7 @@ function CheckoutDialog({
           ? deliveryPrice > 0
             ? "delivery"
             : "takeaway"
-          : "dine-in",
+          : "dinein", // ✅ الصح بدون شرطة
         tableCode: tableCode || currentOrder.tableCode,
         zone: currentOrder.zone || (isTakeaway ? "takeaway" : "dine-in"),
         customerName: currentOrder.customerName || null,

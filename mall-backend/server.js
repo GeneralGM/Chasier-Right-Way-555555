@@ -731,10 +731,7 @@ app.get("/api/audits", async (req, res) => {
 ///////////////////////////////////////////////// IP /////////////////////////////////////////////////
 // 🖥️ قائمة بالـ IPs الثابتة لأجهزة الميكروس في المول
 const MICROS_IPS = [
-  "192.168.1.100", // تابلت 1
-  "192.168.1.101", // تابلت 2
-  "::ffff:192.168.1.100", // الصيغة اللي ساعات الويندوز بيقرا بيها الـ IPv4
-  "::ffff:192.168.1.101",
+  "192.168.1.32", // تابلت 1
 ];
 
 // 🔍 API سريعة الفرونت إند يكلمها أول ما يفتح عشان يعرف نفسه إيه
@@ -749,6 +746,48 @@ app.get("/api/device-check", (req, res) => {
     ip: clientIp,
     deviceType: isMicros ? "micros" : "main",
   });
+});
+// ============================================================================
+// 📡 مسارات مزامنة الطاولات النشطة لحظياً (POS Active Orders)
+// ============================================================================
+
+// كائن لتخزين الطلبات النشطة لكل الطاولات المفتوحة في الميموري
+let activeOrders = {};
+
+// 1️⃣ جلب جميع الطاولات المفتوحة حالياً (كل الأجهزة بتنادي المسار ده بشكل دوري)
+app.get("/api/pos/orders", (req, res) => {
+  res.json(activeOrders);
+});
+
+// 2️⃣ فتح طاولة جديدة أو تحديث أصنافها (من الميكروس أو الرئيسي)
+app.post("/api/pos/orders/upsert", (req, res) => {
+  const { tableCode, orderData } = req.body;
+
+  if (!tableCode) {
+    return res.status(400).json({ error: "كود الطاولة مطلوب" });
+  }
+
+  // حفظ أو تحديث بيانات الطاولة داخل الميموري
+  activeOrders[tableCode] = orderData;
+
+  console.log(`📌 تم تحديث الطاولة [${tableCode}] بنجاح من جهاز العميل.`);
+  res.json({ success: true, orders: activeOrders });
+});
+
+// 3️⃣ إخلاء وطرد الطاولة من الميموري (عند الضغط على إنهاء الحساب أو تفريغها)
+app.post("/api/pos/orders/clear", (req, res) => {
+  const { tableCode } = req.body;
+
+  if (!tableCode) {
+    return res.status(400).json({ error: "كود الطاولة مطلوب" });
+  }
+
+  if (activeOrders[tableCode]) {
+    delete activeOrders[tableCode]; // مسح الطاولة تماماً لتصبح فارغة ومتاحة مجدداً
+    console.log(`🧼 تم تفريغ وإخلاء الطاولة [${tableCode}].`);
+  }
+
+  res.json({ success: true, orders: activeOrders });
 });
 
 /////////////////////////////////////////////////

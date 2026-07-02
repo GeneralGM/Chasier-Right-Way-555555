@@ -1,5 +1,4 @@
 /* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
@@ -43,22 +42,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isWarehouseRoute = warehouseNav.some((n) => n.to === pathname);
   const [deviceType, setDeviceType] = useState<"main" | "micros">("main");
   const navigate = useNavigate(); // 🌟 تعريف الـ navigate
-
   useEffect(() => {
     fetch("http://192.168.1.21:5000/api/device-check")
       .then((res) => res.json())
       .then((data) => {
+        // 🔍 شيلنا الـ alert وخليناها console.log صامت في الخلفية للاحتياط
+        console.log("🖥️ Device Connected:", data.ip, "Type:", data.deviceType);
+
         if (data.deviceType === "micros") {
           setDeviceType("micros");
-          // 🌟 بنسجلها هنا في المتغير العالمي للويندوز عشان أي صفحة تشوفها
-          (window as any).isMicrosDevice = true;
+          localStorage.setItem("isMicrosDevice", "true");
 
           if (pathname !== "/orders") {
             navigate({ to: "/orders" });
           }
         } else {
-          // لو مش ميكروس بتبقى false
-          (window as any).isMicrosDevice = false;
+          setDeviceType("main");
+          localStorage.setItem("isMicrosDevice", "false");
         }
       })
       .catch((err) => console.error("Error checking device IP:", err));

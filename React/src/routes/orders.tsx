@@ -201,7 +201,15 @@ function PosScreen() {
   const [transferOpen, setTransferOpen] = useState(false);
   const [printOrder, setPrintOrder] = useState<string | null>(null);
   const [checkoutConfirm, setCheckoutConfirm] = useState<string | null>(null);
-  const isMicros = (window as any).isMicrosDevice === true;
+  const [isMicros, setIsMicros] = useState(() => {
+    return localStorage.getItem("isMicrosDevice") === "true";
+  });
+
+  useEffect(() => {
+    // تأكيد إضافي أول ما الصفحة تفتح
+    const checkDevice = localStorage.getItem("isMicrosDevice") === "true";
+    setIsMicros(checkDevice);
+  }, []);
 
   const currentZone = ZONES.find((z) => z.id === zone)!;
   useEffect(() => {
@@ -503,8 +511,15 @@ function ZoneTabs({
   zone: ZoneId;
   setZone: (z: ZoneId) => void;
 }) {
-  const isMicros = (window as any).isMicrosDevice === true;
+  const [isMicros, setIsMicros] = useState(() => {
+    return localStorage.getItem("isMicrosDevice") === "true";
+  });
 
+  useEffect(() => {
+    // تأكيد إضافي أول ما الصفحة تفتح
+    const checkDevice = localStorage.getItem("isMicrosDevice") === "true";
+    setIsMicros(checkDevice);
+  }, []);
   // 🔍 بنفلتر التابات: لو ميكروس، بنخفي الـ takeaway والـ others، لو مش ميكروس بنعرض كله عادي
   const allowedZones = isMicros
     ? ZONES.filter((z) => z.id !== "takeaway" && z.id !== "others")
@@ -833,6 +848,15 @@ function OrderEntryDialog({
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   const sellable = meals.filter((m) => m.kind === "menu");
+  const [isMicros, setIsMicros] = useState(() => {
+    return localStorage.getItem("isMicrosDevice") === "true";
+  });
+
+  useEffect(() => {
+    // تأكيد إضافي أول ما الصفحة تفتح
+    const checkDevice = localStorage.getItem("isMicrosDevice") === "true";
+    setIsMicros(checkDevice);
+  }, []);
 
   // تحسين البحث ليكون مرن وغير حساس لحالة الأحرف (Case-Insensitive)
   const filtered = sellable.filter(
@@ -1579,21 +1603,25 @@ function OrderEntryDialog({
                             </div>
                           )}
                         </div>
-                        <button
-                          onClick={() => removeLine(l.id)}
-                          className="text-destructive hover:bg-destructive/10 p-1 rounded transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {!isMicros && (
+                          <button
+                            onClick={() => removeLine(l.id)}
+                            className="text-destructive hover:bg-destructive/10 p-1 rounded transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-1 mt-2">
-                        <button
-                          onClick={() => changeQty(l.id, l.qty - 1)}
-                          className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
-                        >
-                          -
-                        </button>
+                        {!isMicros && (
+                          <button
+                            onClick={() => changeQty(l.id, l.qty - 1)}
+                            className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
+                          >
+                            -
+                          </button>
+                        )}
 
                         <input
                           type="number"

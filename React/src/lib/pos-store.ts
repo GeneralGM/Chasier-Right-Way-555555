@@ -179,6 +179,46 @@ export function usePosDB() {
       window.removeEventListener("storage", r);
     };
   }, []);
+  useEffect(() => {
+    const fetchActiveOrders = async () => {
+      try {
+        const res = await fetch("http://192.168.1.21:5000/api/pos/orders");
+        const serverOrders = await res.json();
+
+        const cur = load();
+
+        // 🧠 الحماية هنا: لو السيرفر راجع فاضي (مثلاً بعد فصل الكهرباء) والـ LocalStorage فيه طاولات مفتوحة
+        if (
+          Object.keys(serverOrders).length === 0 &&
+          Object.keys(cur.orders || {}).length > 0
+        ) {
+          // نرفع الطاولات المحلية الحالية للسيرفر عشان نرجّع حالته زي ما كانت
+          for (const tableCode in cur.orders) {
+            await fetch("http://192.168.1.21:5000/api/pos/orders/upsert", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                tableCode,
+                orderData: cur.orders[tableCode],
+              }),
+            });
+          }
+        } else {
+          // لو السيرفر شغال تمام وفيه داتا، بنحدث الفرونت إند عادي
+          cur.orders = serverOrders;
+          save(cur);
+          setDb(cur);
+        }
+      } catch (err) {
+        console.error("🚨 خطأ أثناء جلب الطاولات النشطة:", err);
+      }
+    };
+
+    fetchActiveOrders();
+
+    const interval = setInterval(fetchActiveOrders, 1500);
+    return () => clearInterval(interval);
+  }, []);
 
   const addEmployee = useCallback(
     async (name: string, role: EmployeeRole, pin: string) => {
@@ -290,18 +330,45 @@ export function usePosDB() {
     [],
   );
 
-  const upsertOrder = useCallback((order: ActiveOrder) => {
+  const upsertOrder = useCallback(async (order: ActiveOrder) => {
+    // 1️⃣ التحديث المحلي السريع فوراً عشان الشاشة متقفلش أو تهنج
     const cur = load();
     cur.orders[order.tableCode] = order;
     save(cur);
     setDb(cur);
+
+    // 2️⃣ إرسال التحديث للسيرفر في الخلفية عشان الأجهزة التانية لقطه
+    try {
+      await fetch("http://192.168.1.21:5000/api/pos/orders/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tableCode: order.tableCode,
+          orderData: order,
+        }),
+      });
+    } catch (err) {
+      console.error("🚨 خطأ أثناء تحديث الطاولة على السيرفر:", err);
+    }
   }, []);
 
-  const clearOrder = useCallback((tableCode: string) => {
+  const clearOrder = useCallback(async (tableCode: string) => {
+    // 1️⃣ مسح الطاولة محلياً فوراً عشان ترجع خضراء وفاضية عندك
     const cur = load();
     delete cur.orders[tableCode];
     save(cur);
     setDb(cur);
+
+    // 2️⃣ إبلاغ السيرفر بمسح الطاولة عشان تتشال من عند الميكروس برضه
+    try {
+      await fetch("http://192.168.1.21:5000/api/pos/orders/clear", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableCode }),
+      });
+    } catch (err) {
+      console.error("🚨 خطأ أثناء مسح الطاولة من السيرفر:", err);
+    }
   }, []);
 
   const addInvoice = useCallback(

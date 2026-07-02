@@ -858,30 +858,40 @@ app.post("/api/pos/orders/clear", (req, res) => {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////// Vertify Captian /////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// 4️⃣ الـ API للتحقق من باسوورد الكابتن بناءً على جدولك الحقيقي employees
 app.post("/api/pos/verify-captain", async (req, res) => {
-  const { password } = req.body;
+  const { password, expectedCaptainName } = req.body; // 🌟 استقبلنا الاسم المتوقع لو الطاولة مفتوحة
 
   if (!password) {
     return res.status(400).json({ success: false, error: "الرمز السري مطلوب" });
   }
 
   try {
-    // 🌟 التعديل هنا: البحث عن الرتبة "كابتن صالة"
+    // 1. نبحث عن الموظف بالباسوورد وتكون رتبته كابتن صالة
     const result = await pool.query(
       "SELECT name, role FROM employees WHERE pin_hash = $1 AND role = 'كابتن صالة' LIMIT 1",
       [String(password)],
     );
 
     if (result.rows.length > 0) {
-      return res.json({ success: true, captainName: result.rows[0].name });
+      const foundCaptainName = result.rows[0].name;
+
+      // 🌟 القفل هنا: لو الطاولة مفتوحة بكابتن معين، لازم الباسوورد يرجع نفس الاسم ده بالظبط!
+      if (expectedCaptainName && expectedCaptainName !== foundCaptainName) {
+        return res.status(403).json({
+          success: false,
+          error: `عفواً، هذه الطاولة محصورة لبصمة كابتن: ${expectedCaptainName}`,
+        });
+      }
+
+      // لو كله تمام أو طاولة جديدة
+      return res.json({ success: true, captainName: foundCaptainName });
     } else {
       return res
         .status(401)
         .json({ success: false, error: "رمز كابتن غير صحيح أو غير مصرح له" });
     }
   } catch (err) {
-    console.error("🚨 خطأ أثناء التحقق من الكابتن في الداتابيز:", err.message);
+    console.error("🚨 خطأ أثناء التحقق من الكابتن:", err.message);
     res.status(500).json({ success: false, error: "حدث خطأ في السيرفر" });
   }
 });

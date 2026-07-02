@@ -308,36 +308,27 @@ function PosScreen() {
 
     const order = pos.orders[targetTable!] as any;
 
-    // 🔒 1. حالة: الطاولة مفتوحة بالفعل بكابتن (verify_existing)
-    if (captainPromptMode === "verify_existing") {
-      // لازم الباسورد اللي مدخله الكابتن يطابق تمااااماً الباسورد اللي اتفتحت بيه الطاولة
-      if (captainPin === order.openedByPassword) {
-        setOpenOrder(targetTable);
-        setCaptainPromptOpen(false);
-      } else {
-        // 🔥 هنا القفل: لو الباسورد غلط، بنوقف الأكشن فوراً وبنديله رسالة تحذير واضحة
-        toast.error(
-          `عفواً، هذه الطاولة محصورة لبصمة كابتن: ${order.captainName || "الذي فتحها"}!`,
-        );
-      }
-      return; // بنعمل return هنا عشان نمنع جافا سكريبت تكمل وتنزل على كود السيرفر تحت
-    }
+    // تحديد هل الطاولة مفتوحة بكابتن وعايزين نتحقق منه هو بالذات؟
+    const expectedCaptain =
+      captainPromptMode === "verify_existing" ? order?.captainName : undefined;
 
-    // 🌐 2. حالة: طاولة جديدة أو طاولة كاشير (لازم نتأكد من السيرفر إنه كابتن حقيقي)
     try {
       const res = await fetch(
         "http://192.168.1.21:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password: captainPin }),
+          body: JSON.stringify({
+            password: captainPin,
+            expectedCaptainName: expectedCaptain, // 🌟 بنبعت للسيرفر الاسم اللي فاتح الطاولة حالياً
+          }),
         },
       );
       const data = await res.json();
 
       if (data.success) {
         if (captainPromptMode === "new") {
-          // طاولة جديدة تماماً: بنسجل بيانات الكابتن وبصمته لأول مرة
+          // طاولة جديدة
           upsertOrder({
             tableCode: targetTable!,
             zone,
@@ -348,19 +339,20 @@ function PosScreen() {
             openedAt: Date.now(),
             openedBy: "captain",
             captainName: data.captainName,
-            openedByPassword: captainPin, // حفظ البصمة الأصلية في الـ State
           } as any);
         } else if (captainPromptMode === "verify_any") {
-          // الطاولة كانت مفتوحة بكاشير، وأول كابتن يدخل عليها بيمسك بصمتها
+          // كانت مفتوحة بكاشير ودخل أول كابتن مسكها
           upsertOrder({
             ...order,
             captainName: data.captainName,
-            openedByPassword: captainPin, // من هنا ورايح الطاولة بقت محصورة للبصمة دي
           } as any);
         }
+
+        // لو نجح في الـ verify_existing هيدخل علطول من غير ما يغير أي داتا
         setOpenOrder(targetTable);
         setCaptainPromptOpen(false);
       } else {
+        // ❌ السيرفر هيطلع رسالة الخطأ الصارمة (اسم الكابتن الأصلي) والسيستم هيرفض يدخله
         toast.error(data.error || "رمز غير صحيح أو غير مصرح لك");
       }
     } catch (err) {
@@ -1574,10 +1566,12 @@ function OrderEntryDialog({
                   السلة فارغة — اختر صنف للإضافة.
                 </p>
               ) : (
-                order.items.map((l) => {
+                order.items.map((l, index) => {
+                  // 🌟 ضفنا الـ index هنا
                   return (
                     <div
-                      key={l.id}
+                      // 🔒 דمج الآيدي مع الإندكس بيمنع المتصفح من إعادة رسم العنصر (بيمنع الرعشة)
+                      key={`${l.id}-${index}`}
                       className="bg-card border border-border rounded-md p-1.5 text-xs shadow-sm"
                     >
                       <div className="flex items-start justify-between gap-1.5">

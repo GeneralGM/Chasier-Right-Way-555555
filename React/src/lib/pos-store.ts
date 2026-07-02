@@ -91,6 +91,9 @@ export interface ActiveOrder {
   type?: "takeaway" | "delivery";
   customerPhone?: string | null;
   deliveryPrice?: number;
+  openedByPassword?: string; // البصمة (الباسوورد) اللي اتفتحت بيها لمنع دخول كابتن آخر
+  captainName?: string; // اسم الكابتن (لو مفتوحة من ميكروس)
+  cashierName?: string; // اسم الكاشير (لو مفتوحة من الرئيسي)
 }
 
 export interface Invoice {
@@ -104,6 +107,7 @@ export interface Invoice {
   customerAddress?: string;
   cashierId?: string;
   cashierName?: string;
+  captainName?: string | null;
   items: OrderItem[];
   subtotal: number;
   discountPct: number;

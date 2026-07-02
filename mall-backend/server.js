@@ -109,7 +109,69 @@ app.get("/api/employees", async (req, res) => {
     res.status(500).json({ error: "خطأ في جلب البيانات" });
   }
 });
+// --- مسار التعديل (PUT) ---
+app.put("/api/employees/:id", async (req, res) => {
+  const { id } = req.params;
+  const { name, role, pinHash } = req.body;
 
+  try {
+    let query;
+    let values;
+
+    // لو الموظف كتب باسوورد جديد، هنحدث الـ pin_hash مع الاسم والرتبة
+    if (pinHash) {
+      query = `
+        UPDATE employees 
+        SET name = $1, role = $2, pin_hash = $3 
+        WHERE id = $4
+        RETURNING id, name, role, pin_hash AS "pinHash"
+      `;
+      values = [name, role, pinHash, id];
+    } else {
+      // لو مش باعت باسوورد (عايز يعدل الاسم أو الرتبة بس)
+      query = `
+        UPDATE employees 
+        SET name = $1, role = $2 
+        WHERE id = $3
+        RETURNING id, name, role, pin_hash AS "pinHash"
+      `;
+      values = [name, role, id];
+    }
+
+    const result = await pool.query(query, values);
+
+    // نتأكد إن الموظف موجود أصلاً
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: "الموظف غير موجود" });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("❌ خطأ أثناء التعديل في الداتابيز:", error);
+    res.status(500).json({ message: "فشل التعديل في قاعدة البيانات" });
+  }
+});
+
+// --- مسار الحذف (DELETE) ---
+app.delete("/api/employees/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      "DELETE FROM employees WHERE id = $1 RETURNING id",
+      [id],
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: "الموظف غير موجود أصلاً" });
+    }
+
+    res.json({ success: true, message: "تم حذف الموظف بنجاح" });
+  } catch (error) {
+    console.error("❌ خطأ أثناء الحذف من الداتابيز:", error);
+    res.status(500).json({ message: "فشل الحذف من قاعدة البيانات" });
+  }
+});
 // --- مسارات الفواتير (Invoices) ---
 
 app.post("/api/invoices", async (req, res) => {
@@ -123,6 +185,7 @@ app.post("/api/invoices", async (req, res) => {
     customerAddress,
     cashierId,
     cashierName,
+    captainName, // 🌟 استلام اسم الكابتن
     items,
     subtotal,
     discountPct,
@@ -138,9 +201,9 @@ app.post("/api/invoices", async (req, res) => {
     const query = `
       INSERT INTO invoices (
         id, type, invoice_number, table_code, zone, customer_name, customer_address, 
-        cashier_id, cashier_name, items, subtotal, discount_pct, discount_value, 
+        cashier_id, cashier_name, captain_name, items, subtotal, discount_pct, discount_value, 
         tax_pct, tax_value, delivery_price, total, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       RETURNING *
     `;
     const result = await pool.query(query, [
@@ -153,6 +216,7 @@ app.post("/api/invoices", async (req, res) => {
       customerAddress || null,
       cashierId || null,
       cashierName || null,
+      captainName || null, // الحفظ في الداتابيز
       JSON.stringify(items),
       subtotal,
       discountPct,
@@ -175,6 +239,7 @@ app.post("/api/invoices", async (req, res) => {
       customerAddress: inv.customer_address,
       cashierId: inv.cashier_id,
       cashierName: inv.cashier_name,
+      captainName: inv.captain_name, // الإرجاع للفرونت إند
       items: typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items,
       subtotal: Number(inv.subtotal),
       discountPct: Number(inv.discount_pct),
@@ -767,10 +832,11 @@ app.post("/api/pos/orders/upsert", (req, res) => {
     return res.status(400).json({ error: "كود الطاولة مطلوب" });
   }
 
-  // حفظ أو تحديث بيانات الطاولة داخل الميموري
   activeOrders[tableCode] = orderData;
 
-  console.log(`📌 تم تحديث الطاولة [${tableCode}] بنجاح من جهاز العميل.`);
+  // 🔕 عشان تهدي الشاشة، حط شرطتين // قبل الـ console.log دي عشان توقفها:
+  // console.log(`📌 تم تحديث الطاولة [${tableCode}] بنجاح من جهاز العميل.`);
+
   res.json({ success: true, orders: activeOrders });
 });
 
@@ -789,8 +855,36 @@ app.post("/api/pos/orders/clear", (req, res) => {
 
   res.json({ success: true, orders: activeOrders });
 });
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////// Vertify Captian /////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 4️⃣ الـ API للتحقق من باسوورد الكابتن بناءً على جدولك الحقيقي employees
+app.post("/api/pos/verify-captain", async (req, res) => {
+  const { password } = req.body;
 
-/////////////////////////////////////////////////
+  if (!password) {
+    return res.status(400).json({ success: false, error: "الرمز السري مطلوب" });
+  }
+
+  try {
+    // 🌟 التعديل هنا: البحث عن الرتبة "كابتن صالة"
+    const result = await pool.query(
+      "SELECT name, role FROM employees WHERE pin_hash = $1 AND role = 'كابتن صالة' LIMIT 1",
+      [String(password)],
+    );
+
+    if (result.rows.length > 0) {
+      return res.json({ success: true, captainName: result.rows[0].name });
+    } else {
+      return res
+        .status(401)
+        .json({ success: false, error: "رمز كابتن غير صحيح أو غير مصرح له" });
+    }
+  } catch (err) {
+    console.error("🚨 خطأ أثناء التحقق من الكابتن في الداتابيز:", err.message);
+    res.status(500).json({ success: false, error: "حدث خطأ في السيرفر" });
+  }
+});
 const PORT = 5000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server is running on all network interfaces on port ${PORT}`);

@@ -33,7 +33,7 @@ export const Route = createFileRoute("/roles")({
   head: () => ({ meta: [{ title: "بصمات الموظفين - الصلاحيات" }] }),
   component: RolesPage,
 });
-const API_BASE_URL = "http://192.168.1.15:5000";
+const API_BASE_URL = "http://192.168.1.21:5000";
 
 // 🌟 جدول أوزان الصلاحيات للمقارنة الذكية
 const ROLE_WEIGHTS: Record<string, number> = {
@@ -108,14 +108,15 @@ function RolesPage() {
     }
   });
 
-  function toggleEye(id: string) {
-    if (revealed[id]) {
-      const c = { ...revealed };
-      delete c[id];
-      setRevealed(c);
-    } else {
-      setPinFor(id);
-    }
+  function hidePassword(id: string) {
+    const c = { ...revealed };
+    delete c[id];
+    setRevealed(c);
+  }
+
+  // دالة إظهار الباسوورد (هتشتغل جوه الـ ActionGate بعد الباسوورد ما يطلع صح)
+  function showPassword(id: string) {
+    setRevealed({ ...revealed, [id]: true });
   }
   // 🌟 دالة منفصلة ومنظمة لإضافة وتعديل الموظفين
   const handleSaveEmployee = async (data: {
@@ -124,7 +125,9 @@ function RolesPage() {
     pin?: string;
   }) => {
     try {
-      // 1. حالة إضافة موظف جديد
+      // ==========================================
+      // 1. حالة إضافة موظف جديد (شغالة وسليمة)
+      // ==========================================
       if (editing === "new") {
         const response = await fetch(`${API_BASE_URL}/api/employees`, {
           method: "POST",
@@ -136,42 +139,86 @@ function RolesPage() {
           }),
         });
 
-        // لو السيرفر تمام والداتا بيس وافقت
         if (response.ok) {
           const savedEmp = await response.json();
-
-          // حفظ في اللوكل ستوريدج وتحديث الحالة
           await addEmployee(savedEmp.name, savedEmp.role, savedEmp.pinHash);
           setServerEmployees((prev) => [...prev, savedEmp]);
-          toast.success("تم الإضافة في السيرفر بنجاح");
-        }
-        // لو السيرفر رجع خطأ (زي الباسوورد المكرر)
-        else {
+          toast.success("تم إضافة الموظف الجديد في السيرفر بنجاح");
+        } else {
           const errorData = await response.json().catch(() => ({}));
-          console.log("❌ السيرفر رجع خطأ كامل هنا:", errorData);
-          // هيعرض الرسالة العربي اللي جاية من الباك إند
-          toast.error(
-            errorData.message || `خطأ من السيرفر بكود: ${response.status}`,
-          );
+          toast.error(errorData.message || "فشل إضافة الموظف في السيرفر");
         }
       }
 
-      // 2. حالة تعديل موظف حالي
+      // ==========================================
+      // 2. حالة تعديل موظف حالي (تمت إضافة الـ fetch وتحديث الـ state لايف)
+      // ==========================================
       else {
-        await updateEmployee((editing as Employee).id, {
-          name: data.name,
-          role: data.role,
-          newPin: data.pin || undefined,
+        const empId = (editing as Employee).id;
+
+        // أرسل التحديث للباك إند أولاً ليحفظ في الـ PostgreSQL
+        const response = await fetch(`${API_BASE_URL}/api/employees/${empId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: data.name,
+            role: data.role,
+            pinHash: data.pin || undefined, // يرسل البين الجديد لو الموظف كتب باسوورد جديد
+          }),
         });
-        toast.success("تم التحديث بنجاح");
+
+        if (response.ok) {
+          const updatedEmpFromServer = await response.json();
+
+          // أ) تحديث الكاش المحلي (لوكال ستوريدج)
+          await updateEmployee(empId, {
+            name: data.name,
+            role: data.role,
+            newPin: data.pin || undefined,
+          });
+
+          // ب) تحديث الـ State الخاص بالسيرفر في الفرونت إند لتحديث الشاشة فوراً
+          setServerEmployees((prev) =>
+            prev.map((emp) => (emp.id === empId ? updatedEmpFromServer : emp)),
+          );
+
+          toast.success("تم تحديث بيانات الموظف في قاعدة البيانات");
+        } else {
+          const errorData = await response.json().catch(() => ({}));
+          toast.error(errorData.message || "فشل تحديث الموظف في السيرفر");
+        }
       }
     } catch (err) {
       console.error("Error saving employee:", err);
-      toast.error("خطأ في الاتصال بقاعدة البيانات");
+      toast.error("خطأ في الاتصال بالسيرفر الرئيسي");
     } finally {
-      // قفل الشاشة وتصفير البيانات في كل الأحوال
+      // قفل المودال وتصفير بيانات المشغل الحالي
       setEditing(null);
       setCurrentOperator(null);
+    }
+  };
+  const handleDeleteEmployee = async (empId: string) => {
+    try {
+      // 1. أرسل طلب الحذف للسيرفر
+      const response = await fetch(`${API_BASE_URL}/api/employees/${empId}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        // 2. احذفه من الكاش المحلي (لوكال ستوريدج)
+        await deleteEmployee(empId);
+
+        // 3. حدّث الـ State في الشاشة عشان يختفي فوراً
+        setServerEmployees((prev) => prev.filter((emp) => emp.id !== empId));
+
+        toast.success("تم حذف الموظف نهائياً من قاعدة البيانات");
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        toast.error(errorData.message || "فشل حذف الموظف من السيرفر");
+      }
+    } catch (err) {
+      console.error("Error deleting employee:", err);
+      toast.error("خطأ في الاتصال بالسيرفر");
     }
   };
 
@@ -293,16 +340,31 @@ function RolesPage() {
                               ? e.pinHash || e.pin || "####"
                               : "####"}
                           </span>
-                          <button
-                            onClick={() => toggleEye(e.id)}
-                            className="text-muted-foreground hover:text-foreground"
-                          >
-                            {revealed[e.id] ? (
+                          {revealed[e.id] ? (
+                            // 1. لو الباسوورد ظاهر أصلاً -> زرار عادي للإخفاء بدون طلب باسوورد
+                            <button
+                              onClick={() => hidePassword(e.id)}
+                              className="text-muted-foreground hover:text-foreground"
+                              title="إخفاء الرقم السري"
+                            >
                               <EyeOff className="w-4 h-4" />
-                            ) : (
-                              <Eye className="w-4 h-4" />
-                            )}
-                          </button>
+                            </button>
+                          ) : (
+                            // 2. لو الباسوورد مخفي -> زرار محمي بـ ActionGate للإظهار
+                            <ActionGate
+                              requiredRole="محاسب"
+                              actionName="إظهار الرقم السري للموظف"
+                              onSuccess={() => showPassword(e.id)}
+                            >
+                              {/* الزرار جوه ActionGate مبيكونش عليه onClick لأنه بيتولى المهمة */}
+                              <button
+                                className="text-muted-foreground hover:text-foreground"
+                                title="إظهار الرقم السري"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                            </ActionGate>
+                          )}
                         </>
                       )}
                     </div>
@@ -318,29 +380,27 @@ function RolesPage() {
                     ) : (
                       <div className="flex gap-1">
                         <ActionGate
-                          requiredRole={e.role as any}
-                          actionName={`تعديل بيانات ${e.name}`}
+                          requiredRole="محاسب"
+                          actionName={`تعديل بيانات الموظف: ${e.name}`}
                           onSuccess={(operator: any) => {
                             setCurrentOperator(operator);
-                            setEditing(e);
+                            setEditing(e); // 👈 هيفتح المودال بس ويقعد مستنيك تعدل وتدوس حفظ
                           }}
                         >
-                          <button className="p-1.5 rounded hover:bg-secondary">
+                          <button className="p-1.5 rounded hover:bg-secondary text-blue-600">
                             <Pencil className="w-4 h-4" />
                           </button>
                         </ActionGate>
 
                         <ActionGate
-                          requiredRole={e.role as any}
-                          actionName={`حذف الموظف ${e.name}`}
+                          requiredRole="محاسب"
+                          actionName={`حذف الموظف: ${e.name} نهائياً`}
                           onSuccess={() => {
-                            if (confirm(`حذف ${e.name}؟`)) {
-                              deleteEmployee(e.id);
-                              toast.success("تم الحذف محلياً");
-                            }
+                            // نداء دالة الحذف اللي بتكلم السيرفر
+                            handleDeleteEmployee(e.id);
                           }}
                         >
-                          <button className="p-1.5 rounded hover:bg-destructive/10 text-destructive">
+                          <button className="p-1.5 rounded hover:bg-secondary text-destructive">
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </ActionGate>

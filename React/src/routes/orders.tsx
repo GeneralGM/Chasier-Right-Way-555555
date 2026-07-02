@@ -47,6 +47,7 @@ import {
   Trash2,
   Bike,
   AlertTriangle,
+  Lock,
 } from "lucide-react";
 
 export const Route = createFileRoute("/orders")({
@@ -60,7 +61,6 @@ function OrdersGate() {
   return <PosScreen />;
 }
 
-// دالة بتحسب الرقم بناءً على تاريخ اليوم
 function getNextInvoiceNumber(invoices: Invoice[]) {
   const today = new Date().toDateString();
   const todayInvoices = invoices.filter(
@@ -69,7 +69,6 @@ function getNextInvoiceNumber(invoices: Invoice[]) {
 
   if (todayInvoices.length === 0) return 1;
 
-  // بنجيب أكبر رقم موجود النهاردة ونزود عليه 1
   const maxNum = Math.max(...todayInvoices.map((i) => i.invoiceNumber || 0));
   return maxNum + 1;
 }
@@ -80,11 +79,9 @@ function ShiftLogin() {
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
 
-  // 🌟 ولايات المزامنة مع السيرفر
   const [serverEmployees, setServerEmployees] = useState<any[]>([]);
   const [isLoadingEmployees, setIsLoadingEmployees] = useState(false);
 
-  // 🔄 جلب الموظفين من الـ Backend فوراً لو الـ LocalStorage ممسوح
   useEffect(() => {
     async function fetchEmployeesFallback() {
       if (pos.employees && pos.employees.length > 0) return;
@@ -104,7 +101,6 @@ function ShiftLogin() {
     fetchEmployeesFallback();
   }, [pos.employees, pos.employees.length]);
 
-  // القائمة الذكية المدمجة
   const activeEmployeesList =
     pos.employees && pos.employees.length > 0 ? pos.employees : serverEmployees;
 
@@ -112,7 +108,6 @@ function ShiftLogin() {
     e.preventDefault();
     setErr("");
 
-    // البحث في القائمة المدمجة عن طريق الباسوورد
     const emp = activeEmployeesList.find(
       (x) =>
         (x.pin === pin || x.pinHash === pin || x.pin_hash === pin) &&
@@ -120,7 +115,6 @@ function ShiftLogin() {
     );
 
     if (!emp) {
-      // محاولة أخيرة عبر الدالة الأصلية تحسباً للتشويش
       const fallbackEmp = await findByPin(pin, "كاشير");
       if (!fallbackEmp) {
         setErr("كلمة سر الكاشير غير صحيحة");
@@ -135,7 +129,6 @@ function ShiftLogin() {
     toast.success(`أهلاً ${emp.name} — بدأت الشيفت`);
   }
 
-  // شاشة التحميل وقت الفحص
   if (isLoadingEmployees) {
     return (
       <div className="flex items-center justify-center h-[70vh]" dir="rtl">
@@ -197,7 +190,7 @@ function PosScreen() {
   const [page, setPage] = useState(0);
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [openOrder, setOpenOrder] = useState<string | null>(null); // tableCode
+  const [openOrder, setOpenOrder] = useState<string | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
   const [printOrder, setPrintOrder] = useState<string | null>(null);
   const [checkoutConfirm, setCheckoutConfirm] = useState<string | null>(null);
@@ -205,8 +198,15 @@ function PosScreen() {
     return localStorage.getItem("isMicrosDevice") === "true";
   });
 
+  // 🌟 State الخاصة بنافذة الكابتن
+  const [captainPromptOpen, setCaptainPromptOpen] = useState(false);
+  const [captainPromptMode, setCaptainPromptMode] = useState<
+    "new" | "verify_existing" | "verify_any"
+  >("new");
+  const [targetTable, setTargetTable] = useState<string | null>(null);
+  const [captainPin, setCaptainPin] = useState("");
+
   useEffect(() => {
-    // تأكيد إضافي أول ما الصفحة تفتح
     const checkDevice = localStorage.getItem("isMicrosDevice") === "true";
     setIsMicros(checkDevice);
   }, []);
@@ -217,7 +217,6 @@ function PosScreen() {
     setSelectedTable(null);
   }, [zone]);
 
-  // Generate table codes for current zone (paginated)
   const tableCodes = useMemo(() => {
     const arr: string[] = [];
     for (let i = 1; i <= currentZone.count; i++)
@@ -243,38 +242,132 @@ function PosScreen() {
   function jumpToCode(code: string) {
     const c = code.trim();
     if (!c) return;
-    // find zone matching prefix
     const z = ZONES.find((z) => c.startsWith(z.prefix) && z.id !== "takeaway");
-    if (!z) {
-      toast.error("كود طاولة غير معروف");
-      return;
-    }
+    if (!z) return toast.error("كود طاولة غير معروف");
     const n = parseInt(c.slice(z.prefix.length));
-    if (!n || n < 1 || n > z.count) {
-      toast.error("رقم الطاولة خارج النطاق");
-      return;
-    }
+    if (!n || n < 1 || n > z.count)
+      return toast.error("رقم الطاولة خارج النطاق");
     setZone(z.id);
     setPage(Math.floor((n - 1) / PAGE_SIZE));
     setSelectedTable(c);
   }
 
+  // 🌟 المنطق السحري لفتح الطاولة
   function actionOpen() {
     if (!selectedTable) return toast.error("اختر طاولة أولاً");
-    // ensure order exists
-    if (!pos.orders[selectedTable]) {
-      upsertOrder({
-        tableCode: selectedTable,
-        zone,
-        items: [],
-        state: "active",
-        discountPct: 0,
-        taxPct: 14,
-        openedAt: Date.now(),
-      });
+    const order = pos.orders[selectedTable] as any;
+
+    if (!isMicros) {
+      // الكاشير: يدخل فوراً ويفتح الطاولة بدون باسوورد
+      if (!order) {
+        upsertOrder({
+          tableCode: selectedTable,
+          zone,
+          items: [],
+          state: "active",
+          discountPct: 0,
+          taxPct: 14,
+          openedAt: Date.now(),
+          openedBy: "cashier",
+          cashierName: pos.shift?.cashierName || "كاشير غير معروف",
+        } as any);
+      }
+      setOpenOrder(selectedTable);
+      return;
     }
-    setOpenOrder(selectedTable);
+
+    // الميكروس: هنا الحماية
+    if (!order) {
+      // 1. طاولة فاضية: نطلب باسوورد كابتن جديد
+      setTargetTable(selectedTable);
+      setCaptainPromptMode("new");
+      setCaptainPin("");
+      setCaptainPromptOpen(true);
+    } else {
+      // 2. طاولة مفتوحة بالفعل
+      if (order.openedBy === "captain") {
+        // اتفتحت بكابتن: لازم نفس الباسوورد اللي فتحها
+        setTargetTable(selectedTable);
+        setCaptainPromptMode("verify_existing");
+        setCaptainPin("");
+        setCaptainPromptOpen(true);
+      } else {
+        // اتفتحت بكاشير: نطلب باسوورد عشان نسجل اسم الكابتن اللي بيضيف بس
+        setTargetTable(selectedTable);
+        setCaptainPromptMode("verify_any");
+        setCaptainPin("");
+        setCaptainPromptOpen(true);
+      }
+    }
   }
+
+  // 🌟 التحقق من باسوورد الكابتن ومنع التداخل بين الكباتن
+  async function handleCaptainSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!captainPin) return;
+
+    const order = pos.orders[targetTable!] as any;
+
+    // 🔒 1. حالة: الطاولة مفتوحة بالفعل بكابتن (verify_existing)
+    if (captainPromptMode === "verify_existing") {
+      // لازم الباسورد اللي مدخله الكابتن يطابق تمااااماً الباسورد اللي اتفتحت بيه الطاولة
+      if (captainPin === order.openedByPassword) {
+        setOpenOrder(targetTable);
+        setCaptainPromptOpen(false);
+      } else {
+        // 🔥 هنا القفل: لو الباسورد غلط، بنوقف الأكشن فوراً وبنديله رسالة تحذير واضحة
+        toast.error(
+          `عفواً، هذه الطاولة محصورة لبصمة كابتن: ${order.captainName || "الذي فتحها"}!`,
+        );
+      }
+      return; // بنعمل return هنا عشان نمنع جافا سكريبت تكمل وتنزل على كود السيرفر تحت
+    }
+
+    // 🌐 2. حالة: طاولة جديدة أو طاولة كاشير (لازم نتأكد من السيرفر إنه كابتن حقيقي)
+    try {
+      const res = await fetch(
+        "http://192.168.1.21:5000/api/pos/verify-captain",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: captainPin }),
+        },
+      );
+      const data = await res.json();
+
+      if (data.success) {
+        if (captainPromptMode === "new") {
+          // طاولة جديدة تماماً: بنسجل بيانات الكابتن وبصمته لأول مرة
+          upsertOrder({
+            tableCode: targetTable!,
+            zone,
+            items: [],
+            state: "active",
+            discountPct: 0,
+            taxPct: 14,
+            openedAt: Date.now(),
+            openedBy: "captain",
+            captainName: data.captainName,
+            openedByPassword: captainPin, // حفظ البصمة الأصلية في الـ State
+          } as any);
+        } else if (captainPromptMode === "verify_any") {
+          // الطاولة كانت مفتوحة بكاشير، وأول كابتن يدخل عليها بيمسك بصمتها
+          upsertOrder({
+            ...order,
+            captainName: data.captainName,
+            openedByPassword: captainPin, // من هنا ورايح الطاولة بقت محصورة للبصمة دي
+          } as any);
+        }
+        setOpenOrder(targetTable);
+        setCaptainPromptOpen(false);
+      } else {
+        toast.error(data.error || "رمز غير صحيح أو غير مصرح لك");
+      }
+    } catch (err) {
+      toast.error("خطأ في الاتصال بالسيرفر");
+    }
+  }
+
   function actionPrint() {
     if (!selectedTable || !pos.orders[selectedTable])
       return toast.error("لا يوجد طلب على هذه الطاولة");
@@ -286,7 +379,6 @@ function PosScreen() {
     setCheckoutConfirm(selectedTable);
   }
 
-  // TAKEAWAY: render customer DB view instead of tables
   if (zone === "takeaway") {
     return (
       <PosFrame
@@ -336,7 +428,6 @@ function PosScreen() {
       cashierName={pos.shift?.cashierName || "جاري التحميل..."}
       zoneTabs={<ZoneTabs zone={zone} setZone={setZone} />}
     >
-      {/* Top: search */}
       <div className="px-4 pt-3 flex gap-2 items-center shrink-0">
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -356,20 +447,17 @@ function PosScreen() {
         </Button>
       </div>
 
-      {/* Center: grid + side actions */}
       <div className="flex-1 flex gap-3 px-4 pt-3 min-h-0 overflow-hidden">
         <div className="flex-1 grid grid-cols-5 grid-rows-4 gap-3 min-h-0">
           {filteredTables.map((code) => {
+            const order = pos.orders[code] as any;
             const st = tableState(code);
             const sel = selectedTable === code;
             const matchSearch =
               search && code.toUpperCase().includes(search.toUpperCase());
-            // 1. اتأكد من حالة الأوردر (هل فيه items ولا لأ)
-            const order = pos.orders[code];
             const hasItems =
               order && Array.isArray(order.items) && order.items.length > 0;
 
-            // 2. غير منطق الألوان بحيث لو مفيش items يرجع للـ default
             const colors = !hasItems
               ? "bg-card border-border"
               : st === "active"
@@ -377,20 +465,41 @@ function PosScreen() {
                 : st === "printed"
                   ? "bg-blue-100 dark:bg-blue-950/40 border-blue-400 text-blue-900 dark:text-blue-200"
                   : "bg-card border-border";
+
             return (
               <button
                 key={code}
                 onClick={() => setSelectedTable(code)}
-                className={`relative rounded-2xl border-2 flex flex-col items-center justify-center gap-1 transition
-                  ${colors}
-                  ${sel ? "ring-4 ring-primary/60 scale-[1.02]" : ""}
-                  ${matchSearch ? "ring-2 ring-emerald-500" : ""}`}
+                className={`relative rounded-2xl border-2 flex flex-col items-center justify-center gap-1 transition overflow-hidden p-2
+        ${colors}
+        ${sel ? "ring-4 ring-primary/60 scale-[1.02]" : ""}
+        ${matchSearch ? "ring-2 ring-emerald-500" : ""}`}
               >
                 <TableChairsSvg />
                 <span className="font-bold text-lg">{code}</span>
-                {st !== "empty" && (
-                  <span className="text-[10px] uppercase tracking-wide">
-                    {st === "active" ? "" : "مطبوع"}
+
+                {/* 🌟 المربع الصغير لعرض أسماء الكباتن والكاشيرات بذكاء */}
+                {hasItems && (
+                  <div className="flex flex-col items-center gap-0.5 mt-0.5 w-full px-1">
+                    {/* 1. لو الطاولة عليها اسم كابتن يظهر أولاً */}
+                    {order?.captainName && (
+                      <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 px-1.5 py-0.5 rounded font-extrabold truncate max-w-full text-center">
+                        كابتن: {order.captainName}
+                      </span>
+                    )}
+
+                    {/* 2. يعرض اسم الكاشير لو هو اللي فاتح الطاولة، ولو الكابتن اشتغل عليها يعرضهم تحت بعض */}
+                    {order?.cashierName && (
+                      <span className="text-[10px] bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-200 px-1.5 py-0.5 rounded font-extrabold truncate max-w-full text-center">
+                        كاشير: {order.cashierName}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {st === "printed" && (
+                  <span className="text-[10px] uppercase tracking-wide font-bold mt-0.5 text-red-600">
+                    مطبوع
                   </span>
                 )}
               </button>
@@ -404,7 +513,6 @@ function PosScreen() {
           ))}
         </div>
 
-        {/* Side actions */}
         <aside className="w-44 shrink-0 flex flex-col gap-2">
           <Button onClick={actionOpen} className="h-16 text-base gap-2">
             <Plus className="w-5 h-5" /> فتح
@@ -437,7 +545,6 @@ function PosScreen() {
         </aside>
       </div>
 
-      {/* Footer: pagination + zones */}
       <div className="px-4 py-2 flex items-center justify-between gap-3 shrink-0 border-t border-border">
         <div className="flex items-center gap-1">
           <Button
@@ -461,6 +568,41 @@ function PosScreen() {
           </Button>
         </div>
       </div>
+
+      {/* 🌟 نافذة الكابتن */}
+      <Dialog open={captainPromptOpen} onOpenChange={setCaptainPromptOpen}>
+        <DialogContent dir="rtl" className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Lock className="w-5 h-5 text-amber-600" />
+              تأكيد الدخول
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCaptainSubmit} className="space-y-4 pt-4">
+            <p className="text-sm text-muted-foreground">
+              {captainPromptMode === "verify_existing"
+                ? "هذه الطاولة محصورة. يرجى إدخال بصمة الكابتن."
+                : "يرجى إدخال الرمز السري الخاص بك ككابتن."}
+            </p>
+            <Input
+              type="password"
+              inputMode="numeric"
+              autoFocus
+              placeholder="••••"
+              value={captainPin}
+              onChange={(e) => setCaptainPin(e.target.value)}
+              className="text-center text-xl tracking-widest h-12"
+            />
+            <Button
+              type="submit"
+              className="w-full h-11"
+              disabled={!captainPin}
+            >
+              دخول
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Modals */}
       {openOrder && pos.orders[openOrder] && (
@@ -493,7 +635,6 @@ function PosScreen() {
           order={pos.orders[checkoutConfirm]}
           onClose={() => setCheckoutConfirm(null)}
           onDone={() => {
-            // السطر ده هو الساحر: بيحذف الأوردر النشط من الطاولة لأن خلاص نزل مبيعات
             clearOrder(checkoutConfirm!);
             setCheckoutConfirm(null);
             setSelectedTable(null);
@@ -511,16 +652,14 @@ function ZoneTabs({
   zone: ZoneId;
   setZone: (z: ZoneId) => void;
 }) {
-  const [isMicros, setIsMicros] = useState(() => {
-    return localStorage.getItem("isMicrosDevice") === "true";
-  });
+  const [isMicros, setIsMicros] = useState(
+    () => localStorage.getItem("isMicrosDevice") === "true",
+  );
 
   useEffect(() => {
-    // تأكيد إضافي أول ما الصفحة تفتح
-    const checkDevice = localStorage.getItem("isMicrosDevice") === "true";
-    setIsMicros(checkDevice);
+    setIsMicros(localStorage.getItem("isMicrosDevice") === "true");
   }, []);
-  // 🔍 بنفلتر التابات: لو ميكروس، بنخفي الـ takeaway والـ others، لو مش ميكروس بنعرض كله عادي
+
   const allowedZones = isMicros
     ? ZONES.filter((z) => z.id !== "takeaway" && z.id !== "others")
     : ZONES;
@@ -574,7 +713,6 @@ function PosFrame({
 }
 
 function TableChairsSvg() {
-  // tiny stylized table+6 chairs
   return (
     <svg width="46" height="32" viewBox="0 0 46 32" className="opacity-60">
       <rect
@@ -621,8 +759,6 @@ function TakeawayView({
 }) {
   const { db: pos, addCustomer, upsertOrder, updateCustomer } = usePosDB();
   const [q, setQ] = useState("");
-
-  // حالات الإضافة والتعديل
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
@@ -654,12 +790,10 @@ function TakeawayView({
 
   function handleSave() {
     if (!newName.trim()) return toast.error("اسم العميل مطلوب على الأقل");
-
     if (editingId && updateCustomer) {
       updateCustomer(editingId, newName, newPhone, newAddress);
       toast.success("تم تعديل بيانات العميل");
     } else {
-      // مرر الهاتف والعنوان للـ store
       addCustomer(newName, newPhone, newAddress);
       toast.success("تم إضافة العميل بنجاح");
     }
@@ -669,7 +803,6 @@ function TakeawayView({
   function openFor(c: any, isDelivery: boolean = false) {
     const prefix = isDelivery ? "DEL" : "TAK";
     const code = `${prefix}-${c.id.slice(0, 6)}-${Date.now().toString(36)}`;
-
     upsertOrder({
       tableCode: code,
       zone: "takeaway",
@@ -684,7 +817,6 @@ function TakeawayView({
       deliveryPrice: 0,
       openedAt: Date.now(),
     });
-
     onOpenOrder(code);
   }
 
@@ -843,49 +975,37 @@ function OrderEntryDialog({
   const [deliveryInputPrice, setDeliveryInputPrice] = useState("");
   const [q, setQ] = useState("");
   const [modifierMeal, setModifierMeal] = useState<Meal | null>(null);
-
-  // State الجديد للتحكم في القسم النشط
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   const sellable = meals.filter((m) => m.kind === "menu");
-  const [isMicros, setIsMicros] = useState(() => {
-    return localStorage.getItem("isMicrosDevice") === "true";
-  });
+  const [isMicros, setIsMicros] = useState(
+    () => localStorage.getItem("isMicrosDevice") === "true",
+  );
 
   useEffect(() => {
-    // تأكيد إضافي أول ما الصفحة تفتح
-    const checkDevice = localStorage.getItem("isMicrosDevice") === "true";
-    setIsMicros(checkDevice);
+    setIsMicros(localStorage.getItem("isMicrosDevice") === "true");
   }, []);
 
-  // تحسين البحث ليكون مرن وغير حساس لحالة الأحرف (Case-Insensitive)
   const filtered = sellable.filter(
     (m) => !q || m.name.toLowerCase().includes(q.toLowerCase()),
   );
-
-  // استخراج قائمة الأقسام الفريدة المتاحة في المنيو تلقائياً
-  const categories = useMemo(() => {
-    return Array.from(new Set(sellable.map((m) => m.category).filter(Boolean)));
-  }, [sellable]);
+  const categories = useMemo(
+    () => Array.from(new Set(sellable.map((m) => m.category).filter(Boolean))),
+    [sellable],
+  );
 
   const getAvailableQty = (targetMeal: Record<string, unknown>) => {
     if (targetMeal.category === SHISHA_CATEGORY) return Infinity;
-
-    // تعريف الـ DB كـ unknown عشان نتحايل على قيود النوع
     const dbRaw = db as unknown as Record<string, unknown>;
     const allOrders = Object.values(
       (dbRaw.orders as Record<string, unknown>[]) || {},
     );
-
     let maxPossible = Infinity;
     const ingredients =
       (targetMeal.ingredients as Array<Record<string, unknown>>) || [];
-
     for (const ing of ingredients) {
       if (ing.refKind === "meal") continue;
       const itemId = ing.itemId as string;
-
-      // حساب المحجوز (Reserved)
       const reservedQty = allOrders.reduce((sum: number, order: unknown) => {
         const typedOrder = order as Record<string, unknown>;
         const itemsList =
@@ -895,24 +1015,18 @@ function OrderEntryDialog({
           sum + ((itemInOrder?.qty as number) || 0) * ((ing.qty as number) || 0)
         );
       }, 0);
-
       const itemsList = items as unknown as Array<Record<string, unknown>>;
       const it = itemsList?.find((x) => x.id === itemId);
       if (!it) continue;
-
       const targetDept = ((targetMeal.department as string) ||
         (it.department as string)) as "بار" | "مطبخ";
       const key = deptKey(targetDept, it.id as string);
-
       const deptStock = dbRaw?.deptStock as Record<string, number> | undefined;
       const currentStock = ((deptStock?.[key] as number) || 0) - reservedQty;
-
       const conversion =
         (it.conversionFactor as number) > 0
           ? (it.conversionFactor as number)
           : 1;
-
-      // استخدام Parameters لسحب النوع مباشرة من الدالة وتجنب أي نوع صريح
       const needBasePerOne = convertToBase(
         ing.qty as number,
         ing.unit as Parameters<typeof convertToBase>[1],
@@ -920,38 +1034,24 @@ function OrderEntryDialog({
         conversion,
         it.subUnitType as Parameters<typeof convertToBase>[4],
       );
-
       const possibleMeals = Math.floor(currentStock / needBasePerOne);
-      if (possibleMeals < maxPossible) {
-        maxPossible = possibleMeals;
-      }
+      if (possibleMeals < maxPossible) maxPossible = possibleMeals;
     }
-
     return maxPossible;
   };
 
-  // Manufacturable qty per meal (limit by sub-inventory; shisha bypassed)
   function manufacturable(meal: Meal): number | null {
     if (meal.category === SHISHA_CATEGORY) return null;
     if (!meal.ingredients || meal.ingredients.length === 0) return 0;
-
     const dbRaw = db as unknown as Record<string, unknown>;
     const allOrders = Object.values(
       (dbRaw.orders as Record<string, unknown>[]) || {},
     );
-
     let min = Infinity;
     for (const ing of meal.ingredients) {
-      // التعامل مع الوجبات الفرعية
-      if (ing.refKind === "meal") {
-        // (نفس منطقك القديم)
-        continue;
-      }
-
+      if (ing.refKind === "meal") continue;
       const it = items.find((x) => x.id === ing.itemId);
       if (!it) return 0;
-
-      // حساب المحجوز
       const reservedQty = allOrders.reduce((sum: number, order: unknown) => {
         const typedOrder = order as Record<string, unknown>;
         const itemsList =
@@ -963,20 +1063,16 @@ function OrderEntryDialog({
         );
         return sum + count * (ing.qty as number);
       }, 0);
-
       const targetDept = (meal.department || it.department) as "بار" | "مطبخ";
       const totalHave =
         (dbRaw.deptStock as Record<string, number>)?.[
           deptKey(targetDept, it.id)
         ] || 0;
       const have = clamp0(totalHave - reservedQty);
-
       const conversion =
         it.conversionFactor && it.conversionFactor > 0
           ? it.conversionFactor
           : 1;
-
-      // نفس حركة سحب الأنواع
       const needBase = convertToBase(
         ing.qty,
         ing.unit as Parameters<typeof convertToBase>[1],
@@ -984,7 +1080,6 @@ function OrderEntryDialog({
         conversion,
         it.subUnitType as Parameters<typeof convertToBase>[4],
       );
-
       if (needBase <= 0) continue;
       min = Math.min(min, Math.floor(have / needBase));
     }
@@ -1012,21 +1107,13 @@ function OrderEntryDialog({
 
   const getMaxQty = (meal: any, db: any, currentQty: number = 0) => {
     const department = meal.department;
-
     const limits = meal.ingredients.map((ing: any) => {
       const stockKey = `${department}::${ing.itemId}`;
-
-      // الرصيد الحالي في المخزن
       const stockInDb = db.deptStock[stockKey] || 0;
-
-      // 💡 السر هنا: بنرجع الكمية اللي الوجبة دي سحباها حالياً للمخزن "حسابياً فقط"
-      // عشان نعرف الإجمالي الحقيقي المتاح للوجبة دي من البداية
       const currentIngWeightInKg = (currentQty * ing.qty) / 1000;
       const availableStock = stockInDb + currentIngWeightInKg;
-
       return Math.floor((availableStock * 1000) / ing.qty);
     });
-
     return Math.min(...limits);
   };
 
@@ -1066,21 +1153,14 @@ function OrderEntryDialog({
   async function handleSaveAndDeduct(code: string) {
     const updatedDeptStock = { ...db.deptStock };
     const outOfStockMeals: string[] = [];
-
-    // 1. جلب نسخة الأوردر القديم من قاعدة البيانات قبل التعديل
     const oldOrder = db.orders?.find(
       (o: Record<string, unknown>) => o.tableCode === code,
     );
-
-    // 2. عمل خريطة (Map) لحساب كميات الوجبات (القديمة والجديدة) لمعرفة الفرق
     const qtyMap: Record<string, { oldQty: number; newQty: number }> = {};
 
-    // نملأ الكميات الجديدة من السلة الحالية
-    for (const item of order.items) {
+    for (const item of order.items)
       qtyMap[item.mealId] = { oldQty: 0, newQty: item.qty };
-    }
 
-    // نملأ الكميات القديمة لو الأوردر ده كان محفوظ قبل كده
     if (
       oldOrder &&
       Array.isArray((oldOrder as Record<string, unknown>).items)
@@ -1090,33 +1170,24 @@ function OrderEntryDialog({
         qty: number;
       }>;
       for (const item of oldItems) {
-        if (!qtyMap[item.mealId]) {
+        if (!qtyMap[item.mealId])
           qtyMap[item.mealId] = { oldQty: item.qty, newQty: 0 };
-        } else {
-          qtyMap[item.mealId].oldQty = item.qty;
-        }
+        else qtyMap[item.mealId].oldQty = item.qty;
       }
     }
 
-    // 3. الفحص والخصم أو الإرجاع بناءً على الفرق (Diff)
     for (const mealId in qtyMap) {
       const { oldQty, newQty } = qtyMap[mealId];
       const diffQty = newQty - oldQty;
-
       if (diffQty === 0) continue;
-
       const meal = meals.find((m) => m.id === mealId);
       if (!meal || meal.category === SHISHA_CATEGORY) continue;
-
       for (const ing of meal.ingredients) {
         if (ing.refKind === "meal") continue;
-
         const it = items.find((x) => x.id === ing.itemId);
         if (!it) continue;
-
         const targetDept = meal.department || it.department;
         const key = deptKey(targetDept, it.id);
-
         const conversion =
           it.conversionFactor && it.conversionFactor > 0
             ? it.conversionFactor
@@ -1128,25 +1199,18 @@ function OrderEntryDialog({
           conversion,
           it.subUnitType,
         );
-
         const totalDiffNeeded = needBasePerOne * diffQty;
         const currentStock = updatedDeptStock[key] || 0;
-
-        // أمان: لو المخزن مش مكفي
         if (totalDiffNeeded > 0 && currentStock < totalDiffNeeded) {
-          if (!outOfStockMeals.includes(meal.name)) {
+          if (!outOfStockMeals.includes(meal.name))
             outOfStockMeals.push(meal.name);
-          }
         }
-
-        // تطبيق التغيير (خصم أو إرجاع تلقائي)
         if (outOfStockMeals.length === 0) {
           updatedDeptStock[key] = Math.max(0, currentStock - totalDiffNeeded);
         }
       }
     }
 
-    // 4. الرد الحاسم لو فيه عجز في المخزن
     if (outOfStockMeals.length > 0) {
       alert(
         `🚨 خطأ في المخزن: الأصناف [ ${outOfStockMeals.join(", ")} ] كميتها لا تكفي الزيادة الحالية!`,
@@ -1154,21 +1218,14 @@ function OrderEntryDialog({
       return;
     }
 
-    // 5. التثبيت النهائي لحركة المخزن في الداتابيز
     if (db.updateDeptStock) {
       await db.updateDeptStock(updatedDeptStock);
     }
-    // ==========================================
-    // 💡 التعديل المتوافق مع نوع SaleEntry بالظبط
-    // ==========================================
 
-    // 1. حساب إجمالي البيع للعملية الحالية
     const currentTotalSales = order.items.reduce(
       (sum: number, item: any) => sum + item.price * item.qty,
       0,
     );
-
-    // لو مش متاحة أو صعبة الوصول هنا، حطها مؤقتاً 0 والجدول في النتائج كدة كدة بيحسبها لوحده
     let currentTotalCost = 0;
     if (typeof expandMealToBase === "function" && db.meals && db.items) {
       order.items.forEach((item: any) => {
@@ -1182,7 +1239,6 @@ function OrderEntryDialog({
       });
     }
 
-    // 3. بناء الأوبجكت بالمواصفات الكاملة المطلوبة
     const newSale = {
       id: "sale_" + Date.now(),
       date: new Date().toISOString().slice(0, 10),
@@ -1192,13 +1248,11 @@ function OrderEntryDialog({
         qty: item.qty,
         price: item.price,
       })),
-      // الثلاثة المطلوبة اللي كانت ناقصة ومسببة الخطأ 👇
       totalSales: currentTotalSales,
       totalCost: currentTotalCost,
       createdAt: Date.now(),
     };
 
-    // 4. الحفظ في الداتا بيس (باستخدام التايب كاستنج لضمان عدم اعتراض TS)
     if ((db as any).setDb) {
       (db as any).setDb((prev: any) => ({
         ...prev,
@@ -1207,32 +1261,21 @@ function OrderEntryDialog({
     } else if (db.sales) {
       db.sales.push(newSale as any);
     }
-    // ==========================================
 
-    // لو السلة فاضية اقفل الأوردر وامسحه بلاش فواتير صفرية
     if (order.items.length === 0) {
       clearOrder(code);
       onClose();
       return;
     }
 
-    // ==========================================
-    // 🛍️ لوجيك التوجيه بناءً على نوع الزون (Takeaway أو صالة)
-    // ==========================================
     if (order.zone === "takeaway") {
-      // 🛵 لوجيك التيك أواي المطور
       let finalDeliveryPrice = 0;
       const inputPrice = prompt(
         "الرجاء إدخال مصاريف التوصيل (اتركه 0 إذا كان تيك أواي عادي):",
         "0",
       );
-
-      // لو الكاشير ضغط إلغاء (Cancel)، نوقف العملية تماماً ومفيش حاجة تتحفظ
       if (inputPrice === null) return;
-
       finalDeliveryPrice = Number(inputPrice) || 0;
-
-      // الشرط الذكي: لو أكبر من 0 يتحول لـ delivery (توصيل)، غير كده يفضل takeaway
       const computedType = finalDeliveryPrice > 0 ? "delivery" : "takeaway";
 
       const inv: any = {
@@ -1247,6 +1290,7 @@ function OrderEntryDialog({
         customerAddress: order.customerAddress || null,
         cashierId: pos.shift?.cashierId || null,
         cashierName: pos.shift?.cashierName || null,
+        captainName: (order as any).captainName || null, // 🌟 ترحيل اسم الكابتن للفاتورة
         items: order.items,
         subtotal: totals.subtotal,
         discountPct: order.discountPct,
@@ -1264,37 +1308,23 @@ function OrderEntryDialog({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(inv),
         });
-
-        if (!response.ok) {
-          throw new Error("فشل في حفظ الفاتورة على السيرفر");
-        }
-
+        if (!response.ok) throw new Error("فشل في حفظ الفاتورة على السيرفر");
         addInvoice(inv);
-
         if (order.customerName) {
           const c = pos.customers.find((c) => c.name === order.customerName);
           if (c) incCustomerOrders(c.id);
         }
-
         clearOrder(code);
-
-        if (computedType === "delivery") {
+        if (computedType === "delivery")
           toast.success(
             `تم حفظ الفاتورة كـ Order توصيل! 🛵 (+${finalDeliveryPrice} ج.م)`,
           );
-        } else {
-          toast.success("تم حفظ فاتورة تيك أواي بنجاح! 🛍️");
-        }
-
+        else toast.success("تم حفظ فاتورة تيك أواي بنجاح! 🛍️");
         onClose();
       } catch (error: any) {
-        console.error("خطأ أثناء حفظ الفاتورة:", error);
         toast.error(`حدث خطأ أثناء الحفظ على السيرفر: ${error.message}`);
       }
     } else {
-      // ==========================================
-      // 🍽️ لوجيك الصالة الأساسي (طاولات)
-      // ==========================================
       upsertOrder({ ...order, state: "active" });
       toast.success("تم حفظ طلب الصالة على الطاولة! 🍽️");
       onClose();
@@ -1304,8 +1334,6 @@ function OrderEntryDialog({
   async function processTakeawayInvoice(isDelivery: boolean) {
     const finalDeliveryPrice = isDelivery ? Number(deliveryInputPrice) || 0 : 0;
     const computedType = isDelivery ? "delivery" : "takeaway";
-
-    // إغلاق البوكس
     setDeliveryModalOpen(false);
 
     const inv: any = {
@@ -1313,20 +1341,21 @@ function OrderEntryDialog({
       invoiceNumber: getNextInvoiceNumber
         ? getNextInvoiceNumber(pos.invoices)
         : Math.floor(100000 + Math.random() * 900000),
-      type: computedType, // 'takeaway' أو 'delivery'
+      type: computedType,
       tableCode: order.tableCode,
       zone: "takeaway",
       customerName: order.customerName || null,
       customerAddress: order.customerAddress || null,
       cashierId: pos.shift?.cashierId || null,
       cashierName: pos.shift?.cashierName || null,
+      captainName: (order as any).captainName || null, // 🌟 ترحيل اسم الكابتن للفاتورة
       items: order.items,
       subtotal: totals.subtotal,
       discountPct: order.discountPct,
       discountValue: totals.discountValue,
       taxPct: order.taxPct,
       taxValue: totals.taxValue,
-      deliveryPrice: finalDeliveryPrice, // لو Skip هتبقي 0
+      deliveryPrice: finalDeliveryPrice,
       total: totals.total + finalDeliveryPrice,
       createdAt: Date.now(),
     };
@@ -1337,53 +1366,29 @@ function OrderEntryDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(inv),
       });
-
       if (!response.ok) throw new Error("فشل في حفظ الفاتورة على السيرفر");
-
       addInvoice(inv);
-
-      // هنا بنحسب الأوردر للزبون بناءً على اسمه عشان orderCount يزيد صح
       if (order.customerName) {
         const c = pos.customers.find((c) => c.name === order.customerName);
         if (c) incCustomerOrders(c.id);
       }
-
       clearOrder(order.tableCode);
-
-      if (computedType === "delivery") {
+      if (computedType === "delivery")
         toast.success(
           `تم حفظ الفاتورة كـ أوردر توصيل 🛵 (+${finalDeliveryPrice} ج.م)`,
         );
-      } else {
-        toast.success("تم حفظ فاتورة تيك أواي 🛍️");
-      }
-
+      else toast.success("تم حفظ فاتورة تيك أواي 🛍️");
       onClose();
     } catch (error: any) {
-      console.error("خطأ:", error);
       toast.error(`حدث خطأ أثناء الحفظ: ${error.message}`);
     }
   }
 
   function onPickMeal(meal: Meal) {
-    if (meal.hasModifiers && (meal.modifierGroups?.length || 0) > 0) {
+    if (meal.hasModifiers && (meal.modifierGroups?.length || 0) > 0)
       setModifierMeal(meal);
-    } else {
-      addLine(meal);
-    }
+    else addLine(meal);
   }
-
-  const handleQtyChange = (val: number, maxQty: number, lineId: string) => {
-    if (val > maxQty) {
-      // إظهار التنبيه
-      alert("عفواً، الكمية المطلوبة غير متوفرة! المتاح هو: " + maxQty);
-
-      // تصفير القيمة أو ضبطها على الأقصى
-      changeQty(lineId, maxQty);
-    } else {
-      changeQty(lineId, val);
-    }
-  };
 
   function changeQty(lineId: string, qty: number) {
     upsertOrder({
@@ -1410,7 +1415,6 @@ function OrderEntryDialog({
         className="max-w-7xl w-[100vw] h-[95vh] p-0 overflow-hidden"
       >
         <div className="flex h-full">
-          {/* Left: meals grid & categories */}
           <div className="flex-1 flex flex-col min-w-0 border-l border-border">
             <div className="p-3 border-b border-border space-y-2">
               <div className="flex items-center justify-between gap-3">
@@ -1433,10 +1437,8 @@ function OrderEntryDialog({
               />
             </div>
 
-            {/* حاوية عرض الأصناف والأقسام الديناميكية */}
             <div className="flex-1 overflow-auto p-3">
               {q ? (
-                /* الحالة الأولى: إذا كان هناك نص بحث، اعرض النتائج المطابقة مباشرة */
                 <div className="grid grid-cols-5 gap-3 justify-items-center">
                   {filtered.map((m) => {
                     const stockQty = manufacturable(m);
@@ -1455,9 +1457,7 @@ function OrderEntryDialog({
                         key={m.id}
                         disabled={disabled}
                         onClick={() => onPickMeal(m)}
-                        className={`h-[150px] w-[170px] rounded-xl border-2 p-3 flex flex-col items-center justify-center text-center gap-2 transition
-                          ${disabled ? "opacity-40 cursor-not-allowed" : "hover:border-primary hover:bg-primary/5"}
-                          ${isShisha ? "border-purple-300 bg-purple-50 dark:bg-purple-950/30" : "border-border bg-card"}`}
+                        className={`h-[150px] w-[170px] rounded-xl border-2 p-3 flex flex-col items-center justify-center text-center gap-2 transition ${disabled ? "opacity-40 cursor-not-allowed" : "hover:border-primary hover:bg-primary/5"} ${isShisha ? "border-purple-300 bg-purple-50 dark:bg-purple-950/30" : "border-border bg-card"}`}
                       >
                         <span className="font-bold text-base leading-tight">
                           {m.name}
@@ -1481,7 +1481,6 @@ function OrderEntryDialog({
                   })}
                 </div>
               ) : !activeCategory ? (
-                /* الحالة الثانية: لا يوجد بحث ولم يتم اختيار قسم بعد -> اعرض قائمة الأقسام */
                 <div className="grid grid-cols-6 gap-4">
                   {categories.map((cat) => (
                     <button
@@ -1494,7 +1493,6 @@ function OrderEntryDialog({
                   ))}
                 </div>
               ) : (
-                /* الحالة الثالثة: تم اختيار قسم معين -> اعرض أصنافه فقط مع زر الرجوع */
                 <div className="space-y-4">
                   <div className="flex items-center justify-between border-b pb-2">
                     <h4 className="font-bold text-lg text-primary">
@@ -1508,7 +1506,6 @@ function OrderEntryDialog({
                       رجوع للأقسام ←
                     </Button>
                   </div>
-
                   <div className="grid grid-cols-5 gap-3 justify-items-center">
                     {filtered
                       .filter((m) => m.category === activeCategory)
@@ -1532,9 +1529,7 @@ function OrderEntryDialog({
                             key={m.id}
                             disabled={disabled}
                             onClick={() => onPickMeal(m)}
-                            className={`h-[150px] w-[170px] rounded-xl border-2 p-3 flex flex-col items-center justify-center text-center gap-2 transition
-                              ${disabled ? "opacity-40 cursor-not-allowed" : "hover:border-primary hover:bg-primary/5"}
-                              ${isShisha ? "border-purple-300 bg-purple-50 dark:bg-purple-950/30" : "border-border bg-card"}`}
+                            className={`h-[150px] w-[170px] rounded-xl border-2 p-3 flex flex-col items-center justify-center text-center gap-2 transition ${disabled ? "opacity-40 cursor-not-allowed" : "hover:border-primary hover:bg-primary/5"} ${isShisha ? "border-purple-300 bg-purple-50 dark:bg-purple-950/30" : "border-border bg-card"}`}
                           >
                             <span className="font-bold text-base leading-tight">
                               {m.name}
@@ -1559,8 +1554,6 @@ function OrderEntryDialog({
                   </div>
                 </div>
               )}
-
-              {/* رسالة عدم وجود نتائج في حال فشل البحث */}
               {filtered.length === 0 && (
                 <div className="col-span-full text-center p-8 text-muted-foreground">
                   لا توجد أصناف مطابقة.
@@ -1569,16 +1562,12 @@ function OrderEntryDialog({
             </div>
           </div>
 
-          {/* Right: cart */}
           <div className="w-80 flex flex-col bg-secondary/30 h-full overflow-hidden">
-            {/* الهيدر: ثابت */}
             <div className="p-3 border-b border-border shrink-0">
               <h3 className="font-bold text-sm">
                 السلة ({order.items.length})
               </h3>
             </div>
-
-            {/* منطقة المنتجات: فيها السكرول وصغرنا المسافات */}
             <div className="flex-1 overflow-y-auto min-h-0 max-h-[360px] p-2 space-y-1.5">
               {order.items.length === 0 ? (
                 <p className="text-center text-muted-foreground text-xs p-6">
@@ -1586,12 +1575,9 @@ function OrderEntryDialog({
                 </p>
               ) : (
                 order.items.map((l) => {
-                  const extras = l.extras.reduce((s, e) => s + e.price, 0);
-                  const lineTotal = (l.unitPrice + extras) * l.qty;
                   return (
                     <div
                       key={l.id}
-                      // صغرنا البادينج وحجم الخط هنا
                       className="bg-card border border-border rounded-md p-1.5 text-xs shadow-sm"
                     >
                       <div className="flex items-start justify-between gap-1.5">
@@ -1612,7 +1598,6 @@ function OrderEntryDialog({
                           </button>
                         )}
                       </div>
-
                       <div className="flex items-center gap-1 mt-2">
                         {!isMicros && (
                           <button
@@ -1622,24 +1607,12 @@ function OrderEntryDialog({
                             -
                           </button>
                         )}
-
                         <input
                           type="number"
                           value={l.qty}
                           className="w-10 h-7 text-center text-xs border rounded bg-background"
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            const meal = db.meals.find(
-                              (m) => m.id === l.mealId,
-                            );
-                            const maxQty = meal ? getMaxQty(meal, db) : 999;
-
-                            const clampedValue = Math.min(val, maxQty);
-                            changeQty(l.id, clampedValue);
-                          }}
                           readOnly
                         />
-
                         <button
                           onClick={() => changeQty(l.id, l.qty + 1)}
                           className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
@@ -1652,8 +1625,6 @@ function OrderEntryDialog({
                 })
               )}
             </div>
-
-            {/* منطقة الإجمالي: ثابتة تحت */}
             <div className="p-3 border-t border-border space-y-1 text-xs shrink-0 bg-background/50">
               <Row label="المجموع" value={fmt2(totals.subtotal)} />
               <Row
@@ -1666,8 +1637,6 @@ function OrderEntryDialog({
               />
               <Row label="الإجمالي" value={fmt2(totals.total)} bold />
             </div>
-
-            {/* الفوتر وزرار الحفظ: ثابت */}
             <DialogFooter className="p-3 border-t border-border shrink-0">
               <Button
                 onClick={() => handleSaveAndDeduct(order.tableCode)}
@@ -1680,7 +1649,6 @@ function OrderEntryDialog({
             </DialogFooter>
           </div>
         </div>
-
         {modifierMeal && (
           <ModifierDialog
             meal={modifierMeal}
@@ -1691,52 +1659,6 @@ function OrderEntryDialog({
             }}
           />
         )}
-        <Dialog open={deliveryModalOpen} onOpenChange={setDeliveryModalOpen}>
-          <DialogContent dir="rtl" className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Bike className="w-5 h-5 text-amber-600" />
-                تحديد مصاريف التوصيل
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <p className="text-sm text-muted-foreground">
-                لو الطلب ده دليفري (أوردر)، دخل مصاريف التوصيل واضغط OK. لو
-                العميل هياخده وهو ماشي، اضغط Skip.
-              </p>
-              <div>
-                <label className="text-xs font-bold mb-1 block">
-                  قيمة التوصيل (ج.م)
-                </label>
-                <Input
-                  type="number"
-                  autoFocus
-                  placeholder="مثال: 20"
-                  value={deliveryInputPrice}
-                  onChange={(e) => setDeliveryInputPrice(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") processTakeawayInvoice(true);
-                  }}
-                />
-              </div>
-            </div>
-            <DialogFooter className="flex justify-between sm:justify-between w-full">
-              <Button
-                variant="outline"
-                onClick={() => processTakeawayInvoice(false)}
-                className="bg-gray-100"
-              >
-                Skip (تيك أواي)
-              </Button>
-              <Button
-                onClick={() => processTakeawayInvoice(true)}
-                className="bg-amber-600 hover:bg-amber-700 text-white"
-              >
-                OK (أوردر دليفري)
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </DialogContent>
     </Dialog>
   );
@@ -1761,7 +1683,6 @@ function Row({
   );
 }
 
-/* ---------------- Modifier modal ---------------- */
 function ModifierDialog({
   meal,
   onCancel,
@@ -1775,17 +1696,13 @@ function ModifierDialog({
   ) => void;
 }) {
   const groups = meal.modifierGroups || [];
-  const [picks, setPicks] = useState<Record<string, string>>({}); // groupId -> optionId
-
+  const [picks, setPicks] = useState<Record<string, string>>({});
   function confirm() {
     const extras: { label: string; price: number }[] = [];
     const parts: string[] = [];
     for (const g of groups) {
       const oid = picks[g.id];
-      if (!oid && g.required) {
-        toast.error(`اختر من ${g.name}`);
-        return;
-      }
+      if (!oid && g.required) return toast.error(`اختر من ${g.name}`);
       if (!oid) continue;
       const opt = g.options.find((o) => o.id === oid)!;
       extras.push({ label: `${g.name}: ${opt.label}`, price: opt.extraPrice });
@@ -1793,7 +1710,6 @@ function ModifierDialog({
     }
     onConfirm(extras, parts.join(" • "));
   }
-
   return (
     <Dialog open onOpenChange={(o) => !o && onCancel()}>
       <DialogContent dir="rtl" className="max-w-lg">
@@ -1842,7 +1758,6 @@ function ModifierDialog({
   );
 }
 
-/* ---------------- Transfer modal ---------------- */
 function TransferDialog({ onClose }: { onClose: () => void }) {
   const { db: pos, transferItems } = usePosDB();
   const [from, setFrom] = useState("");
@@ -1850,27 +1765,20 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState("");
   const [showList, setShowList] = useState(false);
   const [picks, setPicks] = useState<Record<string, number>>({});
-
   const allTables = useMemo(() => {
     const cTables = Array.from({ length: 70 }, (_, i) => `C${i + 1}`);
     const oTables = Array.from({ length: 70 }, (_, i) => `O${i + 1}`);
     return [...cTables, ...oTables];
   }, []);
-
   const filteredTables = allTables.filter((t) =>
     t.toLowerCase().includes(search.toLowerCase()),
   );
-
   const src = from ? pos.orders[from.trim()] : null;
-
   function doTransfer() {
     if (!from.trim() || !to.trim()) return toast.error("أدخل الطاولتين");
-
     const itemsToMove = Object.entries(picks).map(([id, qty]) => ({ id, qty }));
     if (itemsToMove.length === 0) return toast.error("اختر أصنافاً للنقل");
-
     const targetZone = to.startsWith("C") ? "dining" : "takeaway";
-
     const r = transferItems(
       from.trim(),
       to.trim(),
@@ -1878,18 +1786,16 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
       targetZone as any,
     );
     if (!r.ok) return toast.error((r as any).error || "فشل نقل الأصناف");
-
     toast.success("تم النقل بنجاح");
     onClose();
   }
-
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent dir="rtl" className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>تحويل أصناف</DialogTitle>
         </DialogHeader>
-
+        {/* ... (نفس كود الترانزفير كما هو بدون تعديل) ... */}
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <label className="text-xs font-medium">المنقول منها</label>
@@ -1901,7 +1807,6 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
               }}
               placeholder="مثال: C1"
             />
-
             {src && (
               <div className="border rounded-lg max-h-60 overflow-auto p-2">
                 {src.items.map((l) => {
@@ -1957,7 +1862,6 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
               </div>
             )}
           </div>
-
           <div className="space-y-2 relative">
             <label className="text-xs font-medium">المنقول إليها</label>
             <Input
@@ -1969,7 +1873,6 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
               }}
               onFocus={() => setShowList(true)}
             />
-
             {showList && (
               <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-auto">
                 {filteredTables.map((t) => (
@@ -1989,7 +1892,6 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
             )}
           </div>
         </div>
-
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             إلغاء
@@ -2001,7 +1903,6 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-/* ---------------- Print receipt (dialog) ---------------- */
 function PrintDialog({
   tableCode,
   order,
@@ -2027,13 +1928,11 @@ function PrintDialog({
     setPendingDiscount(v);
     setPinOpen(true);
   }
-
   function doPrint() {
     upsertOrder({ ...order, discountPct: discount });
     window.print();
     onPrinted();
   }
-
   return (
     <>
       <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -2100,9 +1999,6 @@ function PrintDialog({
                 تطبيق
               </Button>
             )}
-            <p className="text-[10px] text-muted-foreground">
-              تغيير الخصم يتطلب كلمة سر المسؤول.
-            </p>
           </div>
           <DialogFooter className="gap-2 no-print">
             <Button variant="outline" onClick={onClose}>
@@ -2126,7 +2022,7 @@ function PrintDialog({
           if (pendingDiscount !== null) {
             setDiscount(pendingDiscount);
             upsertOrder({ ...order, discountPct: pendingDiscount });
-            toast.success("تم تطبيق الخصم وحفظه في الطلب بنجاح");
+            toast.success("تم تطبيق الخصم");
           }
           setPinOpen(false);
           setPendingDiscount(null);
@@ -2139,7 +2035,6 @@ function PrintDialog({
   );
 }
 
-/* ---------------- Checkout (two-step) ---------------- */
 function CheckoutDialog({
   tableCode,
   order,
@@ -2156,7 +2051,6 @@ function CheckoutDialog({
   const [confirmed, setConfirmed] = useState(false);
 
   const currentOrder = pos.orders[tableCode] || order;
-
   const totals = computeTotals(
     currentOrder.items,
     currentOrder.discountPct,
@@ -2205,7 +2099,6 @@ function CheckoutDialog({
         String(currentOrder.tableCode || "")
           .toUpperCase()
           .startsWith("T");
-
       let finalDeliveryPrice = 0;
       let finalType: "takeaway" | "delivery" | "dinein" = isTakeaway
         ? "takeaway"
@@ -2216,14 +2109,9 @@ function CheckoutDialog({
           "الرجاء إدخال مصاريف التوصيل (اتركه 0 أو فارغ إذا كان تيك أواي عادي):",
           "0",
         );
-
         if (inputPrice === null) return;
-
         finalDeliveryPrice = Number(inputPrice) || 0;
-
-        if (finalDeliveryPrice > 0) {
-          finalType = "delivery";
-        }
+        if (finalDeliveryPrice > 0) finalType = "delivery";
       }
 
       const inv: Invoice = {
@@ -2236,8 +2124,8 @@ function CheckoutDialog({
         customerAddress: currentOrder.customerAddress,
         cashierId: pos.shift?.cashierId,
         cashierName: pos.shift?.cashierName,
+        captainName: (currentOrder as any).captainName || null, // 🌟 ترحيل اسم الكابتن للفاتورة في الداتابيز
         items: currentOrder.items,
-
         subtotal: totals.subtotal,
         discountPct: currentOrder.discountPct,
         discountValue: totals.discountValue,
@@ -2248,33 +2136,24 @@ function CheckoutDialog({
         createdAt: Date.now(),
       };
 
-      // 1. حفظ الفاتورة على السيرفر
       await addInvoice(inv);
-
-      // 2. خصم الكميات محلياً
       deductInventory();
 
-      // 3. ترحيل خصم الجرامات والمكونات إلى الـ pgAdmin فوراً
       try {
         for (const line of currentOrder.items) {
           const meal = db.meals.find((m) => m.id === line.mealId);
           if (!meal || !meal.ingredients) continue;
-
           const dept = meal.department;
-
           for (const ing of meal.ingredients) {
             const key = deptKey(dept as SubDept, ing.itemId);
-
             const freshDb = JSON.parse(
               localStorage.getItem("rest-inv-db-v1") || "{}",
             );
             const nextDeptStock = freshDb.deptStock || {};
             const remainingQty =
               nextDeptStock[key] !== undefined ? nextDeptStock[key] : 0;
-
             const originalItem = db.items.find((i) => i.id === ing.itemId);
             const itemName = originalItem ? originalItem.name : "صنف مخزني";
-
             await fetch("http://192.168.1.21:5000/api/dept-stock", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -2287,49 +2166,31 @@ function CheckoutDialog({
             });
           }
         }
-        console.log(
-          "🚀 تم ترحيل وتثبيت خصم المكونات في pgAdmin بنجاح يا هندسة!",
-        );
       } catch (stockError) {
-        console.error(
-          "🚨 خطأ أثناء ترحيل خصم المخازن الفرعية للسيرفر:",
-          stockError,
-        );
+        console.error("🚨 خطأ:", stockError);
       }
 
-      // =========================================================
-      // 🔥 4. تسجيل المبيعات وترحيلها إلى السيرفر (pgAdmin) لدعم الـ ResultsTab
-      // =========================================================
       const salesByDept: Record<
         string,
         { mealId: string; qty: number; price: number }[]
       > = {};
-
       for (const line of currentOrder.items) {
         const meal = db.meals.find((m) => m.id === line.mealId);
         if (!meal) continue;
         const dept = meal.department;
-
-        if (!salesByDept[dept]) {
-          salesByDept[dept] = [];
-        }
-
+        if (!salesByDept[dept]) salesByDept[dept] = [];
         const existingLine = salesByDept[dept].find(
           (l) => l.mealId === line.mealId,
         );
-        if (existingLine) {
-          existingLine.qty += line.qty;
-        } else {
+        if (existingLine) existingLine.qty += line.qty;
+        else
           salesByDept[dept].push({
             mealId: line.mealId,
             qty: line.qty,
-            price: meal.sellingPrice || 0, // 🔥 سحبنا السعر من الـ meal مباشرة عشان الـ OrderItem ما فيهوش price
+            price: meal.sellingPrice || 0,
           });
-        }
       }
       const todayStr = new Date().toISOString().slice(0, 10);
-
-      // تجهيز نسخة الـ LocalStorage للاحتياط التزاماً بالسرعة المحلية
       const freshDbForSales = JSON.parse(
         localStorage.getItem("rest-inv-db-v1") || "{}",
       );
@@ -2337,13 +2198,10 @@ function CheckoutDialog({
 
       for (const [deptName, deptLines] of Object.entries(salesByDept)) {
         if (deptLines.length > 0) {
-          // حساب إجمالي البيع للقسم الحالي
           const totalSales = deptLines.reduce(
             (sum, l) => sum + l.price * l.qty,
             0,
           );
-
-          // حساب إجمالي التكلفة بناءً على مكونات الريسبي
           let totalCost = 0;
           if (typeof expandMealToBase === "function" && db.items) {
             for (const l of deptLines) {
@@ -2356,8 +2214,6 @@ function CheckoutDialog({
               }
             }
           }
-
-          // بناء أوبجكت المبيعات المتوافق بالملي مع الـ TypeScript والـ pgAdmin
           const newSale = {
             id: "sale_" + crypto.randomUUID().split("-")[0] + "_" + Date.now(),
             date: todayStr,
@@ -2367,39 +2223,25 @@ function CheckoutDialog({
             totalCost: totalCost,
             createdAt: Date.now(),
           };
-
-          // أ. الحفظ في الـ pgAdmin عن طريق الـ API الخاص بالسيرفر
           try {
             await fetch("http://192.168.1.21:5000/api/sales", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(newSale),
             });
-            console.log(
-              `✅ تم ترحيل بيعة قسم [${deptName}] إلى pgAdmin بنجاح!`,
-            );
           } catch (apiError) {
-            console.error("🚨 فشل ترحيل المبيعات للسيرفر:", apiError);
+            console.error("🚨 فشل:", apiError);
           }
-
-          // ب. التحديث المحلي السريع عشان التبويبات تسمع فوراً بدون ريفريش
           freshDbForSales.sales.push(newSale);
-          if (db.sales) {
-            db.sales.push(newSale as any);
-          }
-
-          // ج. استدعاء الدالة القديمة لضمان عدم كسر أي منطق آخر بالسيستم
+          if (db.sales) db.sales.push(newSale as any);
           try {
             addSale(todayStr, deptName as SubDept, deptLines);
           } catch (e) {
-            console.warn("addSale fallback notice:", e);
+            console.warn(e);
           }
         }
       }
-
-      // حفظ أخير في اللوكال ستوريدج للحفاظ على المزامنة
       localStorage.setItem("rest-inv-db-v1", JSON.stringify(freshDbForSales));
-      // =========================================================
 
       if (isTakeaway && currentOrder.customerName) {
         const c = pos.customers.find(
@@ -2408,20 +2250,16 @@ function CheckoutDialog({
         if (c) incCustomerOrders(c.id);
       }
 
-      // 5. إشعار النجاح للمستخدم
-      if (finalType === "delivery") {
+      if (finalType === "delivery")
         toast.success(
           `تم إنهاء أوردر التوصيل بنجاح 🛵 (+${finalDeliveryPrice} ج.م)`,
         );
-      } else if (finalType === "takeaway") {
+      else if (finalType === "takeaway")
         toast.success("تم إنهاء التيك أواي بنجاح 🛍️");
-      } else {
-        toast.success("تم إنهاء الطاولة بنجاح 🍽️");
-      }
+      else toast.success("تم إنهاء الطاولة بنجاح 🍽️");
 
       onDone();
     } catch (e) {
-      console.error("خطأ في خطوات إنهاء الفاتورة:", e);
       toast.error("حدث خطأ أثناء إنهاء الفاتورة");
     }
   }

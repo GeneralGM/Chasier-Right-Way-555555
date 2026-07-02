@@ -33,6 +33,7 @@ import {
   Bike,
 } from "lucide-react";
 import * as XLSX from "xlsx";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "الإعدادات - أرشيف الفواتير" }] }),
@@ -624,40 +625,207 @@ function ShiftsTab() {
     });
   }, [pos.shifts, serverShifts, pos.invoices, serverInvoices, db.meals]);
 
-  function printShift(report: ShiftReport) {
-    const w = window.open("", "_blank");
-    if (!w) return;
+  // 🌟 دالة طباعة تقرير الشيفت (نفس الصورة بالظبط بدون أي زيادات)
+  const printShiftReport = (shift: any, shiftInvoices: any[]) => {
+    // 1. حسابات التقرير الأساسية
+    let totalDineIn = 0;
+    let totalTakeaway = 0;
+    let totalDelivery = 0;
+    let totalStaff = 0; 
+    let totalHospitality = 0; 
 
-    w.document.write(`
+    let grossSales = 0;
+    let totalDiscount = 0;
+    let totalTax = 0;
+    let totalDeliveryFee = 0;
+    let netSales = 0;
+
+    let cashTotal = 0;
+    let visaTotal = 0;
+
+    const depts: Record<string, number> = {};
+
+    shiftInvoices.forEach((inv) => {
+      // تفاصيل المبيعات (أنواع الطلبات)
+      if (inv.type === "dinein" || inv.type === "dine-in") totalDineIn += Number(inv.total) || 0;
+      else if (inv.type === "takeaway") totalTakeaway += Number(inv.total) || 0;
+      else if (inv.type === "delivery") totalDelivery += Number(inv.total) || 0;
+      else if (inv.type === "staff" || inv.type === "موظفين") totalStaff += Number(inv.total) || 0;
+      else if (inv.type === "hospitality" || inv.type === "ضيافة") totalHospitality += Number(inv.total) || 0;
+
+      // الحسابات المالية
+      grossSales += Number(inv.subtotal) || 0;
+      totalDiscount += Number(inv.discountValue) || 0;
+      totalTax += Number(inv.taxValue) || 0;
+      totalDeliveryFee += Number(inv.deliveryPrice) || 0;
+      netSales += Number(inv.total) || 0;
+
+      // طرق الدفع
+      if (inv.paymentMethod === "visa") {
+        visaTotal += Number(inv.total) || 0;
+      } else {
+        cashTotal += Number(inv.total) || 0;
+      }
+
+      // حساب الأقسام 
+      const itemsArray = typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items || [];
+      itemsArray.forEach((item: any) => {
+        const extrasPrice = item.extras?.reduce((s: number, e: any) => s + Number(e.price), 0) || 0;
+        const lineTotal = (Number(item.unitPrice || item.price) + extrasPrice) * Number(item.qty || 1);
+
+        const meal = db.meals?.find((m: any) => m.id === item.mealId);
+        let deptName = "أخرى";
+        if (meal) {
+          const isShisha = meal.department === "شيشه" || (meal.category || "").trim().replace("ة", "ه") === "شيشه";
+          if (isShisha) deptName = "الشيشة";
+          else if (meal.department) deptName = meal.department;
+        } else if (item.department) {
+          deptName = item.department;
+        }
+
+        if (!depts[deptName]) depts[deptName] = 0;
+        depts[deptName] += lineTotal;
+      });
+    });
+
+    // بيانات الهيدر والخزينة
+    const shiftOpenTime = shift.openedAt ? new Date(shift.openedAt).toLocaleString("ar-EG") : "غير محدد";
+    const shiftCloseTime = shift.closedAt ? new Date(shift.closedAt).toLocaleString("ar-EG") : "ما زال مفتوحاً";
+    const printTime = new Date().toLocaleString("ar-EG");
+
+    const openingBalance = Number(shift.startingCash) || 0;
+    const expectedDrawer = openingBalance + cashTotal; // شلت المصروفات
+
+    // تجهيز صفوف الأقسام ديناميكياً
+    const deptRows = Object.entries(depts).map(([dept, amount]) => `
+      <tr>
+        <td>${dept}</td>
+        <td class="bold">${amount.toFixed(2)}</td>
+      </tr>
+    `).join("");
+
+    // 2. تصميم نافذة الطباعة (HTML/CSS)
+    const printWindow = window.open("", "_blank", "width=600,height=800");
+    if (!printWindow) {
+      toast.error("يرجى السماح بالنوافذ المنبثقة (Pop-ups) للطباعة");
+      return;
+    }
+
+    const htmlContent = `
       <html dir="rtl">
-      <head>
-        <title>تقرير الشيفت - ${report.shift.cashierName}</title>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 20px; }
-          h1 { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }
-          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-          th, td { border: 1px solid #ccc; padding: 10px; text-align: right; }
-          th { background: #f5f5f5; }
-          .total { font-weight: bold; font-size: 1.2em; background: #e0ffe0; }
-          .footer { margin-top: 30px; text-align: center; font-size: 0.9em; color: #666; }
-        </style>
-      </head>
-      <body>
-        <h1>تقرير الشيفت</h1>
-        <table>
-          <tr><th colspan="2">الأقسام الأساسية والإيرادات</th></tr>
-          <tr><td>إيرادات المطبخ</td><td>${fmt2(report.kitchen)} ج.م</td></tr>
-          <tr><td>إيرادات البار</td><td>${fmt2(report.bar)} ج.م</td></tr>
-          <tr><td>إيرادات الشيشة</td><td>${fmt2(report.shisha)} ج.م</td></tr>
-          <tr class="total"><td>إجمالي الإيرادات الأساسية</td><td>${fmt2(report.revenues)} ج.م</td></tr>
-        </table>
-        <div class="footer">طُبع بواسطة النظام بتاريخ: ${new Date().toLocaleString("ar-EG")}</div>
-      </body>
+        <head>
+          <title>تقرير الوردية</title>
+          <style>
+            @page { margin: 0; size: auto; }
+            body {
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+              width: 100%;
+              max-width: 80mm;
+              margin: 0 auto;
+              padding: 10px 5px;
+              color: #000;
+              background: #fff;
+              font-size: 13px;
+              line-height: 1.5;
+              box-sizing: border-box;
+            }
+            h2 { text-align: center; margin: 0 0 10px 0; font-size: 18px; font-weight: bold; text-decoration: underline; }
+            .header-box {
+              border: 1.5px solid #000;
+              padding: 6px;
+              margin-bottom: 12px;
+              font-size: 12px;
+              font-weight: bold;
+            }
+            .header-row {
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 4px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 12px;
+              font-size: 13px;
+            }
+            th, td {
+              border: 1.5px solid #000;
+              padding: 5px;
+            }
+            td:first-child { width: 65%; font-weight: bold; }
+            td:last-child { width: 35%; text-align: center; font-family: monospace; font-size: 14px;}
+            .table-header {
+              text-align: center !important;
+              background-color: #f0f0f0 !important;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+              font-weight: bold;
+              font-size: 14px;
+            }
+            .bold { font-weight: bold; }
+            .footer-sigs {
+              display: flex;
+              justify-content: space-between;
+              margin-top: 25px;
+              font-weight: bold;
+              padding: 0 15px;
+              font-size: 13px;
+            }
+            .footer-sigs div {
+              text-align: center;
+            }
+          </style>
+        </head>
+        <body onload="setTimeout(() => { window.print(); window.close(); }, 500);">
+          
+          <h2>تقرير وردية</h2>
+          
+          <div class="header-box">
+            <div class="header-row">
+              <span>من:</span>
+              <span dir="ltr">${shiftOpenTime}</span>
+            </div>
+            <div class="header-row">
+              <span>إلى:</span>
+              <span dir="ltr">${shiftCloseTime}</span>
+            </div>
+            <div class="header-row">
+              <span>الكاشير:</span>
+              <span>${shift.cashierName || "غير معروف"}</span>
+            </div> 
+          </div>
+            
+            <table>
+            <tr><td colspan="2" class="table-header">تفاصيل المبيعات</td></tr>
+            <tr><td>صالة</td><td class="bold">${totalDineIn.toFixed(2)}</td></tr>
+            <tr><td>بار</td><td class="bold">${totalDelivery.toFixed(2)}</td></tr>
+            <tr><td>شيشة</td><td class="bold">${totalDelivery.toFixed(2)}</td></tr>
+            <tr><td>ضيافة</td><td class="bold">${totalHospitality.toFixed(2)}</td></tr>
+            <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
+            <tr><td>تيك اواي</td><td class="bold">${totalTakeaway.toFixed(2)}</td></tr>
+            <tr><td>دليفري</td><td class="bold">${totalDelivery.toFixed(2)}</td></tr>
+            <tr><td>إجمالي الخصم</td><td class="bold">${totalDiscount.toFixed(2)}</td></tr>
+            <tr><td>إجمالي الإيرادات</td><td class="bold">${netSales.toFixed(2)}</td></tr>
+            <tr><td>إجمالي الخدمة / التوصيل</td><td class="bold">${totalDeliveryFee.toFixed(2)}</td></tr>
+          </table>
+
+          <table>
+            <tr><td colspan="2" class="table-header">طرق الدفع</td></tr>
+            <tr><td>نقدي</td><td class="bold">${cashTotal.toFixed(2)}</td></tr>
+            <tr><td>فيزا</td><td class="bold">${visaTotal.toFixed(2)}</td></tr>
+          </table>
+
+          <table>
+            <tr><td>الرصيد النهائي بالدرج</td><td class="bold">${expectedDrawer.toFixed(2)}</td></tr>
+          </table>
+
+        </body>
       </html>
-    `);
-    w.document.close();
-    w.print();
-  }
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
 
   return (
     <div className="space-y-3">
@@ -730,7 +898,26 @@ function ShiftsTab() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => printShift(report)}
+                        onClick={() => {
+                          // 🌟 تجميع فواتير الشيفت ده مخصوص عشان نبعتها لدالة الطباعة الجديدة
+                          const sourceInvoices =
+                            pos.invoices.length > 0
+                              ? pos.invoices
+                              : serverInvoices;
+                          const shiftInvoices = sourceInvoices.filter((inv) => {
+                            if (inv.createdAt < report.shift.openedAt)
+                              return false;
+                            if (
+                              report.shift.closedAt &&
+                              inv.createdAt > report.shift.closedAt
+                            )
+                              return false;
+                            return true;
+                          });
+
+                          // 🌟 نداء الدالة باسمها الجديد (printShiftReport) وبِعَتْنَالها الشيفت وفواتيره
+                          printShiftReport(report.shift, shiftInvoices);
+                        }}
                       >
                         <Printer className="w-3 h-3" />
                         <span className="mr-1">طباعة</span>

@@ -17,6 +17,7 @@ import {
   usePosDB,
   ZONES,
   PAGE_SIZE,
+  setGlobalEditingTable,
   computeTotals,
   type ZoneId,
   type ActiveOrder,
@@ -288,6 +289,12 @@ function PosScreen() {
     return localStorage.getItem("isMicrosDevice") === "true";
   });
 
+  // 🌟 دالة فتح الطاولة وإرسال قفل الحماية للستور بالترتيب الصحيح
+  function handleOpenOrder(code: string | null) {
+    setOpenOrder(code); // 1. فتح الـ Dialog في الـ UI أولاً
+    setGlobalEditingTable(code); // 2. إبلاغ الستور لحماية الطاولة من المسح
+  }
+
   // 🌟 State الخاصة بنافذة الكابتن
   const [captainPromptOpen, setCaptainPromptOpen] = useState(false);
   const [captainPromptMode, setCaptainPromptMode] = useState<
@@ -362,7 +369,7 @@ function PosScreen() {
           cashierName: pos.shift?.cashierName || "كاشير غير معروف",
         } as any);
       }
-      setOpenOrder(selectedTable);
+      handleOpenOrder(selectedTable);
       return;
     }
 
@@ -439,7 +446,7 @@ function PosScreen() {
         }
 
         // لو نجح في الـ verify_existing هيدخل علطول من غير ما يغير أي داتا
-        setOpenOrder(targetTable);
+        handleOpenOrder(targetTable);
         setCaptainPromptOpen(false);
       } else {
         // ❌ السيرفر هيطلع رسالة الخطأ الصارمة (اسم الكابتن الأصلي) والسيستم هيرفض يدخله
@@ -479,14 +486,14 @@ function PosScreen() {
         cashierName={pos.shift?.cashierName || "جاري التحميل..."}
         zoneTabs={<ZoneTabs zone={zone} setZone={setZone} />}
       >
-        <TakeawayView onOpenOrder={(code) => setOpenOrder(code)} />
+        <TakeawayView onOpenOrder={(code) => handleOpenOrder(code)} />
         {openOrder && pos.orders[openOrder] && (
           <OrderEntryDialog
             tableCode={openOrder}
             order={pos.orders[openOrder]}
             meals={db.meals}
             items={db.items}
-            onClose={() => setOpenOrder(null)}
+            onClose={() => handleOpenOrder(null)}
           />
         )}
       </PosFrame>
@@ -1053,6 +1060,10 @@ function OrderEntryDialog({
     clearOrder,
     incCustomerOrders,
   } = usePosDB();
+
+  // 🌟 السر هنا: المسودة المعزولة تماماً عن المزامنة
+  const [draftItems, setDraftItems] = useState<OrderItem[]>(order.items || []);
+
   const [deliveryModalOpen, setDeliveryModalOpen] = useState(false);
   const [deliveryInputPrice, setDeliveryInputPrice] = useState("");
   const [q, setQ] = useState("");
@@ -1075,52 +1086,6 @@ function OrderEntryDialog({
     () => Array.from(new Set(sellable.map((m) => m.category).filter(Boolean))),
     [sellable],
   );
-
-  const getAvailableQty = (targetMeal: Record<string, unknown>) => {
-    if (targetMeal.category === SHISHA_CATEGORY) return Infinity;
-    const dbRaw = db as unknown as Record<string, unknown>;
-    const allOrders = Object.values(
-      (dbRaw.orders as Record<string, unknown>[]) || {},
-    );
-    let maxPossible = Infinity;
-    const ingredients =
-      (targetMeal.ingredients as Array<Record<string, unknown>>) || [];
-    for (const ing of ingredients) {
-      if (ing.refKind === "meal") continue;
-      const itemId = ing.itemId as string;
-      const reservedQty = allOrders.reduce((sum: number, order: unknown) => {
-        const typedOrder = order as Record<string, unknown>;
-        const itemsList =
-          (typedOrder.items as Array<Record<string, unknown>>) || [];
-        const itemInOrder = itemsList.find((i) => i.mealId === targetMeal.id);
-        return (
-          sum + ((itemInOrder?.qty as number) || 0) * ((ing.qty as number) || 0)
-        );
-      }, 0);
-      const itemsList = items as unknown as Array<Record<string, unknown>>;
-      const it = itemsList?.find((x) => x.id === itemId);
-      if (!it) continue;
-      const targetDept = ((targetMeal.department as string) ||
-        (it.department as string)) as "بار" | "مطبخ";
-      const key = deptKey(targetDept, it.id as string);
-      const deptStock = dbRaw?.deptStock as Record<string, number> | undefined;
-      const currentStock = ((deptStock?.[key] as number) || 0) - reservedQty;
-      const conversion =
-        (it.conversionFactor as number) > 0
-          ? (it.conversionFactor as number)
-          : 1;
-      const needBasePerOne = convertToBase(
-        ing.qty as number,
-        ing.unit as Parameters<typeof convertToBase>[1],
-        it.unit as Parameters<typeof convertToBase>[2],
-        conversion,
-        it.subUnitType as Parameters<typeof convertToBase>[4],
-      );
-      const possibleMeals = Math.floor(currentStock / needBasePerOne);
-      if (possibleMeals < maxPossible) maxPossible = possibleMeals;
-    }
-    return maxPossible;
-  };
 
   function manufacturable(meal: Meal): number | null {
     if (meal.category === SHISHA_CATEGORY) return null;
@@ -1168,6 +1133,7 @@ function OrderEntryDialog({
     return min === Infinity ? 99 : Math.max(0, min);
   }
 
+  // 🌟 التعديلات على المسودة (لا تُرسل للسيرفر فوراً)
   function addLine(
     meal: Meal,
     extras: { label: string; price: number }[] = [],
@@ -1184,79 +1150,51 @@ function OrderEntryDialog({
       mealName: undefined,
       department: "",
     };
-    upsertOrder({ ...order, items: [...order.items, line], state: "active" });
+    setDraftItems([...draftItems, line]);
   }
 
-  const getMaxQty = (meal: any, db: any, currentQty: number = 0) => {
-    const department = meal.department;
-    const limits = meal.ingredients.map((ing: any) => {
-      const stockKey = `${department}::${ing.itemId}`;
-      const stockInDb = db.deptStock[stockKey] || 0;
-      const currentIngWeightInKg = (currentQty * ing.qty) / 1000;
-      const availableStock = stockInDb + currentIngWeightInKg;
-      return Math.floor((availableStock * 1000) / ing.qty);
-    });
-    return Math.min(...limits);
-  };
-
-  function deductInventoryFinal() {
-    const perDept: Record<string, { itemId: string; baseQty: number }[]> = {};
-    for (const line of order.items) {
-      const meal = db.meals.find((m) => m.id === line.mealId);
-      if (!meal || meal.category === SHISHA_CATEGORY) continue;
-      const dept = meal.department;
-      for (const ing of meal.ingredients) {
-        if (ing.refKind === "meal") continue;
-        const it = items.find((x) => x.id === ing.itemId);
-        if (!it) continue;
-        const conversion =
-          it.conversionFactor && it.conversionFactor > 0
-            ? it.conversionFactor
-            : 1;
-        const baseQty = round2(
-          clamp0(
-            convertToBase(
-              ing.qty,
-              ing.unit,
-              it.unit,
-              conversion,
-              it.subUnitType,
-            ) * line.qty,
-          ),
-        );
-        if (baseQty <= 0) continue;
-        (perDept[dept] = perDept[dept] || []).push({ itemId: it.id, baseQty });
-      }
-    }
-    for (const [d, arr] of Object.entries(perDept))
-      deductSubStock(d as SubDept, arr);
+  function changeQty(lineId: string, qty: number) {
+    setDraftItems(
+      draftItems.map((l) => (l.id === lineId ? { ...l, qty: clamp0(qty) } : l)),
+    );
   }
 
-  // 1. ضيف الـ State دي في بداية الكومبوننت
+  function removeLine(lineId: string) {
+    setDraftItems(draftItems.filter((l) => l.id !== lineId));
+  }
+  // 🌟 دالة اختيار الصنف (لو ليه إضافات يفتحها، لو لأ ينزله في المسودة علطول)
+  function onPickMeal(meal: Meal) {
+    if (meal.hasModifiers && (meal.modifierGroups?.length || 0) > 0)
+      setModifierMeal(meal);
+    else addLine(meal);
+  }
+
+  // 🌟 الحسابات تعتمد على المسودة المحلية
+  const totals = computeTotals(draftItems, order.discountPct, order.taxPct);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSaveAndDeduct(code: string) {
-    if (isSubmitting) return; // حماية ضد الضغط المتكرر
+    if (isSubmitting) return;
     setIsSubmitting(true);
 
     try {
-      // ... (نفس كود خصم المخزون وحساب المبيعات القديم بدون تغيير) ...
-
       if (order.zone === "takeaway") {
         let finalDeliveryPrice = 0;
         const inputPrice = prompt(
           "الرجاء إدخال مصاريف التوصيل (اتركه 0 إذا كان تيك أواي عادي):",
           "0",
         );
-        if (inputPrice === null) return;
+        if (inputPrice === null) {
+          setIsSubmitting(false);
+          return;
+        }
         finalDeliveryPrice = Number(inputPrice) || 0;
         const computedType = finalDeliveryPrice > 0 ? "delivery" : "takeaway";
 
         const inv: any = {
           id: crypto.randomUUID(),
-          invoiceNumber: getNextInvoiceNumber
-            ? getNextInvoiceNumber(pos.invoices)
-            : Math.floor(100000 + Math.random() * 900000),
+          invoiceNumber: Math.floor(100000 + Math.random() * 900000),
           type: computedType,
           tableCode: code,
           zone: "takeaway",
@@ -1265,18 +1203,17 @@ function OrderEntryDialog({
           cashierId: pos.shift?.cashierId || null,
           cashierName: pos.shift?.cashierName || null,
           captainName: (order as any).captainName || null,
-          items: order.items,
+          items: draftItems, // 🌟 استخدام المسودة هنا
           subtotal: totals.subtotal,
           discountPct: order.discountPct,
           discountValue: totals.discountValue,
-          taxPct: 0, // 👈 تثبيت الخدمة على 0% بدلاً من 14% للتيك أواي
+          taxPct: 0,
           taxValue: 0,
           deliveryPrice: finalDeliveryPrice,
           total: totals.subtotal - totals.discountValue + finalDeliveryPrice,
           createdAt: Date.now(),
         };
 
-        // ❌ شيلنا الـ fetch اللي كان هنا لأنه بيتعمل جوة addInvoice
         await addInvoice(inv);
 
         if (order.customerName) {
@@ -1291,93 +1228,17 @@ function OrderEntryDialog({
         else toast.success("تم حفظ فاتورة تيك أواي بنجاح! 🛍️");
         onClose();
       } else {
-        upsertOrder({ ...order, state: "active" });
+        // 🌟 إرسال المسودة بالكامل للسيرفر عند الحفظ
+        upsertOrder({ ...order, items: draftItems, state: "active" });
         toast.success("تم حفظ طلب الصالة على الطاولة! 🍽️");
         onClose();
       }
     } catch (error: any) {
       toast.error(`حدث خطأ: ${error.message}`);
     } finally {
-      setIsSubmitting(false); // فك قفل الزرار
+      setIsSubmitting(false);
     }
   }
-
-  async function processTakeawayInvoice(isDelivery: boolean) {
-    const finalDeliveryPrice = isDelivery ? Number(deliveryInputPrice) || 0 : 0;
-    const computedType = isDelivery ? "delivery" : "takeaway";
-    setDeliveryModalOpen(false);
-
-    const inv: any = {
-      id: crypto.randomUUID(),
-      invoiceNumber: getNextInvoiceNumber
-        ? getNextInvoiceNumber(pos.invoices)
-        : Math.floor(100000 + Math.random() * 900000),
-      type: computedType,
-      tableCode: order.tableCode,
-      zone: "takeaway",
-      customerName: order.customerName || null,
-      customerAddress: order.customerAddress || null,
-      cashierId: pos.shift?.cashierId || null,
-      cashierName: pos.shift?.cashierName || null,
-      captainName: (order as any).captainName || null, // 🌟 ترحيل اسم الكابتن للفاتورة
-      items: order.items,
-      subtotal: totals.subtotal,
-      discountPct: order.discountPct,
-      discountValue: totals.discountValue,
-      taxPct: order.taxPct,
-      taxValue: totals.taxValue,
-      deliveryPrice: finalDeliveryPrice,
-      total: totals.total + finalDeliveryPrice,
-      createdAt: Date.now(),
-    };
-
-    try {
-      const response = await fetch("http://192.168.100.195:5000/api/invoices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(inv),
-      });
-      if (!response.ok) throw new Error("فشل في حفظ الفاتورة على السيرفر");
-      addInvoice(inv);
-      if (order.customerName) {
-        const c = pos.customers.find((c) => c.name === order.customerName);
-        if (c) incCustomerOrders(c.id);
-      }
-      clearOrder(order.tableCode);
-      if (computedType === "delivery")
-        toast.success(
-          `تم حفظ الفاتورة كـ أوردر توصيل 🛵 (+${finalDeliveryPrice} ج.م)`,
-        );
-      else toast.success("تم حفظ فاتورة تيك أواي 🛍️");
-      onClose();
-    } catch (error: any) {
-      toast.error(`حدث خطأ أثناء الحفظ: ${error.message}`);
-    }
-  }
-
-  function onPickMeal(meal: Meal) {
-    if (meal.hasModifiers && (meal.modifierGroups?.length || 0) > 0)
-      setModifierMeal(meal);
-    else addLine(meal);
-  }
-
-  function changeQty(lineId: string, qty: number) {
-    upsertOrder({
-      ...order,
-      items: order.items.map((l) =>
-        l.id === lineId ? { ...l, qty: clamp0(qty) } : l,
-      ),
-    });
-  }
-
-  function removeLine(lineId: string) {
-    upsertOrder({
-      ...order,
-      items: order.items.filter((l) => l.id !== lineId),
-    });
-  }
-
-  const totals = computeTotals(order.items, order.discountPct, order.taxPct);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -1413,10 +1274,9 @@ function OrderEntryDialog({
                 <div className="grid grid-cols-5 gap-3 justify-items-center">
                   {filtered.map((m) => {
                     const stockQty = manufacturable(m);
+                    // 🌟 الحسابات تعتمد على المسودة
                     const addedInCart =
-                      ((
-                        order.items as unknown as Array<Record<string, unknown>>
-                      )?.find((it) => it.mealId === m.id)?.qty as number) || 0;
+                      draftItems.find((it) => it.mealId === m.id)?.qty || 0;
                     const mq =
                       typeof stockQty === "number"
                         ? Math.max(0, stockQty - addedInCart)
@@ -1482,13 +1342,9 @@ function OrderEntryDialog({
                       .filter((m) => m.category === activeCategory)
                       .map((m) => {
                         const stockQty = manufacturable(m);
+                        // 🌟 الحسابات تعتمد على المسودة
                         const addedInCart =
-                          ((
-                            order.items as unknown as Array<
-                              Record<string, unknown>
-                            >
-                          )?.find((it) => it.mealId === m.id)?.qty as number) ||
-                          0;
+                          draftItems.find((it) => it.mealId === m.id)?.qty || 0;
                         const mq =
                           typeof stockQty === "number"
                             ? Math.max(0, stockQty - addedInCart)
@@ -1535,67 +1391,61 @@ function OrderEntryDialog({
 
           <div className="w-80 flex flex-col bg-secondary/30 h-full overflow-hidden">
             <div className="p-3 border-b border-border shrink-0">
-              <h3 className="font-bold text-sm">
-                السلة ({order.items.length})
-              </h3>
+              <h3 className="font-bold text-sm">السلة ({draftItems.length})</h3>
             </div>
             <div className="flex-1 overflow-y-auto min-h-0 max-h-[360px] p-2 space-y-1.5">
-              {order.items.length === 0 ? (
+              {draftItems.length === 0 ? (
                 <p className="text-center text-muted-foreground text-xs p-6">
                   السلة فارغة — اختر صنف للإضافة.
                 </p>
               ) : (
-                order.items.map((l, index) => {
-                  // 🌟 ضفنا الـ index هنا
-                  return (
-                    <div
-                      // 🔒 דمج الآيدي مع الإندكس بيمنع المتصفح من إعادة رسم العنصر (بيمنع الرعشة)
-                      key={`${l.id}-${index}`}
-                      className="bg-card border border-border rounded-md p-1.5 text-xs shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-1.5">
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate">{l.name}</div>
-                          {l.modifiersSummary && (
-                            <div className="text-[10px] text-muted-foreground mt-0.5">
-                              {l.modifiersSummary}
-                            </div>
-                          )}
-                        </div>
-                        {!isMicros && (
-                          <button
-                            onClick={() => removeLine(l.id)}
-                            className="text-destructive hover:bg-destructive/10 p-1 rounded transition-colors"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                draftItems.map((l, index) => (
+                  <div
+                    key={`${l.id}-${index}`}
+                    className="bg-card border border-border rounded-md p-1.5 text-xs shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-1.5">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{l.name}</div>
+                        {l.modifiersSummary && (
+                          <div className="text-[10px] text-muted-foreground mt-0.5">
+                            {l.modifiersSummary}
+                          </div>
                         )}
                       </div>
-                      <div className="flex items-center gap-1 mt-2">
-                        {!isMicros && (
-                          <button
-                            onClick={() => changeQty(l.id, l.qty - 1)}
-                            className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
-                          >
-                            -
-                          </button>
-                        )}
-                        <input
-                          type="number"
-                          value={l.qty}
-                          className="w-10 h-7 text-center text-xs border rounded bg-background"
-                          readOnly
-                        />
+                      {!isMicros && (
                         <button
-                          onClick={() => changeQty(l.id, l.qty + 1)}
+                          onClick={() => removeLine(l.id)}
+                          className="text-destructive hover:bg-destructive/10 p-1 rounded transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 mt-2">
+                      {!isMicros && (
+                        <button
+                          onClick={() => changeQty(l.id, l.qty - 1)}
                           className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
                         >
-                          +
+                          -
                         </button>
-                      </div>
+                      )}
+                      <input
+                        type="number"
+                        value={l.qty}
+                        className="w-10 h-7 text-center text-xs border rounded bg-background"
+                        readOnly
+                      />
+                      <button
+                        onClick={() => changeQty(l.id, l.qty + 1)}
+                        className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
+                      >
+                        +
+                      </button>
                     </div>
-                  );
-                })
+                  </div>
+                ))
               )}
             </div>
             <div className="p-3 border-t border-border space-y-1 text-xs shrink-0 bg-background/50">
@@ -1636,7 +1486,6 @@ function OrderEntryDialog({
     </Dialog>
   );
 }
-
 function Row({
   label,
   value,

@@ -5,6 +5,21 @@ import { round2, clamp0 } from "./format";
 import { sha256 as jsSha256 } from "js-sha256";
 import { toast } from "sonner";
 
+// 🛡️ قفل المزامنة العالمي - بره الـ Hook تماماً عشان يحمي الطاولة المفتوحة
+interface SyncLocks {
+  editingTable: string | null;
+  isPollingOrders: boolean;
+}
+
+const syncLocks: SyncLocks = {
+  editingTable: null,
+  isPollingOrders: false,
+};
+
+export function setGlobalEditingTable(code: string | null) {
+  syncLocks.editingTable = code;
+}
+
 if (typeof window !== "undefined") {
   if (!window.crypto) {
     (window as any).crypto = {};
@@ -184,9 +199,12 @@ export function usePosDB() {
     };
   }, []);
   useEffect(() => {
+    // لو المزامنة شغالة مسبقاً في كامبوننت تاني، اخرج فوراً وماتعملش Interval جديد
+    if (typeof window === "undefined" || syncLocks.isPollingOrders) return;
+    syncLocks.isPollingOrders = true;
+
     const fetchActiveOrders = async () => {
       try {
-        // جلب الطاولات والشيفت مع بعض
         const [ordersRes, shiftRes] = await Promise.all([
           fetch("http://192.168.100.195:5000/api/pos/orders"),
           fetch("http://192.168.100.195:5000/api/pos/shift"),
@@ -196,33 +214,38 @@ export function usePosDB() {
         const serverShift = await shiftRes.json();
 
         const cur = load();
-
-        // 🌟 منطق الشيفت الإجباري:
         if (serverShift && serverShift.openedAt) {
-          cur.shift = serverShift; // لو السيرفر فيه شيفت، افتح فوراً
+          cur.shift = serverShift;
         } else {
-          cur.shift = null; // لو السيرفر مفيهوش شيفت، اقفل واطرد المستخدم
+          cur.shift = null;
         }
 
-        // الحماية بتاعة الطاولات اللي كانت عندك زي ما هي
-        if (
-          Object.keys(serverOrders).length === 0 &&
-          Object.keys(cur.orders || {}).length > 0
-        ) {
-          for (const tableCode in cur.orders) {
-            await fetch("http://192.168.100.195:5000/api/pos/orders/upsert", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                tableCode,
-                orderData: cur.orders[tableCode],
-              }),
-            });
+        let hasChanges = false;
+
+        // تحديث الطاولات من السيرفر (مع تجاهل الطاولة المفتوحة حالياً في الشاشة)
+        for (const code in serverOrders) {
+          if (code === syncLocks.editingTable) continue; // 🔒 حماية الطاولة النشطة من المسح
+
+          if (
+            JSON.stringify(cur.orders[code]) !==
+            JSON.stringify(serverOrders[code])
+          ) {
+            cur.orders[code] = serverOrders[code];
+            hasChanges = true;
           }
-        } else {
-          cur.orders = serverOrders;
+        }
+
+        // 🌟 استبدله ليكون كدة بالظبط جوه fetchActiveOrders:
+        for (const code in cur.orders) {
+          if (code === syncLocks.editingTable) continue; // 🔒 الحماية هنا: لو الطاولة دي مفتوحة في الشاشة دلوقتي، اوعى تمسحها حتى لو مش جاية من السيرفر
+          if (!serverOrders[code]) {
+            delete cur.orders[code];
+            hasChanges = true;
+          }
+        }
+
+        if (hasChanges) {
           save(cur);
-          setDb(cur);
         }
       } catch (err) {
         console.error("🚨 خطأ أثناء المزامنة:", err);
@@ -230,9 +253,12 @@ export function usePosDB() {
     };
 
     fetchActiveOrders();
-
     const interval = setInterval(fetchActiveOrders, 1500);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearInterval(interval);
+      syncLocks.isPollingOrders = false; // فك القفل عند تدمير الكامبوننت
+    };
   }, []);
 
   const addEmployee = useCallback(

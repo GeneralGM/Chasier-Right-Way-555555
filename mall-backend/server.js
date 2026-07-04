@@ -820,54 +820,80 @@ app.get("/api/device-check", (req, res) => {
 // 📡 مسارات مزامنة الطاولات النشطة لحظياً (POS Active Orders)
 // ============================================================================
 
-// كائن لتخزين الطلبات النشطة لكل الطاولات المفتوحة في الميموري
-let activeOrders = {};
-let currentActiveShift = null;
-
-// جلب الشيفت الحالي
-app.get("/api/pos/shift", (req, res) => res.json(currentActiveShift || {}));
-
-// فتح شيفت جديد (من الجهاز الرئيسي)
-app.post("/api/pos/shift/open", (req, res) => {
-  currentActiveShift = req.body;
-  res.json({ success: true });
-});
-
-// 1️⃣ جلب جميع الطاولات المفتوحة حالياً (كل الأجهزة بتنادي المسار ده بشكل دوري)
-app.get("/api/pos/orders", (req, res) => {
-  res.json(activeOrders);
-});
-
-// 2️⃣ فتح طاولة جديدة أو تحديث أصنافها (من الميكروس أو الرئيسي)
-app.post("/api/pos/orders/upsert", (req, res) => {
+// 🌟 1. حفظ أو تحديث طاولة (Upsert) جوه الداتا بيس
+app.post("/api/pos/orders/upsert", async (req, res) => {
   const { tableCode, orderData } = req.body;
-
-  if (!tableCode) {
-    return res.status(400).json({ error: "كود الطاولة مطلوب" });
+  if (!tableCode || !orderData) {
+    return res.status(400).json({ success: false, error: "البيانات ناقصة" });
   }
 
-  activeOrders[tableCode] = orderData;
+  // سحب الحالة من الأوردر اللي جاي من الفرونت، لو مش موجودة بنخليها active
+  const state = orderData.state || "active";
+  const updatedAt = Date.now();
 
-  // 🔕 عشان تهدي الشاشة، حط شرطتين // قبل الـ console.log دي عشان توقفها:
-  // console.log(`📌 تم تحديث الطاولة [${tableCode}] بنجاح من جهاز العميل.`);
-
-  res.json({ success: true, orders: activeOrders });
+  try {
+    const query = `
+      INSERT INTO active_orders (table_code, state, order_data, updated_at)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (table_code)
+      DO UPDATE SET state = $2, order_data = $3, updated_at = $4;
+    `;
+    await pool.query(query, [
+      tableCode,
+      state,
+      JSON.stringify(orderData),
+      updatedAt,
+    ]);
+    res.json({
+      success: true,
+      message: `تم تحديث الطاولة ${tableCode} بنجاح كـ ${state}`,
+    });
+  } catch (err) {
+    console.error("🚨 خطأ في داتا بيس الطلبات النشطة:", err);
+    res
+      .status(500)
+      .json({ success: false, error: "فشل حفظ الطلب في قاعدة البيانات" });
+  }
 });
 
-// 3️⃣ إخلاء وطرد الطاولة من الميموري (عند الضغط على إنهاء الحساب أو تفريغها)
-app.post("/api/pos/orders/clear", (req, res) => {
+// 🌟 2. جلب كل الطلبات النشطة (عشان دالة المزامنة في الفرونت إند)
+app.get("/api/pos/orders", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT table_code, order_data FROM active_orders WHERE state IN ('active', 'printed')",
+    );
+
+    // تحويل الناتج لشكل Object مفتاحه الـ table_code عشان الفرونت إند يفهمه علطول
+    const ordersMap = {};
+    result.rows.forEach((row) => {
+      ordersMap[row.table_code] = row.order_data;
+    });
+
+    res.json(ordersMap);
+  } catch (err) {
+    console.error("🚨 خطأ أثناء جلب الطلبات النشطة:", err);
+    res.status(500).json({ error: "فشل جلب البيانات من السيرفر" });
+  }
+});
+
+// 🌟 3. مسح الطاولة (لما الفاتورة تتقفل وتتحول لـ finish)
+app.post("/api/pos/orders/clear", async (req, res) => {
   const { tableCode } = req.body;
-
   if (!tableCode) {
-    return res.status(400).json({ error: "كود الطاولة مطلوب" });
+    return res.status(400).json({ success: false, error: "كود الطاولة مطلوب" });
   }
 
-  if (activeOrders[tableCode]) {
-    delete activeOrders[tableCode]; // مسح الطاولة تماماً لتصبح فارغة ومتاحة مجدداً
-    console.log(`🧼 تم تفريغ وإخلاء الطاولة [${tableCode}].`);
+  try {
+    await pool.query("DELETE FROM active_orders WHERE table_code = $1", [
+      tableCode,
+    ]);
+    res.json({ success: true, message: `تم تفريغ الطاولة ${tableCode} بنجاح` });
+  } catch (err) {
+    console.error("🚨 خطأ أثناء مسح الطاولة:", err);
+    res
+      .status(500)
+      .json({ success: false, error: "فشل مسح الطاولة من السيرفر" });
   }
-
-  res.json({ success: true, orders: activeOrders });
 });
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////// Vertify Captian /////////////////////////////////////////////////

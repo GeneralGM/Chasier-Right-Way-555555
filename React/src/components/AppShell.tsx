@@ -46,7 +46,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    fetch("http://192.168.100.195:5000/api/device-check")
+    fetch("http://192.168.1.37:5000/api/device-check")
       .then((res) => res.json())
       .then((data) => {
         console.log("🖥️ Device Connected:", data.ip, "Type:", data.deviceType);

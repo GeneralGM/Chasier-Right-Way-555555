@@ -206,8 +206,8 @@ export function usePosDB() {
     const fetchActiveOrders = async () => {
       try {
         const [ordersRes, shiftRes] = await Promise.all([
-          fetch("http://192.168.100.195:5000/api/pos/orders"),
-          fetch("http://192.168.100.195:5000/api/pos/shift"),
+          fetch("http://192.168.1.37:5000/api/pos/orders"),
+          fetch("http://192.168.1.37:5000/api/pos/shift"),
         ]);
 
         const serverOrders = await ordersRes.json();
@@ -372,24 +372,32 @@ export function usePosDB() {
   );
 
   const upsertOrder = useCallback(async (order: ActiveOrder) => {
-    // 1️⃣ التحديث المحلي السريع فوراً عشان الشاشة متقفلش أو تهنج
+    // 1️⃣ التحديث المحلي السريع فوراً (Optimistic UI) عشان الشاشة طلقة وماتهنجش
     const cur = load();
     cur.orders[order.tableCode] = order;
     save(cur);
     setDb(cur);
 
-    // 2️⃣ إرسال التحديث للسيرفر في الخلفية عشان الأجهزة التانية لقطه
+    // 2️⃣ إرسال التحديث للسيرفر (قاعدة البيانات الحقيقية)
     try {
-      await fetch("http://192.168.100.195:5000/api/pos/orders/upsert", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tableCode: order.tableCode,
-          orderData: order,
-        }),
-      });
+      const response = await fetch(
+        "http://192.168.1.37:5000/api/pos/orders/upsert",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tableCode: order.tableCode,
+            orderData: order, // الأوردر ده جواه الـ state ('active' أو 'printed')
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        toast.error("⚠️ لم يتم حفظ الطاولة على السيرفر، تأكد من الشبكة!");
+      }
     } catch (err) {
       console.error("🚨 خطأ أثناء تحديث الطاولة على السيرفر:", err);
+      toast.error("⚠️ خطأ في الاتصال بالسيرفر الرئيسي!");
     }
   }, []);
 
@@ -402,7 +410,7 @@ export function usePosDB() {
 
     // 2️⃣ إبلاغ السيرفر بمسح الطاولة عشان تتشال من عند الميكروس برضه
     try {
-      await fetch("http://192.168.100.195:5000/api/pos/orders/clear", {
+      await fetch("http://192.168.1.37:5000/api/pos/orders/clear", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableCode }),
@@ -428,15 +436,12 @@ export function usePosDB() {
 
       // 🌟 السحر هنا: إرسال الفاتورة فوراً لقاعدة البيانات (pgAdmin) مهما كان نوعها (صالة / تيك أواي / دليفري)
       try {
-        const response = await fetch(
-          "http://192.168.100.195:5000/api/invoices",
-          {
-            method: "POST",
-            mode: "cors",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(fullInvoice),
-          },
-        );
+        const response = await fetch("http://192.168.1.37:5000/api/invoices", {
+          method: "POST",
+          mode: "cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fullInvoice),
+        });
 
         if (response.ok) {
           console.log("✅ تم حفظ الفاتورة بنجاح في قاعدة البيانات PostgreSQL!");
@@ -450,76 +455,82 @@ export function usePosDB() {
         );
       }
 
-      const triggerPrint = (invoice: any) => {
-        const printWindow = window.open("", "_blank", "width=400,height=600");
-        if (!printWindow) return;
-        const dPrice = Number(invoice.deliveryPrice) || 0;
-        const html = `
-        <html>
-          <head>
-            <title>طباعة الفاتورة</title>
-            <style>
-              body { font-family: Arial, sans-serif; direction: rtl; text-align: center; padding: 20px; font-size: 14px; }
-              .header { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
-              .type-title { font-size: 22px; font-weight: bold; margin: 10px 0; border: 2px dashed #000; padding: 5px; text-transform: uppercase; }
-              .meta { margin-bottom: 10px; font-size: 12px; border-bottom: 1px dashed #000; padding-bottom: 5px; }
-              table { width: 100%; border-collapse: collapse; margin-top: 10px; text-align: right; }
-              th { border-bottom: 1px solid #000; padding: 4px; font-size: 13px; }
-              td { padding: 4px; font-size: 13px; vertical-align: top; }
-              .totals { margin-top: 10px; border-top: 1px dashed #000; padding-top: 5px; text-align: right; }
-              .totals div { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 13px; }
-              .bold { font-weight: bold; font-size: 15px; }
-            </style>
-          </head>
-          <body>
-            <div class="header">مجمع الـمـول</div>
-            <div class="type-title">ORDER</div>
-            <div class="meta">
-              <div>رقم الفاتورة: ${String(invoice.id || invoiceNumber).slice(0, 8)}</div>
-              <div>التاريخ: ${new Date(invoice.createdAt || createdAt).toLocaleString("ar-EG")}</div>
-              <div>النوع: ${invoice.type === "delivery" ? "توصيل" : invoice.type === "takeaway" ? "تيك أواي" : "صالة"}</div>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>الصنف</th>
-                  <th style="text-align:center;">الكمية</th>
-                  <th style="text-align:left;">الإجمالي</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${(typeof invoice.items === "string"
-                  ? JSON.parse(invoice.items)
-                  : invoice.items
-                )
-                  .map((line: any) => {
-                    const exStr =
-                      line.extras && line.extras.length
-                        ? ` <span style="font-size:11px;color:#555;">(+${line.extras.map((e: any) => e.name || e.label).join(", ")})</span>`
-                        : "";
-                    return `<tr><td>${line.mealName || line.name}${exStr}</td><td style="text-align:center;">${line.qty}</td><td style="text-align:left;">${((line.unitPrice + (line.extras ? line.extras.reduce((s: number, e: any) => s + e.price, 0) : 0)) * line.qty).toFixed(2)} ج</td></tr>`;
-                  })
-                  .join("")}
-              </tbody>
-            </table>
-            <div class="totals">
-              <div><span>المجموع الأصلي:</span> <span>${Number(invoice.subtotal || 0).toFixed(2)} ج</span></div>
-              ${invoice.discountValue > 0 ? `<div><span>الخصم:</span> <span>${Number(invoice.discountValue).toFixed(2)} ج</span></div>` : ""}
-              ${invoice.taxValue > 0 ? `<div><span>الضريبة:</span> <span>${Number(invoice.taxValue).toFixed(2)} ج</span></div>` : ""}
-              <div><span>التوصيل:</span> <span class="bold">${dPrice.toFixed(2)} ج</span></div>
-              <div class="bold" style="border-top:1px solid #000; padding-top:4px; margin-top:4px;">
-                <span>الإجمالي النهائي:</span> <span>${Number(invoice.total || 0).toFixed(2)} ج</span>
-              </div>
-            </div>
-            <div style="margin-top:20px; font-size:11px; border-top:1px solid #000; padding-top:5px;">شكراً لزيارتكم!</div>
-            <script>window.onload = function() { window.print(); window.close(); }</script>
-          </body>
-        </html>
-      `;
-        printWindow.document.open();
-        printWindow.document.write(html);
-        printWindow.document.close();
-      };
+      //     const triggerPrint = (invoice: any, isFinal: boolean = false) => {
+      //       const printWindow = window.open("", "_blank", "width=400,height=600");
+      //       if (!printWindow) return;
+
+      //       const dPrice = Number(invoice.deliveryPrice) || 0;
+      //       const html = `
+      // <html>
+      //   <head>
+      //     <title>طباعة الفاتورة</title>
+      //     <style>
+      //       body { font-family: Arial, sans-serif; direction: rtl; text-align: center; padding: 20px; font-size: 14px; }
+      //       .header { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+      //       .type-title { font-size: 20px; font-weight: bold; margin: 10px 0; border: 2px dashed #000; padding: 5px; }
+      //       .meta { margin-bottom: 10px; font-size: 12px; border-bottom: 1px dashed #000; padding-bottom: 5px; }
+      //       table { width: 100%; border-collapse: collapse; margin-top: 10px; text-align: right; }
+      //       th { border-bottom: 1px solid #000; padding: 4px; font-size: 13px; }
+      //       td { padding: 4px; font-size: 13px; vertical-align: top; }
+      //       .totals { margin-top: 10px; border-top: 1px dashed #000; padding-top: 5px; text-align: right; }
+      //       .totals div { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 13px; }
+      //       .bold { font-weight: bold; font-size: 15px; }
+      //     </style>
+      //   </head>
+      //   <body>
+      //     <div class="header">مجمع الـمـول</div>
+
+      //     <div class="type-title">
+      //       ${isFinal ? "فاتورة نهائية مدفوعة" : "بون حساب مبدئي (طاولة صالة)"}
+      //     </div>
+
+      //     <div class="meta">
+      //       <div>رقم الفاتورة: ${String(invoice.id || "000000").slice(0, 8)}</div>
+      //       <div>التاريخ: ${new Date(invoice.createdAt || Date.now()).toLocaleString("ar-EG")}</div>
+      //       <div>النوع: ${invoice.type === "delivery" ? "توصيل" : invoice.type === "takeaway" ? "تيك أواي" : "صالة"}</div>
+      //       ${invoice.tableCode ? `<div>رقم الطاولة: ${invoice.tableCode}</div>` : ""}
+      //     </div>
+      //     <table>
+      //       <thead>
+      //         <tr>
+      //           <th>الصنف</th>
+      //           <th style="text-align:center;">الكمية</th>
+      //           <th style="text-align:left;">الإجمالي</th>
+      //         </tr>
+      //       </thead>
+      //       <tbody>
+      //         ${(typeof invoice.items === "string"
+      //           ? JSON.parse(invoice.items)
+      //           : invoice.items
+      //         )
+      //           .map((line: any) => {
+      //             const exStr =
+      //               line.extras && line.extras.length
+      //                 ? ` <span style="font-size:11px;color:#555;">(+${line.extras.map((e: any) => e.name || e.label).join(", ")})</span>`
+      //                 : "";
+      //             return `<tr><td>${line.mealName || line.name}${exStr}</td><td style="text-align:center;">${line.qty}</td><td style="text-align:left;">${((line.unitPrice + (line.extras ? line.extras.reduce((s: number, e: any) => s + e.price, 0) : 0)) * line.qty).toFixed(2)} ج</td></tr>`;
+      //           })
+      //           .join("")}
+      //       </tbody>
+      //     </table>
+      //     <div class="totals">
+      //       <div><span>المجموع الأصلي:</span> <span>${Number(invoice.subtotal || 0).toFixed(2)} ج</span></div>
+      //       ${invoice.discountValue > 0 ? `<div><span>الخصم:</span> <span>${Number(invoice.discountValue).toFixed(2)} ج</span></div>` : ""}
+      //       ${invoice.taxValue > 0 ? `<div><span>الضريبة:</span> <span>${Number(invoice.taxValue).toFixed(2)} ج</span></div>` : ""}
+      //       ${dPrice > 0 ? `<div><span>التوصيل:</span> <span class="bold">${dPrice.toFixed(2)} ج</span></div>` : ""}
+      //       <div class="bold" style="border-top:1px solid #000; padding-top:4px; margin-top:4px;">
+      //         <span>الإجمالي النهائي:</span> <span>${Number(invoice.total || 0).toFixed(2)} ج</span>
+      //       </div>
+      //     </div>
+      //     <div style="margin-top:20px; font-size:11px; border-top:1px solid #000; padding-top:5px;">شكراً لزيارتكم!</div>
+      //     <script>window.onload = function() { window.print(); window.close(); }</script>
+      //   </body>
+      // </html>
+      // `;
+      //       printWindow.document.open();
+      //       printWindow.document.write(html);
+      //       printWindow.document.close();
+      //     };
 
       cur.invoices = [fullInvoice, ...cur.invoices];
       save(cur);
@@ -527,7 +538,7 @@ export function usePosDB() {
       toast.success(
         `🎉 تم اعتماد الفاتورة محلياً ورفعها رقم: ${invoiceNumber}`,
       );
-      triggerPrint(fullInvoice);
+      // triggerPrint(fullInvoice);
       return fullInvoice;
     },
     [],
@@ -545,7 +556,7 @@ export function usePosDB() {
 
       // 2. إبلاغ السيرفر عشان يفتح أجهزة الميكروس
       try {
-        await fetch("http://192.168.100.195:5000/api/pos/shift/open", {
+        await fetch("http://192.168.1.37:5000/api/pos/shift/open", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(shiftData),
@@ -584,7 +595,7 @@ export function usePosDB() {
       };
 
       try {
-        const res = await fetch("http://192.168.100.195:5000/api/shifts", {
+        const res = await fetch("http://192.168.1.37:5000/api/shifts", {
           method: "POST",
           mode: "cors",
           headers: { "Content-Type": "application/json" },
@@ -699,9 +710,9 @@ export function usePosDB() {
     async function syncServerToLocalStorage() {
       try {
         const [invoicesRes, shiftsRes, employeesRes] = await Promise.all([
-          fetch("http://192.168.100.195:5000/api/invoices"),
-          fetch("http://192.168.100.195:5000/api/shifts"),
-          fetch("http://192.168.100.195:5000/api/employees"),
+          fetch("http://192.168.1.37:5000/api/invoices"),
+          fetch("http://192.168.1.37:5000/api/shifts"),
+          fetch("http://192.168.1.37:5000/api/employees"),
         ]);
 
         if (invoicesRes.ok && shiftsRes.ok && employeesRes.ok) {

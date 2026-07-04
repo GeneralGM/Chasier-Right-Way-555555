@@ -100,9 +100,7 @@ function ShiftLogin() {
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch(
-          "http://192.168.100.195:5000/api/employees",
-        );
+        const response = await fetch("http://192.168.1.37:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -411,7 +409,7 @@ function PosScreen() {
 
     try {
       const res = await fetch(
-        "http://192.168.100.195:5000/api/pos/verify-captain",
+        "http://192.168.1.37:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1751,8 +1749,23 @@ function PrintDialog({
     setPinOpen(true);
   }
   function doPrint() {
-    upsertOrder({ ...order, discountPct: discount });
-    window.print();
+    // 1. تحديث الأوردر بالخصم والحالة الجديدة
+    const updatedOrder = { ...order, discountPct: discount, state: "printed" };
+
+    // 2. حساب المجاميع عشان تتبعت للطباعة صح
+    const printData = {
+      ...updatedOrder,
+      subtotal: totals.subtotal,
+      discountValue: totals.discountValue,
+      taxValue: totals.taxValue,
+      total: totals.total,
+    };
+
+    upsertOrder(updatedOrder as any);
+
+    // 3. استدعاء الطباعة كـ "بون مبدئي" (false)
+    triggerPrint(printData, false);
+
     onPrinted();
   }
   return (
@@ -1976,6 +1989,8 @@ function CheckoutDialog({
       // 3️⃣ حفظ الفاتورة وتحديث المخزون
       await addInvoice(inv); // 👈 هنا الـ TS هيقرأ الـ inv بنجاح![cite: 12]
       deductInventory();
+      // 🌟 استدعاء الطباعة كـ "فاتورة نهائية" (true)
+      triggerPrint(inv, true);
 
       // 4️⃣ توزيع المبيعات على الأقسام والتقرير اليومي
       const salesByDept: Record<string, any[]> = {};
@@ -2086,3 +2101,100 @@ function CheckoutDialog({
     </Dialog>
   );
 }
+
+// 🌟 دالة الطباعة الذكية (بون مبدئي أو فاتورة نهائية)
+// eslint-disable-next-line react-refresh/only-export-components
+export const triggerPrint = (data: any, isFinal: boolean = false) => {
+  const printWindow = window.open("", "_blank", "width=400,height=600");
+  if (!printWindow) return;
+
+  const dPrice = Number(data.deliveryPrice) || 0;
+  const invoiceNumber = data.invoiceNumber || "000000";
+  const createdAt = data.createdAt || Date.now();
+  const typeLabel =
+    data.type === "delivery"
+      ? "توصيل"
+      : data.type === "takeaway"
+        ? "تيك أواي"
+        : "صالة";
+
+  const html = `
+  <html dir="rtl">
+    <head>
+      <title>طباعة الفاتورة</title>
+      <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; font-size: 14px; }
+        .header { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+        .type-title { font-size: 18px; font-weight: bold; margin: 10px 0; border: 2px dashed #000; padding: 5px; background: #f9f9f9; }
+        .meta { margin-bottom: 10px; font-size: 12px; border-bottom: 1px dashed #000; padding-bottom: 5px; text-align: right; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; text-align: right; }
+        th { border-bottom: 1px solid #000; padding: 4px; font-size: 13px; }
+        td { padding: 4px; font-size: 13px; vertical-align: top; }
+        .totals { margin-top: 10px; border-top: 1px dashed #000; padding-top: 5px; text-align: right; }
+        .totals div { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 13px; }
+        .bold { font-weight: bold; font-size: 15px; }
+      </style>
+    </head>
+    <body>
+      <div class="header">مجمع الـمـول</div>
+      
+      <div class="type-title">
+        ${isFinal ? "فاتورة نهائية (مدفوعة)" : "بون حساب مبدئي (غير مدفوع)"}
+      </div>
+
+      <div class="meta">
+        ${isFinal ? `<div>رقم الفاتورة: ${invoiceNumber}</div>` : ""}
+        <div>التاريخ: ${new Date(createdAt).toLocaleString("ar-EG")}</div>
+        <div>النوع: ${typeLabel}</div>
+        ${data.tableCode ? `<div>رقم الطاولة: ${data.tableCode}</div>` : ""}
+        ${data.cashierName ? `<div>الكاشير: ${data.cashierName}</div>` : ""}
+      </div>
+      
+      <table>
+        <thead>
+          <tr>
+            <th>الصنف</th>
+            <th style="text-align:center;">الكمية</th>
+            <th style="text-align:left;">الإجمالي</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(typeof data.items === "string"
+            ? JSON.parse(data.items)
+            : data.items
+          )
+            .map((line: any) => {
+              const exStr =
+                line.extras && line.extras.length
+                  ? ` <br><span style="font-size:10px;color:#555;">(+${line.extras.map((e: any) => e.name || e.label).join(", ")})</span>`
+                  : "";
+              const lineTotal =
+                (line.unitPrice +
+                  (line.extras
+                    ? line.extras.reduce((s: number, e: any) => s + e.price, 0)
+                    : 0)) *
+                line.qty;
+              return `<tr><td>${line.mealName || line.name}${exStr}</td><td style="text-align:center;">${line.qty}</td><td style="text-align:left;">${lineTotal.toFixed(2)} ج</td></tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+      
+      <div class="totals">
+        <div><span>المجموع الأصلي:</span> <span>${Number(data.subtotal || 0).toFixed(2)} ج</span></div>
+        ${data.discountValue > 0 ? `<div><span>الخصم:</span> <span>${Number(data.discountValue).toFixed(2)} ج</span></div>` : ""}
+        ${data.taxValue > 0 ? `<div><span>الضريبة:</span> <span>${Number(data.taxValue).toFixed(2)} ج</span></div>` : ""}
+        ${dPrice > 0 ? `<div><span>التوصيل:</span> <span class="bold">${dPrice.toFixed(2)} ج</span></div>` : ""}
+        <div class="bold" style="border-top:1px solid #000; padding-top:4px; margin-top:4px;">
+          <span>الإجمالي النهائي:</span> <span>${Number(data.total || 0).toFixed(2)} ج</span>
+        </div>
+      </div>
+      <div style="margin-top:20px; font-size:11px; border-top:1px solid #000; padding-top:5px;">شكراً لزيارتكم!</div>
+      <script>window.onload = function() { window.print(); window.close(); }</script>
+    </body>
+  </html>
+  `;
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+};

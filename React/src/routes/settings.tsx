@@ -200,9 +200,7 @@ function InvoicesTab() {
     async function fetchInvoicesFromPostgres() {
       try {
         setIsLoading(true);
-        const response = await fetch(
-          "http://192.168.100.195:5000/api/invoices",
-        );
+        const response = await fetch("http://192.168.1.37:5000/api/invoices");
         if (response.ok) {
           const data = await response.json();
           setServerInvoices(data);
@@ -508,8 +506,8 @@ function ShiftsTab() {
       try {
         setIsLoading(true);
         const [shiftsRes, invoicesRes] = await Promise.all([
-          fetch("http://192.168.100.195:5000/api/shifts"),
-          fetch("http://192.168.100.195:5000/api/invoices"),
+          fetch("http://192.168.1.37:5000/api/shifts"),
+          fetch("http://192.168.1.37:5000/api/invoices"),
         ]);
 
         if (shiftsRes.ok && invoicesRes.ok) {
@@ -631,8 +629,8 @@ function ShiftsTab() {
     let totalDineIn = 0;
     let totalTakeaway = 0;
     let totalDelivery = 0;
-    let totalStaff = 0; 
-    let totalHospitality = 0; 
+    let totalStaff = 0;
+    let totalHospitality = 0;
 
     let grossSales = 0;
     let totalDiscount = 0;
@@ -647,11 +645,14 @@ function ShiftsTab() {
 
     shiftInvoices.forEach((inv) => {
       // تفاصيل المبيعات (أنواع الطلبات)
-      if (inv.type === "dinein" || inv.type === "dine-in") totalDineIn += Number(inv.total) || 0;
+      if (inv.type === "dinein" || inv.type === "dine-in")
+        totalDineIn += Number(inv.total) || 0;
       else if (inv.type === "takeaway") totalTakeaway += Number(inv.total) || 0;
       else if (inv.type === "delivery") totalDelivery += Number(inv.total) || 0;
-      else if (inv.type === "staff" || inv.type === "موظفين") totalStaff += Number(inv.total) || 0;
-      else if (inv.type === "hospitality" || inv.type === "ضيافة") totalHospitality += Number(inv.total) || 0;
+      else if (inv.type === "staff" || inv.type === "موظفين")
+        totalStaff += Number(inv.total) || 0;
+      else if (inv.type === "hospitality" || inv.type === "ضيافة")
+        totalHospitality += Number(inv.total) || 0;
 
       // الحسابات المالية
       grossSales += Number(inv.subtotal) || 0;
@@ -667,16 +668,23 @@ function ShiftsTab() {
         cashTotal += Number(inv.total) || 0;
       }
 
-      // حساب الأقسام 
-      const itemsArray = typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items || [];
+      // حساب الأقسام
+      const itemsArray =
+        typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items || [];
       itemsArray.forEach((item: any) => {
-        const extrasPrice = item.extras?.reduce((s: number, e: any) => s + Number(e.price), 0) || 0;
-        const lineTotal = (Number(item.unitPrice || item.price) + extrasPrice) * Number(item.qty || 1);
+        const extrasPrice =
+          item.extras?.reduce((s: number, e: any) => s + Number(e.price), 0) ||
+          0;
+        const lineTotal =
+          (Number(item.unitPrice || item.price) + extrasPrice) *
+          Number(item.qty || 1);
 
         const meal = db.meals?.find((m: any) => m.id === item.mealId);
         let deptName = "أخرى";
         if (meal) {
-          const isShisha = meal.department === "شيشه" || (meal.category || "").trim().replace("ة", "ه") === "شيشه";
+          const isShisha =
+            meal.department === "شيشه" ||
+            (meal.category || "").trim().replace("ة", "ه") === "شيشه";
           if (isShisha) deptName = "الشيشة";
           else if (meal.department) deptName = meal.department;
         } else if (item.department) {
@@ -689,20 +697,28 @@ function ShiftsTab() {
     });
 
     // بيانات الهيدر والخزينة
-    const shiftOpenTime = shift.openedAt ? new Date(shift.openedAt).toLocaleString("ar-EG") : "غير محدد";
-    const shiftCloseTime = shift.closedAt ? new Date(shift.closedAt).toLocaleString("ar-EG") : "ما زال مفتوحاً";
+    const shiftOpenTime = shift.openedAt
+      ? new Date(shift.openedAt).toLocaleString("ar-EG")
+      : "غير محدد";
+    const shiftCloseTime = shift.closedAt
+      ? new Date(shift.closedAt).toLocaleString("ar-EG")
+      : "ما زال مفتوحاً";
     const printTime = new Date().toLocaleString("ar-EG");
 
     const openingBalance = Number(shift.startingCash) || 0;
     const expectedDrawer = openingBalance + cashTotal; // شلت المصروفات
 
     // تجهيز صفوف الأقسام ديناميكياً
-    const deptRows = Object.entries(depts).map(([dept, amount]) => `
+    const deptRows = Object.entries(depts)
+      .map(
+        ([dept, amount]) => `
       <tr>
         <td>${dept}</td>
         <td class="bold">${amount.toFixed(2)}</td>
       </tr>
-    `).join("");
+    `,
+      )
+      .join("");
 
     // 2. تصميم نافذة الطباعة (HTML/CSS)
     const printWindow = window.open("", "_blank", "width=600,height=800");

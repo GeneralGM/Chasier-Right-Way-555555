@@ -827,7 +827,6 @@ app.post("/api/pos/orders/upsert", async (req, res) => {
     return res.status(400).json({ success: false, error: "البيانات ناقصة" });
   }
 
-  // سحب الحالة من الأوردر اللي جاي من الفرونت، لو مش موجودة بنخليها active
   const state = orderData.state || "active";
   const updatedAt = Date.now();
 
@@ -844,31 +843,23 @@ app.post("/api/pos/orders/upsert", async (req, res) => {
       JSON.stringify(orderData),
       updatedAt,
     ]);
-    res.json({
-      success: true,
-      message: `تم تحديث الطاولة ${tableCode} بنجاح كـ ${state}`,
-    });
+    res.json({ success: true, message: `تم تحديث الطاولة ${tableCode} بنجاح` });
   } catch (err) {
     console.error("🚨 خطأ في داتا بيس الطلبات النشطة:", err);
-    res
-      .status(500)
-      .json({ success: false, error: "فشل حفظ الطلب في قاعدة البيانات" });
+    res.status(500).json({ success: false, error: "فشل حفظ الطلب" });
   }
 });
 
-// 🌟 2. جلب كل الطلبات النشطة (عشان دالة المزامنة في الفرونت إند)
+// 🌟 2. جلب كل الطلبات النشطة (دي اللي كانت ناقصة وبتعمل 404!)
 app.get("/api/pos/orders", async (req, res) => {
   try {
     const result = await pool.query(
       "SELECT table_code, order_data FROM active_orders WHERE state IN ('active', 'printed')",
     );
-
-    // تحويل الناتج لشكل Object مفتاحه الـ table_code عشان الفرونت إند يفهمه علطول
     const ordersMap = {};
     result.rows.forEach((row) => {
       ordersMap[row.table_code] = row.order_data;
     });
-
     res.json(ordersMap);
   } catch (err) {
     console.error("🚨 خطأ أثناء جلب الطلبات النشطة:", err);
@@ -876,7 +867,38 @@ app.get("/api/pos/orders", async (req, res) => {
   }
 });
 
-// 🌟 3. مسح الطاولة (لما الفاتورة تتقفل وتتحول لـ finish)
+// 🌟 3. إندبوينت فحص حالة الوردية الحالية (النسخة المتصلحة)
+// app.get("/api/pos/shift", async (req, res) => {
+//   try {
+//     const result = await pool.query(
+//       "SELECT * FROM shifts WHERE state = 'active' LIMIT 1",
+//     );
+
+//     if (result.rows.length > 0) {
+//       const shift = result.rows[0];
+//       res.json({
+//         success: true,
+//         activeShift: {
+//           id: shift.id,
+//           state: shift.state,
+//           openedAt: shift.opened_at,
+//           openedBy: shift.opened_by || "الكاشير",
+//         },
+//       });
+//     } else {
+//       res.json({ success: true, activeShift: null });
+//     }
+//   } catch (err) {
+//     console.error("🚨 خطأ أثناء فحص الوردية من جدول shifts:", err);
+//     res.status(500).json({ success: false, error: "Database error" });
+//   }
+// });
+// 🛑 إندبوينت مؤقتة للورديات (عشان الفرونت ما يضربش لحد ما تظبطها في المستقبل)
+app.get("/api/pos/shift", (req, res) => {
+  // بنرد علطول إن مفيش وردية مفتوحة عشان المزامنة تشتغل بهدوء
+  res.json({ success: true, activeShift: null });
+});
+// 🌟 4. مسح الطاولة (لما الفاتورة تتقفل وتتحول لـ finish)
 app.post("/api/pos/orders/clear", async (req, res) => {
   const { tableCode } = req.body;
   if (!tableCode) {

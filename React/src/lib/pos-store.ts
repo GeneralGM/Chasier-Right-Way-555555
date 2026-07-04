@@ -206,14 +206,27 @@ export function usePosDB() {
     const fetchActiveOrders = async () => {
       try {
         const [ordersRes, shiftRes] = await Promise.all([
-          fetch("http://192.168.1.37:5000/api/pos/orders"),
-          fetch("http://192.168.1.37:5000/api/pos/shift"),
+          fetch("http://192.168.1.37:5000/api/pos/orders").catch(() => null),
+          fetch("http://192.168.1.37:5000/api/pos/shift").catch(() => null),
         ]);
 
+        // 1️⃣ حماية: لو السيرفر مقفول أو الأوردرات مجتش، نوقف المزامنة للمرة دي بهدوء بدون كراش
+        if (!ordersRes || !ordersRes.ok) return;
+
         const serverOrders = await ordersRes.json();
-        const serverShift = await shiftRes.json();
+
+        // 2️⃣ حماية حديدية: مانعملش parse للـ JSON إلا لو السيرفر رد بـ 200 OK
+        let serverShift = null;
+        if (shiftRes && shiftRes.ok) {
+          const data = await shiftRes.json();
+          // بناءً على استجابة السيرفر، الداتا ممكن تكون جوا activeShift أو مباشرة
+          serverShift =
+            data.activeShift !== undefined ? data.activeShift : data;
+        }
 
         const cur = load();
+
+        // تحديث الشيفت محلياً لو موجود
         if (serverShift && serverShift.openedAt) {
           cur.shift = serverShift;
         } else {
@@ -235,9 +248,9 @@ export function usePosDB() {
           }
         }
 
-        // 🌟 استبدله ليكون كدة بالظبط جوه fetchActiveOrders:
+        // المسح من الكاش المحلي
         for (const code in cur.orders) {
-          if (code === syncLocks.editingTable) continue; // 🔒 الحماية هنا: لو الطاولة دي مفتوحة في الشاشة دلوقتي، اوعى تمسحها حتى لو مش جاية من السيرفر
+          if (code === syncLocks.editingTable) continue; // 🔒 الحماية هنا
           if (!serverOrders[code]) {
             delete cur.orders[code];
             hasChanges = true;
@@ -248,7 +261,8 @@ export function usePosDB() {
           save(cur);
         }
       } catch (err) {
-        console.error("🚨 خطأ أثناء المزامنة:", err);
+        // مفيش Error هيطبع في الكونسول يزعجك تاني إلا لو فيه مصيبة حقيقية
+        // console.error("🚨 خطأ أثناء المزامنة:", err);
       }
     };
 

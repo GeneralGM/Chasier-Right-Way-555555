@@ -185,7 +185,7 @@ app.post("/api/invoices", async (req, res) => {
     customerAddress,
     cashierId,
     cashierName,
-    captainName, // 🌟 استلام اسم الكابتن
+    captainName,
     items,
     subtotal,
     discountPct,
@@ -195,6 +195,8 @@ app.post("/api/invoices", async (req, res) => {
     deliveryPrice,
     total,
     createdAt,
+    terminalId,
+    createdBy, // 🌟 المتغيرات الجديدة من الفرونت إند
   } = req.body;
 
   try {
@@ -202,8 +204,9 @@ app.post("/api/invoices", async (req, res) => {
       INSERT INTO invoices (
         id, type, invoice_number, table_code, zone, customer_name, customer_address, 
         cashier_id, cashier_name, captain_name, items, subtotal, discount_pct, discount_value, 
-        tax_pct, tax_value, delivery_price, total, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        tax_pct, tax_value, delivery_price, total, created_at,
+        terminal_id, created_by -- 🌟 الأعمدة الجديدة
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
       RETURNING *
     `;
     const result = await pool.query(query, [
@@ -216,7 +219,7 @@ app.post("/api/invoices", async (req, res) => {
       customerAddress || null,
       cashierId || null,
       cashierName || null,
-      captainName || null, // الحفظ في الداتابيز
+      captainName || null,
       JSON.stringify(items),
       subtotal,
       discountPct,
@@ -226,6 +229,8 @@ app.post("/api/invoices", async (req, res) => {
       Number(deliveryPrice) || 0,
       total,
       new Date(createdAt),
+      terminalId || "Main", // 🌟 حفظ رقم الجهاز
+      createdBy || null, // 🌟 حفظ اسم اللي قفل الفاتورة
     ]);
 
     const inv = result.rows[0];
@@ -239,7 +244,7 @@ app.post("/api/invoices", async (req, res) => {
       customerAddress: inv.customer_address,
       cashierId: inv.cashier_id,
       cashierName: inv.cashier_name,
-      captainName: inv.captain_name, // الإرجاع للفرونت إند
+      captainName: inv.captain_name,
       items: typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items,
       subtotal: Number(inv.subtotal),
       discountPct: Number(inv.discount_pct),
@@ -253,6 +258,7 @@ app.post("/api/invoices", async (req, res) => {
         : Date.now(),
     });
   } catch (err) {
+    console.error("❌ خطأ أثناء حفظ الفاتورة:", err.message);
     res
       .status(500)
       .json({ error: "حدث خطأ أثناء حفظ الفاتورة", details: err.message });
@@ -293,10 +299,83 @@ app.get("/api/invoices", async (req, res) => {
   }
 });
 
-// --- مسارات الورديات (Shifts) ---
+// ==========================================
+// 🕒 مسارات الورديات (Shifts) بالمنطق الجديد
+// ==========================================
 
-// --- مسارات الورديات المعدلة بالكامل لتتوافق مع الـ bigint ---
+// 🌟 1. فحص الوردية الحالية (للمزامنة) مخصصة للجهاز نفسه
+app.get("/api/pos/shift", async (req, res) => {
+  const terminalId = req.query.terminalId || "Main"; // 🌟 بنعرف رقم الجهاز
 
+  try {
+    const result = await pool.query(
+      "SELECT * FROM shifts WHERE terminal_id = $1 AND closed_at IS NULL ORDER BY created_at DESC LIMIT 1",
+      [terminalId],
+    );
+
+    if (result.rows.length > 0) {
+      const shift = result.rows[0];
+      res.json({
+        success: true,
+        activeShift: {
+          cashierId: shift.cashier_id,
+          cashierName: shift.cashier_name,
+          openedAt: Number(shift.opened_at),
+        },
+      });
+    } else {
+      res.json({ success: true, activeShift: null });
+    }
+  } catch (err) {
+    console.error("🚨 خطأ أثناء فحص الوردية:", err.message);
+    res.status(500).json({ success: false, error: "Database error" });
+  }
+});
+
+// 🌟 2. فتح وردية جديدة (بداية الشيفت)
+app.post("/api/pos/shift/open", async (req, res) => {
+  const { cashierId, cashierName, openedAt, terminalId } = req.body; // 🌟 استلمنا terminalId
+
+  try {
+    const id = crypto.randomUUID();
+    const finalOpenedAt = openedAt ? Number(openedAt) : Date.now();
+    const termId = terminalId || "Main";
+
+    // 💡 حماية: نتأكد إن مفيش وردية مفتوحة لنفس الجهاز
+    const checkQuery = await pool.query(
+      "SELECT id FROM shifts WHERE terminal_id = $1 AND closed_at IS NULL LIMIT 1",
+      [termId],
+    );
+    if (checkQuery.rows.length > 0) {
+      return res
+        .status(400)
+        .json({ success: false, error: "الوردية مفتوحة بالفعل لهذا الجهاز" });
+    }
+
+    const query = `
+      INSERT INTO shifts (id, cashier_id, cashier_name, opened_at, created_at, terminal_id) 
+      VALUES ($1, $2, $3, $4, NOW(), $5) 
+      RETURNING *
+    `;
+
+    const result = await pool.query(query, [
+      id,
+      cashierId,
+      cashierName,
+      finalOpenedAt,
+      termId,
+    ]);
+
+    res.status(201).json({ success: true, shift: result.rows[0] });
+  } catch (err) {
+    console.error("🚨 خطأ أثناء فتح الوردية:", err.message);
+    res
+      .status(500)
+      .json({ success: false, error: "حدث خطأ أثناء فتح الوردية" });
+  }
+});
+
+// 🌟 3. إغلاق الوردية الحالية (نهاية الشيفت للجهاز فقط)
 app.post("/api/shifts", async (req, res) => {
   const {
     cashierId,
@@ -311,17 +390,13 @@ app.post("/api/shifts", async (req, res) => {
     dineinSales,
     takeawaySales,
     deliverySales,
+    terminalId, // 🌟 استلام رقم الجهاز
   } = req.body;
 
   try {
-    const safeCashierId = String(cashierId || "0");
-    const safeCashierName = String(cashierName || "كاشير غير معروف");
-
-    // إجبار التواريخ تتخزن كأرقام بملي الثواني (تطابق الـ bigint عندك في الداتابيز)
-    const finalOpenedAt = openedAt ? Number(openedAt) : Date.now();
     const finalClosedAt = closedAt ? Number(closedAt) : Date.now();
-
-    currentActiveShift = null;
+    const finalOpenedAt = Number(openedAt);
+    const termId = terminalId || "Main"; // 🌟
 
     const totalRevenue =
       (Number(kitchenSales) || 0) +
@@ -330,19 +405,18 @@ app.post("/api/shifts", async (req, res) => {
       (Number(taxValue) || 0) -
       (Number(discountValue) || 0);
 
+    // 💡 بنقفل الوردية الخاصة بالجهاز ده بس (WHERE terminal_id = $12)
     const query = `
-      INSERT INTO shifts (
-        id, cashier_id, cashier_name, opened_at, closed_at, kitchen_sales, bar_sales, 
-        shisha_sales, tax_value, discount_value, total_revenue, dinein_sales, takeaway_sales, delivery_sales
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      UPDATE shifts 
+      SET 
+        closed_at = $1, kitchen_sales = $2, bar_sales = $3, shisha_sales = $4, 
+        tax_value = $5, discount_value = $6, total_revenue = $7, dinein_sales = $8, 
+        takeaway_sales = $9, delivery_sales = $10 
+      WHERE opened_at = $11 AND terminal_id = $12 AND closed_at IS NULL 
       RETURNING *
     `;
 
     const result = await pool.query(query, [
-      crypto.randomUUID(),
-      safeCashierId,
-      safeCashierName,
-      finalOpenedAt,
       finalClosedAt,
       Number(kitchenSales) || 0,
       Number(barSales) || 0,
@@ -353,28 +427,34 @@ app.post("/api/shifts", async (req, res) => {
       Number(dineinSales) || 0,
       Number(takeawaySales) || 0,
       Number(deliverySales) || 0,
+      finalOpenedAt,
+      termId, // 🌟 تمرير رقم الجهاز
     ]);
 
-    // نرجع البيانات للفرونت إند بشكل منسق ومفهوم
+    if (result.rows.length === 0) {
+      return res
+        .status(404)
+        .json({ error: "لا توجد وردية مفتوحة مطابقة لإغلاقها لهذا الجهاز!" });
+    }
+
     const row = result.rows[0];
-    res.status(201).json({
+    res.status(200).json({
       ...row,
       openedAt: Number(row.opened_at),
       closedAt: Number(row.closed_at),
     });
   } catch (err) {
-    console.error("❌ خطأ الداتابيز:", err.message);
-    res.status(500).json({ error: "حدث خطأ أثناء حفظ الوردية" });
+    console.error("❌ خطأ أثناء تحديث وإغلاق الوردية:", err.message);
+    res.status(500).json({ error: "حدث خطأ أثناء إغلاق الوردية" });
   }
 });
-
+// 🌟 4. جلب أرشيف كل الورديات (لشاشة التقارير)
 app.get("/api/shifts", async (req, res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM shifts ORDER BY opened_at DESC",
     );
 
-    // التحويل السحري: بنمسك رقم الـ bigint ونأكد إنه يتحول لرقم عادي في الجافاسكريبت عشان الفرونت إند يشوف التاريخ صح!
     const formattedShifts = result.rows.map((row) => ({
       id: row.id,
       cashierName: row.cashier_name,
@@ -394,6 +474,7 @@ app.get("/api/shifts", async (req, res) => {
 
     res.json(formattedShifts);
   } catch (err) {
+    console.error("🚨 خطأ أثناء جلب الورديات:", err.message);
     res.status(500).json({ error: "حدث خطأ أثناء جلب الورديات" });
   }
 });
@@ -799,21 +880,33 @@ app.get("/api/audits", async (req, res) => {
 ///////////////////////////////////////////////// IP /////////////////////////////////////////////////
 // 🖥️ قائمة بالـ IPs الثابتة لأجهزة الميكروس في المول
 const MICROS_IPS = [
-  "192.168.1.32", // تابلت 1
   "192.168.100.205", // تابلت 2
 ];
-
-// 🔍 API سريعة الفرونت إند يكلمها أول ما يفتح عشان يعرف نفسه إيه
+// 🖥️ قائمة بالـ IPs الثابتة لأجهزة الكاشير الفرعي 🌟 (الجديدة)
+const Sec_chasierIPs = [
+  "192.168.1.32", // تابلت 1
+  "192.168.1.40", // جهاز كاشير فرعي 1
+  "192.168.1.41", // جهاز كاشير فرعي 2
+];
+// 🔍 تعديل الـ API عشان تدعم التحققين سوا
 app.get("/api/device-check", (req, res) => {
   // جلب الـ IP بتاع الجهاز اللي باعت الطلب حالياً
   const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
 
-  // نتحقق هل الـ IP ده موجود في قائمة الميكروس؟
+  // 1. نتحقق هل هو في قائمة الميكروس؟
   const isMicros = MICROS_IPS.includes(clientIp);
+
+  // 2. نتحقق هل هو في قائمة الكاشير الفرعي؟ 🌟
+  const isSecCashier = Sec_chasierIPs.includes(clientIp);
+
+  // السيرفر هيرد بنوع الجهاز بالظبط بناءً على الـ IP
+  let deviceType = "main";
+  if (isMicros) deviceType = "micros";
+  else if (isSecCashier) deviceType = "sec_cashier";
 
   res.json({
     ip: clientIp,
-    deviceType: isMicros ? "micros" : "main",
+    deviceType: deviceType,
   });
 });
 // ============================================================================
@@ -865,38 +958,6 @@ app.get("/api/pos/orders", async (req, res) => {
     console.error("🚨 خطأ أثناء جلب الطلبات النشطة:", err);
     res.status(500).json({ error: "فشل جلب البيانات من السيرفر" });
   }
-});
-
-// 🌟 3. إندبوينت فحص حالة الوردية الحالية (النسخة المتصلحة)
-// app.get("/api/pos/shift", async (req, res) => {
-//   try {
-//     const result = await pool.query(
-//       "SELECT * FROM shifts WHERE state = 'active' LIMIT 1",
-//     );
-
-//     if (result.rows.length > 0) {
-//       const shift = result.rows[0];
-//       res.json({
-//         success: true,
-//         activeShift: {
-//           id: shift.id,
-//           state: shift.state,
-//           openedAt: shift.opened_at,
-//           openedBy: shift.opened_by || "الكاشير",
-//         },
-//       });
-//     } else {
-//       res.json({ success: true, activeShift: null });
-//     }
-//   } catch (err) {
-//     console.error("🚨 خطأ أثناء فحص الوردية من جدول shifts:", err);
-//     res.status(500).json({ success: false, error: "Database error" });
-//   }
-// });
-// 🛑 إندبوينت مؤقتة للورديات (عشان الفرونت ما يضربش لحد ما تظبطها في المستقبل)
-app.get("/api/pos/shift", (req, res) => {
-  // بنرد علطول إن مفيش وردية مفتوحة عشان المزامنة تشتغل بهدوء
-  res.json({ success: true, activeShift: null });
 });
 // 🌟 4. مسح الطاولة (لما الفاتورة تتقفل وتتحول لـ finish)
 app.post("/api/pos/orders/clear", async (req, res) => {

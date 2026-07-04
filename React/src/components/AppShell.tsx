@@ -14,7 +14,7 @@ import {
   ShoppingCart,
   Fingerprint,
   Settings,
-  Store, // أيقونة جديدة للوجو
+  Store,
   UserPen,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -30,48 +30,100 @@ const warehouseNav = [
 ] as const;
 
 const primaryNav = [
-  { to: "/reports", label: "التقرير", icon: FileBarChart },
-  { to: "/orders", label: "الطلبات", icon: ShoppingCart },
-  { to: "/roles", label: "بصمات الموظفين", icon: Fingerprint },
-  { to: "/settings", label: "الإعدادات", icon: Settings },
-] as const;
+  {
+    to: "/reports",
+    label: "التقرير",
+    icon: FileBarChart,
+    showFor: ["main", "sec_cashier"],
+  },
+  {
+    to: "/orders",
+    label: "الطلبات",
+    icon: ShoppingCart,
+    showFor: ["main", "micros", "sec_cashier"],
+  },
+  {
+    to: "/roles",
+    label: "بصمات الموظفين",
+    icon: Fingerprint,
+    showFor: ["main"],
+  },
+  {
+    to: "/settings",
+    label: "الإعدادات",
+    icon: Settings,
+    showFor: ["main", "sec_cashier"],
+  },
+];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const [warehouseOpen, setWarehouseOpen] = useState(false);
+  const navigate = useNavigate();
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [warehouseOpen, setWarehouseOpen] = useState(false);
+
+  // 🌟 State واحدة تلم الليلة كلها (بتقرأ من الكاش مبدئياً عشان الشاشة مترعشش)
+  const [deviceType, setDeviceType] = useState<
+    "main" | "micros" | "sec_cashier"
+  >(() => {
+    if (typeof window !== "undefined") {
+      if (localStorage.getItem("isMicrosDevice") === "true") return "micros";
+      if (localStorage.getItem("isSecCashierDevice") === "true")
+        return "sec_cashier";
+    }
+    return "main";
+  });
+
+  // 🌟 استنتاج الحالات عشان نستخدمها في الشاشة بسهولة
+  const isMicros = deviceType === "micros";
+  const isSecCashier = deviceType === "sec_cashier";
+  const isMain = deviceType === "main";
 
   const isWarehouseRoute = warehouseNav.some((n) => n.to === pathname);
-  const [deviceType, setDeviceType] = useState<"main" | "micros">("main");
-  const navigate = useNavigate();
 
+  // 🌟 useEffect واحدة ذكية بتكلم السيرفر وتحدث كل حاجة
   useEffect(() => {
-    fetch("http://192.168.1.37:5000/api/device-check")
-      .then((res) => res.json())
-      .then((data) => {
-        console.log("🖥️ Device Connected:", data.ip, "Type:", data.deviceType);
+    const syncDeviceTypeWithServer = async () => {
+      try {
+        const res = await fetch("http://192.168.1.37:5000/api/device-check");
+        const data = await res.json();
+        const fetchedType = data.deviceType; // "main" أو "micros" أو "sec_cashier"
 
-        if (data.deviceType === "micros") {
-          setDeviceType("micros");
+        console.log(
+          `🖥️ تم التعرف على الجهاز: IP [${data.ip}] - النوع [${fetchedType}]`,
+        );
+        setDeviceType(fetchedType);
+
+        if (fetchedType === "micros") {
           localStorage.setItem("isMicrosDevice", "true");
+          localStorage.setItem("isSecCashierDevice", "false");
 
-          if (pathname !== "/orders") {
-            navigate({ to: "/orders" });
-          }
-        } else {
-          setDeviceType("main");
+          // الميكروس ملوش غير صفحة الطلبات
+          if (pathname !== "/orders") navigate({ to: "/orders" });
+        } else if (fetchedType === "sec_cashier") {
           localStorage.setItem("isMicrosDevice", "false");
+          localStorage.setItem("isSecCashierDevice", "true");
+
+          // حماية: لو الكاشير الفرعي فاتح رابط المخزن نطرده للطلبات
+          if (isWarehouseRoute) navigate({ to: "/orders" });
+        } else {
+          localStorage.setItem("isMicrosDevice", "false");
+          localStorage.setItem("isSecCashierDevice", "false");
         }
-      })
-      .catch((err) => console.error("Error checking device IP:", err));
-  }, [pathname, navigate]);
+      } catch (err) {
+        console.error("❌ فشل التعرف على الجهاز من السيرفر", err);
+      }
+    };
 
-  const isMicros = deviceType === "micros";
+    syncDeviceTypeWithServer();
+  }, [pathname, navigate, isWarehouseRoute]);
 
+  // قفل قائمة المخزن لو الرابط اتغير
   useEffect(() => {
     setWarehouseOpen(false);
   }, [pathname]);
 
+  // قفل القائمة لو داس بره
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (
@@ -87,10 +139,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div dir="rtl" className="min-h-screen flex flex-col bg-slate-50/50">
-      {/* الهيدر بتأثير زجاجي وانيميشن ظهور */}
       <header className="no-print sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-gray-200/60 shadow-sm animate-in slide-in-from-top-4 duration-500">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
-          {/* اللوجو الجديد مع تأثير النبض الخفيف */}
+          {/* اللوجو */}
           <div className="flex items-center gap-3 group cursor-pointer">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-white flex items-center justify-center shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-transform duration-300">
               <Store className="w-5 h-5" />
@@ -100,14 +151,19 @@ export function AppShell({ children }: { children: ReactNode }) {
                 نظام إدارة المطعم
               </h1>
               <p className="text-[10px] text-gray-500 font-medium">
-                المخزن ونقطة البيع
+                {isMain
+                  ? "المخزن ونقطة البيع"
+                  : isSecCashier
+                    ? "كاشير فرعي"
+                    : "شاشة الطلبات"}
               </p>
             </div>
           </div>
 
           {/* 💻 قائمة الشاشات الكبيرة */}
           <nav className="hidden md:flex items-center gap-1.5 bg-gray-100/50 p-1 rounded-xl border border-gray-200/50">
-            {!isMicros && (
+            {/* المخزن بيظهر للجهاز الرئيسي فقط! */}
+            {isMain && (
               <div className="relative" ref={dropdownRef}>
                 <ActionGate
                   requiredRole="محاسب"
@@ -129,7 +185,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </button>
                 </ActionGate>
 
-                {/* قائمة المخزن المنسدلة بأنيميشن */}
                 {warehouseOpen && (
                   <div className="absolute end-0 mt-2 w-56 bg-white/95 backdrop-blur-xl border border-gray-100 rounded-xl shadow-2xl py-2 z-50 animate-in fade-in zoom-in-95 duration-200">
                     {warehouseNav.map((n) => {
@@ -157,9 +212,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             )}
 
-            {/* 🟢 القائمة الرئيسية */}
+            {/* 🟢 القائمة الرئيسية بفلتر الصلاحيات الذكي */}
             {primaryNav
-              .filter((n) => !isMicros || n.to === "/orders")
+              .filter((n) => n.showFor.includes(deviceType))
               .map((n) => {
                 const active = pathname === n.to;
                 const Icon = n.icon;
@@ -182,23 +237,19 @@ export function AppShell({ children }: { children: ReactNode }) {
               })}
           </nav>
 
-          {/* 🔴 زرار الخروج بتصميم عصري */}
-          {!isMicros && (
-            <button
-              className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg font-bold text-red-500 hover:bg-red-50 hover:text-red-600 transition-all duration-300 border border-transparent hover:border-red-100"
-              title="يوسف الرفاعي"
-            >
+          {/* 🔴 زرار الخروج (مخفي من الميكروس) */}
+            <button className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg font-bold text-red-500 hover:bg-red-50 hover:text-red-600 transition-all duration-300 border border-transparent hover:border-red-100">
               <UserPen className="w-4 h-4" />
               <span className="hidden sm:inline">ENG: Youssif Hamed</span>
             </button>
-          )}
+
         </div>
 
         {/* 📱 قائمة الشاشات الصغيرة / التابلت */}
         <nav className="md:hidden flex overflow-x-auto gap-2 px-4 pb-3 pt-2 hide-scrollbar">
           {[
-            ...(!isMicros ? warehouseNav : []),
-            ...primaryNav.filter((n) => !isMicros || n.to === "/orders"),
+            ...( isSecCashier || isMain ? warehouseNav : []),
+            ...primaryNav.filter((n) => n.showFor.includes(deviceType)),
           ].map((n) => {
             const active = pathname === n.to;
             const Icon = n.icon;
@@ -224,13 +275,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         {children}
       </main>
 
-      {/* إضافة ستايل لإخفاء الـ Scrollbar في الموبايل */}
       <style
         dangerouslySetInnerHTML={{
-          __html: `
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-      `,
+          __html: `.hide-scrollbar::-webkit-scrollbar { display: none; } .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`,
         }}
       />
     </div>

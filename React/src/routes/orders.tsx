@@ -89,10 +89,19 @@ function ShiftLogin() {
     return localStorage.getItem("isMicrosDevice") === "true";
   });
 
-  // 🌟 نقلنا الـ useEffect دي فوق برضه
+  // 2. الـ State الجديدة بتاعة الكاشير الفرعي 🌟
+  const [isSecCashier, setIsSecCashier] = useState(() => {
+    return localStorage.getItem("isSecCashierDevice") === "true";
+  });
+
+  // 🌟 الـ useEffect اللي بتشيك أول ما الجهاز يفتح
   useEffect(() => {
-    const checkDevice = localStorage.getItem("isMicrosDevice") === "true";
-    setIsMicros(checkDevice);
+    const checkMicros = localStorage.getItem("isMicrosDevice") === "true";
+    const checkSecCashier =
+      localStorage.getItem("isSecCashierDevice") === "true";
+
+    setIsMicros(checkMicros);
+    setIsSecCashier(checkSecCashier); // تحديث حالة الكاشير الفرعي
   }, []);
 
   useEffect(() => {

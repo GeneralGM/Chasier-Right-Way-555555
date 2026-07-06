@@ -52,6 +52,29 @@ const printInvoice = (invoice: Invoice) => {
     Number(invoice.deliveryPrice) ||
     Number((invoice as any).delivery_price) ||
     0;
+  const taxVal =
+    Number(invoice.taxValue) || Number((invoice as any).tax_value) || 0;
+  const discVal =
+    Number(invoice.discountValue) ||
+    Number((invoice as any).discount_value) ||
+    0;
+  const finalDiscVal =
+    discVal ||
+    (Number(invoice.subtotal || 0) *
+      Number(invoice.discountPct || (invoice as any).discount_pct || 0)) /
+      100 ||
+    0;
+  // حساب الضريبة لو مش موجودة
+  const finalTaxVal =
+    taxVal ||
+    ((Number(invoice.subtotal || 0) - discVal) *
+      Number(invoice.taxPct || (invoice as any).tax_pct || 0)) /
+      100 ||
+    0;
+  // حساب الإجمالي النهائي
+  const computedTotal =
+    Number(invoice.total) ||
+    Number(invoice.subtotal || 0) - discVal + finalTaxVal + dPrice;
 
   // تأمين فك الأري عشان لو جاية كنص من الداتابيز
   const itemsArray =
@@ -128,13 +151,12 @@ const printInvoice = (invoice: Invoice) => {
 
         <div class="totals">
           <div><span>المجموع الأصلي:</span> <span>${Number(invoice.subtotal).toFixed(2)} ج</span></div>
-          ${invoice.discountValue > 0 ? `<div><span>الخصم:</span> <span>${Number(invoice.discountValue).toFixed(2)} ج</span></div>` : ""}
-          ${invoice.taxValue > 0 ? `<div><span>الضريبة:</span> <span>${Number(invoice.taxValue).toFixed(2)} ج</span></div>` : ""}
-          
+          ${finalDiscVal > 0 ? `<div><span>الخصم (${invoice.discountPct || 0}%):</span> <span>${finalDiscVal.toFixed(2)} ج</span></div>` : ""}
+          ${finalTaxVal > 0 ? `<div><span>الضريبة (${invoice.taxPct || 0}%):</span> <span>${finalTaxVal.toFixed(2)} ج</span></div>` : ""}          
           <div><span>التوصيل:</span> <span class="bold">${dPrice.toFixed(2)} ج</span></div>
           
           <div class="bold" style="border-top:1px solid #000; padding-top:4px; margin-top:4px;">
-            <span>الإجمالي النهائي:</span> <span>${Number(invoice.total).toFixed(2)} ج</span>
+            <span>الإجمالي النهائي:</span> <span>${computedTotal.toFixed(2)} ج</span>
           </div>
         </div>
 
@@ -431,10 +453,29 @@ function InvoicesTab() {
 
                   <td className="p-3">{fmt2(inv.subtotal)}</td>
                   <td className="p-3">
-                    {Math.floor(+fmt2(inv.discountPct || 0))}% &asymp;&nbsp;
-                    {fmt2(inv.discountValue)}
+                    {Math.floor(
+                      +fmt2(inv.discountPct || (inv as any).discount_pct || 0),
+                    )}
+                    % &asymp;&nbsp;
+                    {fmt2(
+                      inv.discountValue || (inv as any).discount_value || 0,
+                    )}
                   </td>
-                  <td className="p-3">{fmt2(inv.taxValue)}</td>
+                  <td className="p-3">
+                    {fmt2(
+                      inv.taxValue ||
+                        (inv as any).tax_value ||
+                        ((Number(inv.subtotal) -
+                          Number(
+                            inv.discountValue ||
+                              (inv as any).discount_value ||
+                              0,
+                          )) *
+                          Number(inv.taxPct || (inv as any).tax_pct || 0)) /
+                          100 ||
+                        0,
+                    )}
+                  </td>
 
                   {/* 🌟 خلية الكابتن أو التوصيل حسب حالة الصالة */}
                   {sub === "dinein" ? (
@@ -450,7 +491,35 @@ function InvoicesTab() {
                   )}
 
                   <td className="p-3 font-bold text-emerald-600">
-                    {fmt2(inv.total)}
+                    {fmt2(
+                      inv.total ||
+                        Number(inv.subtotal || 0) -
+                          Number(
+                            inv.discountValue ||
+                              (inv as any).discount_value ||
+                              0,
+                          ) +
+                          Number(
+                            inv.taxValue ||
+                              (inv as any).tax_value ||
+                              ((Number(inv.subtotal || 0) -
+                                Number(
+                                  inv.discountValue ||
+                                    (inv as any).discount_value ||
+                                    0,
+                                )) *
+                                Number(
+                                  inv.taxPct || (inv as any).tax_pct || 0,
+                                )) /
+                                100 ||
+                              0,
+                          ) +
+                          Number(
+                            inv.deliveryPrice ||
+                              (inv as any).delivery_price ||
+                              0,
+                          ),
+                    )}
                   </td>
                   <td className="p-3 font-bold">
                     <Button
@@ -548,8 +617,9 @@ function ShiftsTab() {
       let shisha = Number(shift.shishaSales) || 0;
       let takeawayOnly = Number(shift.takeawaySales) || 0;
       let deliveryOnly = Number(shift.deliverySales) || 0;
-      let tax = Number(shift.taxValue) || 0;
-      let discount = Number(shift.discountValue) || 0;
+      let tax = Number(shift.taxValue || (shift as any).tax_value) || 0;
+      let discount =
+        Number(shift.discountValue || (shift as any).discount_value) || 0;
 
       // حساب الإجمالي الأصلي (الفرعي) إذا لم تتوفر فواتير تفصيلية
       let subtotal = kitchen + bar + shisha;
@@ -569,9 +639,15 @@ function ShiftsTab() {
 
         for (const inv of shiftInvoices) {
           subtotal += inv.subtotal;
-          discount += inv.discountValue;
-          tax += inv.taxValue;
-
+          discount +=
+            Number(inv.discountValue || (inv as any).discount_value) || 0;
+          const invDiscount =
+            Number(inv.discountValue || (inv as any).discount_value) || 0;
+          const invTaxPct = Number(inv.taxPct || (inv as any).tax_pct) || 0;
+          tax +=
+            Number(inv.taxValue || (inv as any).tax_value) ||
+            ((Number(inv.subtotal) - invDiscount) * invTaxPct) / 100 ||
+            0;
           const deliveryFee = Number(inv.deliveryPrice) || 0;
           deliveryFeesOnly += deliveryFee;
 
@@ -656,9 +732,17 @@ function ShiftsTab() {
 
       // الحسابات المالية
       grossSales += Number(inv.subtotal) || 0;
-      totalDiscount += Number(inv.discountValue) || 0;
-      totalTax += Number(inv.taxValue) || 0;
-      totalDeliveryFee += Number(inv.deliveryPrice) || 0;
+      totalDiscount +=
+        Number(inv.discountValue || (inv as any).discount_value) || 0;
+      const invDiscount =
+        Number(inv.discountValue || (inv as any).discount_value) || 0;
+      const invTaxPct = Number(inv.taxPct || (inv as any).tax_pct) || 0;
+      totalTax +=
+        Number(inv.taxValue || (inv as any).tax_value) ||
+        ((Number(inv.subtotal) - invDiscount) * invTaxPct) / 100 ||
+        0;
+      totalDeliveryFee +=
+        Number(inv.deliveryPrice || (inv as any).delivery_price) || 0;
       netSales += Number(inv.total) || 0;
 
       // طرق الدفع

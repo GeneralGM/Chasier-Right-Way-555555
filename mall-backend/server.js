@@ -174,7 +174,44 @@ app.delete("/api/employees/:id", async (req, res) => {
 });
 // --- مسارات الفواتير (Invoices) ---
 
+// 🌟 تحديث الدالة المساعدة لضمان قراءة الضريبة والخصم بأي شكل وهي راجعة للفرونت إند
+function formatInvoiceToFrontend(inv) {
+  if (!inv) return null;
+
+  return {
+    id: inv.id,
+    invoiceNumber: Number(inv.invoice_number || inv.invoiceNumber || 0),
+    type: inv.type,
+    tableCode: inv.table_code || inv.tableCode || "",
+    zone: inv.zone || "",
+    customerName: inv.customer_name || inv.customerName || "",
+    customerAddress: inv.customer_address || inv.customerAddress || "",
+    cashierId: inv.cashier_id || inv.cashierId || "",
+    cashierName: inv.cashier_name || inv.cashierName || "",
+    captainName: inv.captain_name || inv.captainName || "",
+    items:
+      typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items || [],
+
+    // 🌟 تأمين قراءة قيم الحسابات والضرائب من الداتابيز (تلقط الـ snake_case والـ camelCase)
+    subtotal: Number(inv.subtotal || 0),
+    discountPct: Number(inv.discount_pct || inv.discountPct || 0),
+    discountValue: Number(inv.discount_value || inv.discountValue || 0),
+    taxPct: Number(inv.tax_pct || inv.taxPct || 0),
+    taxValue: Number(inv.tax_value || inv.taxValue || 0), // 👈 دي اللي كانت مخلية الفرونت يقراها 0
+    deliveryPrice: Number(inv.delivery_price || inv.deliveryPrice || 0),
+    total: Number(inv.total || 0),
+
+    createdAt: inv.created_at
+      ? new Date(inv.created_at).getTime()
+      : Number(inv.createdAt) || Date.now(),
+    terminalId: inv.terminal_id || inv.terminalId || "Main",
+    createdBy: inv.created_by || inv.createdBy || "",
+  };
+}
+
+// 1️⃣ تعديل مسار حفظ الفاتورة (POST) لضمان تسجيل الضريبة والخصم صح
 app.post("/api/invoices", async (req, res) => {
+  // قراءة البيانات بكل الأشكال الممكنة لعدم حدوث أي لغبطة
   const {
     id,
     type,
@@ -196,24 +233,48 @@ app.post("/api/invoices", async (req, res) => {
     total,
     createdAt,
     terminalId,
-    createdBy, // 🌟 المتغيرات الجديدة من الفرونت إند
+    createdBy,
   } = req.body;
 
   try {
+    // 🌟 حماية وتأمين الـ subtotal
+    let finalSubtotal = Number(subtotal);
+    if (!finalSubtotal && Array.isArray(items)) {
+      finalSubtotal = items.reduce((sum, item) => {
+        const itemPrice = Number(item.unitPrice) || 0;
+        const extrasTotal = (item.extras || []).reduce(
+          (exSum, ex) => exSum + (Number(ex.price) || 0),
+          0,
+        );
+        return sum + item.qty * (itemPrice + extrasTotal);
+      }, 0);
+    }
+
+    // 🌟 التأكد التام من قراءة قيم الضريبة والخصم والإجمالي وتجنب الـ undefined
+    const finalTaxPct = Number(taxPct) || Number(req.body.tax_pct) || 0;
+    const finalTaxValue = Number(taxValue) || Number(req.body.tax_value) || 0;
+    const finalDiscountPct =
+      Number(discountPct) || Number(req.body.discount_pct) || 0;
+    const finalDiscountValue =
+      Number(discountValue) || Number(req.body.discount_value) || 0;
+    const finalDeliveryPrice =
+      Number(deliveryPrice) || Number(req.body.delivery_price) || 0;
+    const finalTotal = Number(total) || Number(req.body.total) || 0;
+
     const query = `
       INSERT INTO invoices (
         id, type, invoice_number, table_code, zone, customer_name, customer_address, 
         cashier_id, cashier_name, captain_name, items, subtotal, discount_pct, discount_value, 
-        tax_pct, tax_value, delivery_price, total, created_at,
-        terminal_id, created_by -- 🌟 الأعمدة الجديدة
+        tax_pct, tax_value, delivery_price, total, created_at, terminal_id, created_by
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
       RETURNING *
     `;
+
     const result = await pool.query(query, [
       id,
       type,
-      invoiceNumber,
-      tableCode,
+      invoiceNumber || req.body.invoice_number,
+      tableCode || req.body.table_code,
       zone || null,
       customerName || null,
       customerAddress || null,
@@ -221,42 +282,20 @@ app.post("/api/invoices", async (req, res) => {
       cashierName || null,
       captainName || null,
       JSON.stringify(items),
-      subtotal,
-      discountPct,
-      discountValue,
-      taxPct,
-      taxValue,
-      Number(deliveryPrice) || 0,
-      total,
-      new Date(createdAt),
-      terminalId || "Main", // 🌟 حفظ رقم الجهاز
-      createdBy || null, // 🌟 حفظ اسم اللي قفل الفاتورة
+      finalSubtotal,
+      finalDiscountPct,
+      finalDiscountValue,
+      finalTaxPct,
+      finalTaxValue, // 🌟 بتنزل هنا في الداتابيز بشكل صحيح ومؤمن
+      finalDeliveryPrice,
+      finalTotal,
+      new Date(createdAt || req.body.created_at || Date.now()),
+      terminalId || "Main",
+      createdBy || null,
     ]);
 
-    const inv = result.rows[0];
-    res.status(201).json({
-      id: inv.id,
-      invoiceNumber: Number(inv.invoice_number),
-      type: inv.type,
-      tableCode: inv.table_code,
-      zone: inv.zone,
-      customerName: inv.customer_name,
-      customerAddress: inv.customer_address,
-      cashierId: inv.cashier_id,
-      cashierName: inv.cashier_name,
-      captainName: inv.captain_name,
-      items: typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items,
-      subtotal: Number(inv.subtotal),
-      discountPct: Number(inv.discount_pct),
-      discountValue: Number(inv.discount_value),
-      taxPct: Number(inv.tax_pct),
-      taxValue: Number(inv.tax_value),
-      deliveryPrice: Number(inv.delivery_price || 0),
-      total: Number(inv.total),
-      createdAt: inv.created_at
-        ? new Date(inv.created_at).getTime()
-        : Date.now(),
-    });
+    // تحويل النتيجة للشكل المتوقع في الفرونت إند (camelCase)
+    res.status(201).json(formatInvoiceToFrontend(result.rows[0]));
   } catch (err) {
     console.error("❌ خطأ أثناء حفظ الفاتورة:", err.message);
     res
@@ -265,36 +304,21 @@ app.post("/api/invoices", async (req, res) => {
   }
 });
 
+// 2️⃣ حماية وتعديل مسار جلب الفواتير (GET) للأرشيف والتقارير
 app.get("/api/invoices", async (req, res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM invoices ORDER BY created_at DESC",
     );
-    const invoices = result.rows.map((inv) => ({
-      id: inv.id,
-      invoiceNumber: Number(inv.invoice_number),
-      type: inv.type,
-      tableCode: inv.table_code,
-      zone: inv.zone,
-      customerName: inv.customer_name,
-      customerAddress: inv.customer_address,
-      cashierId: inv.cashier_id,
-      cashierName: inv.cashier_name,
-      captainName: inv.captain_name || null,
-      items: typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items,
-      subtotal: Number(inv.subtotal),
-      discountPct: Number(inv.discount_pct),
-      discountValue: Number(inv.discount_value),
-      taxPct: Number(inv.tax_pct),
-      taxValue: Number(inv.tax_value),
-      deliveryPrice: Number(inv.delivery_price || 0),
-      total: Number(inv.total),
-      createdAt: inv.created_at
-        ? new Date(inv.created_at).getTime()
-        : Date.now(),
-    }));
-    res.json(invoices);
+
+    // تحويل كل الفواتير المجلوبة لـ camelCase عشان الأرشيف والتقارير يشتغلوا صح
+    const formattedInvoices = result.rows.map((row) =>
+      formatInvoiceToFrontend(row),
+    );
+
+    res.json(formattedInvoices);
   } catch (err) {
+    console.error("❌ خطأ أثناء جلب الفواتير:", err.message);
     res.status(500).json({ error: "حدث خطأ أثناء جلب الفواتير" });
   }
 });

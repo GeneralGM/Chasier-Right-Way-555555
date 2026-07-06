@@ -500,7 +500,7 @@ export function useDB() {
     console.log("🚀 البيانات اللي طالعة من الفورمة للسيرفر:", cleanItem);
 
     try {
-      const response = await fetch("http://192.168.1.37:5000/api/inventory", {
+      const response = await fetch("http://192.168.1.44:5000/api/inventory", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(cleanItem),
@@ -538,7 +538,7 @@ export function useDB() {
       const fullUpdatedItem = { ...currentItem, ...updatedFields };
 
       try {
-        const response = await fetch("http://192.168.1.37:5000/api/inventory", {
+        const response = await fetch("http://192.168.1.44:5000/api/inventory", {
           method: "POST", // السيرفر بيستقبلها وبيدخل في الـ UPDATE علطول بسبب الـ ON CONFLICT
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(fullUpdatedItem),
@@ -566,7 +566,7 @@ export function useDB() {
   const deleteItem = useCallback(async (id: string) => {
     try {
       const response = await fetch(
-        `http://192.168.1.37:5000/api/inventory/${id}`,
+        `http://192.168.1.44:5000/api/inventory/${id}`,
         {
           method: "DELETE",
         },
@@ -586,63 +586,14 @@ export function useDB() {
       toast.error("خطأ في الاتصال بالسيرفر أثناء الحذف");
     }
   }, []);
-
-  // 4️⃣ دالة المزامنة التلقائية لجلب البيانات القديمة عند تشغيل النظام
-  // useEffect(() => {
-  //   async function syncInventoryFromServer() {
-  //     try {
-  //       console.log("🔄 جاري سحب الأصناف وأرصدة الأقسام من الداتابيز...");
-
-  //       // جلب المخزن الرئيسي والمخازن الفرعية مع بعض
-  //       const [invRes, deptRes] = await Promise.all([
-  //         fetch("http://192.168.1.37:5000/api/inventory"),
-  //         fetch("http://192.168.1.37:5000/api/dept-stock"),
-  //       ]);
-
-  //       if (invRes.ok && deptRes.ok) {
-  //         const serverItems = await invRes.json();
-  //         const deptStockData = await deptRes.json();
-
-  //         // 1. لقط النسخة الحالية بأسلوبنا
-  //         const cur = load();
-
-  //         // 2. تحديث قائمة الأصناف الرئيسية
-  //         cur.items = serverItems;
-
-  //         // 3. تجميع أرصدة الأقسام وتحويلها للشكل بتاعنا (مطبخ::123)
-  //         const newDeptStock: Record<string, number> = {};
-  //         deptStockData.forEach((row: any) => {
-  //           const key = `${row.department}::${row.item_id}`;
-  //           newDeptStock[key] = Number(row.qty);
-  //         });
-
-  //         // 4. دمج الأرصدة الجديدة جوه الكاش
-  //         cur.deptStock = newDeptStock;
-
-  //         // 5. الحفظ النهائي في الـ Local Storage والـ State
-  //         save(cur);
-  //         setDb(cur);
-  //         console.log(
-  //           `✅ تمت المزامنة بالكامل! الأرصدة جاهزة في الـ Local Storage.`,
-  //         );
-  //       }
-  //     } catch (error) {
-  //       console.error("❌ فشل سحب البيانات من السيرفر:", error);
-  //     }
-  //   }
-
-  //   syncInventoryFromServer();
-  // }, []);
-  // 1. الدالة دي هتجيب من السيرفر -> تحفظ في Local Storage -> تحدث الـ UI
-
   const syncFromServer = useCallback(async () => {
     try {
       console.log("🔄 جاري سحب الأصناف، أرصدة الأقسام، الريسبي، والمبيعات...");
       const [invRes, deptRes, mealsRes, salesRes] = await Promise.all([
-        fetch("http://192.168.1.37:5000/api/inventory"),
-        fetch("http://192.168.1.37:5000/api/dept-stock"),
-        fetch("http://192.168.1.37:5000/api/meals"),
-        fetch("http://192.168.1.37:5000/api/sales"), // 🌟 ضفنا مسار المبيعات هنا
+        fetch("http://192.168.1.44:5000/api/inventory"),
+        fetch("http://192.168.1.44:5000/api/dept-stock"),
+        fetch("http://192.168.1.44:5000/api/meals"),
+        fetch("http://192.168.1.44:5000/api/sales"), // 🌟 ضفنا مسار المبيعات هنا
       ]);
 
       if (invRes.ok && deptRes.ok && mealsRes.ok && salesRes.ok) {
@@ -733,7 +684,7 @@ export function useDB() {
         createdAt: Date.now(),
       };
       // إرسال إذن التوريد للسيرفر ليظهر في الـ History
-      fetch("http://192.168.1.37:5000/api/vouchers", {
+      fetch("http://192.168.1.44:5000/api/vouchers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(v),
@@ -745,7 +696,7 @@ export function useDB() {
       // 🌟 السحر هنا: نرسل الأصناف التي تغير سعرها وكميتها إلى PostgreSQL
       for (const updatedItem of itemsToUpdateDB) {
         try {
-          await fetch("http://192.168.1.37:5000/api/inventory", {
+          await fetch("http://192.168.1.44:5000/api/inventory", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(updatedItem),
@@ -836,7 +787,7 @@ export function useDB() {
       };
 
       // إرسال إذن الصرف للسيرفر ليظهر في الـ History
-      fetch("http://192.168.1.37:5000/api/vouchers", {
+      fetch("http://192.168.1.44:5000/api/vouchers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(v),
@@ -849,7 +800,7 @@ export function useDB() {
       // 🌟 إرسال الأصناف المخصومة (المخزن الرئيسي) للسيرفر
       for (const updatedItem of itemsToUpdateDB) {
         try {
-          await fetch("http://192.168.1.37:5000/api/inventory", {
+          await fetch("http://192.168.1.44:5000/api/inventory", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(updatedItem),
@@ -862,7 +813,7 @@ export function useDB() {
       // 🌟 السطر السحري الجديد: إرسال أرصدة الأقسام (المطبخ) للسيرفر والداتابيز
       for (const ds of deptStocksToUpdateDB) {
         try {
-          await fetch("http://192.168.1.37:5000/api/dept-stock", {
+          await fetch("http://192.168.1.44:5000/api/dept-stock", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(ds),
@@ -896,7 +847,7 @@ export function useDB() {
 
     // 🌟 إرسال للباك إند
     try {
-      await fetch("http://192.168.1.37:5000/api/meals", {
+      await fetch("http://192.168.1.44:5000/api/meals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(m),
@@ -914,7 +865,7 @@ export function useDB() {
 
     // 🌟 حذف من الباك إند
     try {
-      await fetch(`http://192.168.1.37:5000/api/meals/${id}`, {
+      await fetch(`http://192.168.1.44:5000/api/meals/${id}`, {
         method: "DELETE",
       });
     } catch (e) {
@@ -938,7 +889,7 @@ export function useDB() {
     // 🌟 إرسال للباك إند بالدور (يفضل عمل مسار Bulk في الباك اند لو العدد ضخم جداً بس كدا هيشتغل تمام)
     for (const m of formattedMeals) {
       try {
-        await fetch("http://192.168.1.37:5000/api/meals", {
+        await fetch("http://192.168.1.44:5000/api/meals", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(m),
@@ -1005,7 +956,7 @@ export function useDB() {
 
       // 1. ترحيل البيانات للسيرفر أولاً للتأكد من حفظها في الداتا بيس
       try {
-        const response = await fetch("http://192.168.1.37:5000/api/sales", {
+        const response = await fetch("http://192.168.1.44:5000/api/sales", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(sale),
@@ -1056,7 +1007,7 @@ export function useDB() {
 
       // 1. ترحيل الجرد للسيرفر ليتم حفظه أو تحديثه بناءً على الـ ON CONFLICT في الباك إند
       try {
-        const response = await fetch("http://192.168.1.37:5000/api/audits", {
+        const response = await fetch("http://192.168.1.44:5000/api/audits", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(audit),
@@ -1124,7 +1075,7 @@ export function useDB() {
 
       // 4. رمي التحديث للداتابيز في الخلفية
       try {
-        await fetch("http://192.168.1.37:5000/api/dept-stock", {
+        await fetch("http://192.168.1.44:5000/api/dept-stock", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

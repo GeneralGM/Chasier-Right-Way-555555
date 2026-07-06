@@ -206,8 +206,8 @@ export function usePosDB() {
     const fetchActiveOrders = async () => {
       try {
         const [ordersRes, shiftRes] = await Promise.all([
-          fetch("http://192.168.1.37:5000/api/pos/orders").catch(() => null),
-          fetch("http://192.168.1.37:5000/api/pos/shift").catch(() => null),
+          fetch("http://192.168.1.44:5000/api/pos/orders").catch(() => null),
+          fetch("http://192.168.1.44:5000/api/pos/shift").catch(() => null),
         ]);
 
         // 1️⃣ حماية: لو السيرفر مقفول أو الأوردرات مجتش، نوقف المزامنة للمرة دي بهدوء بدون كراش
@@ -395,7 +395,7 @@ export function usePosDB() {
     // 2️⃣ إرسال التحديث للسيرفر (قاعدة البيانات الحقيقية)
     try {
       const response = await fetch(
-        "http://192.168.1.37:5000/api/pos/orders/upsert",
+        "http://192.168.1.44:5000/api/pos/orders/upsert",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -424,7 +424,7 @@ export function usePosDB() {
 
     // 2️⃣ إبلاغ السيرفر بمسح الطاولة عشان تتشال من عند الميكروس برضه
     try {
-      await fetch("http://192.168.1.37:5000/api/pos/orders/clear", {
+      await fetch("http://192.168.1.44:5000/api/pos/orders/clear", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableCode }),
@@ -450,7 +450,7 @@ export function usePosDB() {
 
       // 🌟 السحر هنا: إرسال الفاتورة فوراً لقاعدة البيانات (pgAdmin) مهما كان نوعها (صالة / تيك أواي / دليفري)
       try {
-        const response = await fetch("http://192.168.1.37:5000/api/invoices", {
+        const response = await fetch("http://192.168.1.44:5000/api/invoices", {
           method: "POST",
           mode: "cors",
           headers: { "Content-Type": "application/json" },
@@ -570,7 +570,7 @@ export function usePosDB() {
 
       // 2. إبلاغ السيرفر عشان يفتح أجهزة الميكروس
       try {
-        await fetch("http://192.168.1.37:5000/api/pos/shift/open", {
+        await fetch("http://192.168.1.44:5000/api/pos/shift/open", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(shiftData),
@@ -609,7 +609,7 @@ export function usePosDB() {
       };
 
       try {
-        const res = await fetch("http://192.168.1.37:5000/api/shifts", {
+        const res = await fetch("http://192.168.1.44:5000/api/shifts", {
           method: "POST",
           mode: "cors",
           headers: { "Content-Type": "application/json" },
@@ -724,9 +724,9 @@ export function usePosDB() {
     async function syncServerToLocalStorage() {
       try {
         const [invoicesRes, shiftsRes, employeesRes] = await Promise.all([
-          fetch("http://192.168.1.37:5000/api/invoices"),
-          fetch("http://192.168.1.37:5000/api/shifts"),
-          fetch("http://192.168.1.37:5000/api/employees"),
+          fetch("http://192.168.1.44:5000/api/invoices"),
+          fetch("http://192.168.1.44:5000/api/shifts"),
+          fetch("http://192.168.1.44:5000/api/employees"),
         ]);
 
         if (invoicesRes.ok && shiftsRes.ok && employeesRes.ok) {

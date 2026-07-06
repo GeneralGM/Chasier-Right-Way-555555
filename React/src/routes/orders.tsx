@@ -59,10 +59,150 @@ export const Route = createFileRoute("/orders")({
 
 function OrdersGate() {
   const { db: pos } = usePosDB();
+  const [isSecCashier] = useState(
+    () => localStorage.getItem("isSecCashierDevice") === "true",
+  );
+  const [secCashierName, setSecCashierName] = useState(() =>
+    localStorage.getItem("secCashierName"),
+  );
+
+  // 1. لو الشيفت الرئيسي مقفول، نوقف الكل هنا
   if (!pos.shift) return <ShiftLogin />;
+
+  // 2. لو الشيفت مفتوح وده "كاشير فرعي" ولسه مسجلش دخول، نطلعله شاشته
+  if (isSecCashier && !secCashierName) {
+    return (
+      <SecCashierLogin
+        onLogin={(name, id) => {
+          localStorage.setItem("secCashierName", name);
+          localStorage.setItem("secCashierId", id);
+          setSecCashierName(name);
+        }}
+      />
+    );
+  }
+
+  // 3. لو كله تمام، يدخل على شاشة الطلبات
   return <PosScreen />;
 }
 
+// 🌟 شاشة تسجيل الدخول الأنيقة المخصصة للكاشير الفرعي فقط (محدثة)
+function SecCashierLogin({
+  onLogin,
+}: {
+  onLogin: (name: string, id: string) => void;
+}) {
+  const { db: pos, findByPin } = usePosDB();
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
+
+  const [serverEmployees, setServerEmployees] = useState<any[]>([]);
+  const [isLoadingEmployees, setIsLoadingEmployees] = useState(false);
+
+  // 🌟 جلب الموظفين من السيرفر لو الكاش المحلي فاضي
+  useEffect(() => {
+    async function fetchEmployeesFallback() {
+      if (pos.employees && pos.employees.length > 0) return;
+      try {
+        setIsLoadingEmployees(true);
+        const response = await fetch("http://192.168.1.44:5000/api/employees");
+        if (response.ok) {
+          const data = await response.json();
+          setServerEmployees(data);
+        }
+      } catch (error) {
+        console.error("❌ خطأ أثناء جلب الكاشيرية:", error);
+      } finally {
+        setIsLoadingEmployees(false);
+      }
+    }
+    fetchEmployeesFallback();
+  }, [pos.employees, pos.employees.length]);
+
+  const activeEmployeesList =
+    pos.employees && pos.employees.length > 0 ? pos.employees : serverEmployees;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr("");
+
+    // 1️⃣ الفحص الأول: بدون تشفير (عشان يقبل الباسووردات القديمة أو اللي متسجلة نص عادي)
+    let emp = activeEmployeesList.find(
+      (x) =>
+        (x.pin === pin || x.pinHash === pin || x.pin_hash === pin) &&
+        x.role === "كاشير",
+    );
+
+    // 2️⃣ الفحص التاني: بالتشفير لو الأول فشل (زي الشاشة الرئيسية بالظبط)
+    if (!emp) {
+      emp = await findByPin(pin, "كاشير");
+    }
+
+    if (!emp) {
+      setErr("الرمز السري غير صحيح أو ليس لديك صلاحية كاشير");
+      return;
+    }
+
+    toast.success(`مرحباً بك يا ${emp.name} في جهاز الكاشير الفرعي`);
+    onLogin(emp.name, emp.id);
+  }
+
+  if (isLoadingEmployees) {
+    return (
+      <div className="flex items-center justify-center h-[70vh]" dir="rtl">
+        <p className="text-xl font-medium text-emerald-600 animate-pulse font-bold">
+          جاري التحقق من الكاشيرية المسجلين في السيرفر...
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      dir="rtl"
+      className="min-h-[70vh] grid place-items-center animate-in fade-in zoom-in-95 duration-300"
+    >
+      <form
+        onSubmit={submit}
+        className="bg-white border border-gray-200 rounded-3xl p-8 w-full max-w-sm space-y-6 shadow-2xl relative overflow-hidden"
+      >
+        <div className="absolute top-0 right-0 w-full h-2 bg-gradient-to-r from-emerald-400 to-teal-500" />
+        <div className="text-center space-y-2">
+          <div className="mx-auto w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mb-4 border border-emerald-100">
+            <ShieldCheck className="w-8 h-8" />
+          </div>
+          <h1 className="text-2xl font-extrabold text-gray-800">
+            الكاشير الفرعي
+          </h1>
+          <p className="text-sm font-medium text-gray-500">
+            أدخل الرمز السري لبدء العمل
+          </p>
+        </div>
+        <Input
+          type="password"
+          inputMode="numeric"
+          autoFocus
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          className="text-center text-3xl tracking-widest h-14 font-bold text-emerald-700 bg-gray-50 border-gray-200 rounded-xl focus-visible:ring-emerald-500"
+          placeholder="••••"
+        />
+        {err && (
+          <p className="text-sm font-bold text-red-500 text-center bg-red-50 py-2 rounded-lg">
+            {err}
+          </p>
+        )}
+        <Button
+          type="submit"
+          className="w-full h-14 text-lg font-bold bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md shadow-emerald-500/20"
+          disabled={!pin}
+        >
+          تسجيل الدخول
+        </Button>
+      </form>
+    </div>
+  );
+}
 function getNextInvoiceNumber(invoices: Invoice[]) {
   const today = new Date().toDateString();
   const todayInvoices = invoices.filter(
@@ -109,7 +249,7 @@ function ShiftLogin() {
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch("http://192.168.1.37:5000/api/employees");
+        const response = await fetch("http://192.168.1.44:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -168,62 +308,63 @@ function ShiftLogin() {
 
   return (
     <>
-      {isMicros && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-md animate-[fadeIn_0.2s_ease-out_forwards]">
-          {/* البوكس الأساسي - ثيم أبيض ونظيف مع حواف رمادية وإضاءة خضراء خفيفة */}
-          <div className="relative w-full max-w-md p-6 overflow-hidden border shadow-2xl bg-white rounded-2xl border-gray-200 animate-[scaleUp_0.3s_cubic-bezier(0.34,1.56,0.64,1)_forwards]">
-            {/* إضاءة نيون خضراء خافتة في الخلفية للحركة */}
-            <div className="absolute -top-12 -left-12 w-32 h-32 bg-emerald-100 rounded-full blur-3xl animate-pulse" />
-            <div className="absolute -bottom-12 -right-12 w-32 h-32 bg-gray-100 rounded-full blur-3xl animate-pulse" />
+      {isMicros ||
+        (isSecCashier && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-md animate-[fadeIn_0.2s_ease-out_forwards]">
+            {/* البوكس الأساسي - ثيم أبيض ونظيف مع حواف رمادية وإضاءة خضراء خفيفة */}
+            <div className="relative w-full max-w-md p-6 overflow-hidden border shadow-2xl bg-white rounded-2xl border-gray-200 animate-[scaleUp_0.3s_cubic-bezier(0.34,1.56,0.64,1)_forwards]">
+              {/* إضاءة نيون خضراء خافتة في الخلفية للحركة */}
+              <div className="absolute -top-12 -left-12 w-32 h-32 bg-emerald-100 rounded-full blur-3xl animate-pulse" />
+              <div className="absolute -bottom-12 -right-12 w-32 h-32 bg-gray-100 rounded-full blur-3xl animate-pulse" />
 
-            <div className="relative flex flex-col items-center text-center space-y-5">
-              {/* حاوية الأيقونة الخضراء مع أنيميشن نبض رادار (Ping) خفيف */}
-              <div className="relative flex items-center justify-center w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100">
-                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400/20 opacity-75 animate-ping" />
-                <ShieldCheck className="w-8 h-8 relative z-10 animate-bounce" />
-              </div>
-
-              {/* النصوص والعناوين باللون الرمادي الداكن والأخضر */}
-              <div className="space-y-2">
-                <h2 className="text-xl font-bold tracking-tight text-gray-800">
-                  حالة نظام الكاشير
-                </h2>
-                <p className="text-sm font-semibold leading-relaxed text-emerald-700 bg-emerald-50/60 border border-emerald-100/80 px-4 py-2.5 rounded-xl">
-                  لابد من فتح الشيفت في جهاز الكاشير الأساسي أولاً
-                </p>
-              </div>
-
-              {/* بطاقة توضيحية رمادية ناعمة لشرح الخطوة التالية */}
-              <div className="w-full p-4 text-right bg-gray-50 rounded-xl border border-gray-100 space-y-2">
-                <div className="flex items-center gap-2 text-gray-500 text-xs font-bold">
-                  <Monitor className="w-4 h-4 text-emerald-600" />
-                  <span>الخطوات المطلوبة:</span>
+              <div className="relative flex flex-col items-center text-center space-y-5">
+                {/* حاوية الأيقونة الخضراء مع أنيميشن نبض رادار (Ping) خفيف */}
+                <div className="relative flex items-center justify-center w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400/20 opacity-75 animate-ping" />
+                  <ShieldCheck className="w-8 h-8 relative z-10 animate-bounce" />
                 </div>
-                <p className="text-[11px] text-gray-600 leading-normal pr-5 relative">
-                  <span className="absolute right-1 top-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  توجه إلى الشاشة الرئيسية لجهاز الكاشير السيرفر (الأساسي)، قم
-                  بتسجيل الدخول وبدء وردية جديدة لتفعيل النظام على باقي الأجهزة
-                  الفرعية.
-                </p>
-              </div>
 
-              {/* أزرار التحكم - زر أساسي أخضر وزر فرعي رمادي */}
-              <div className="flex flex-col w-full gap-2 pt-2">
-                <button
-                  onClick={() => window.location.reload()}
-                  className="flex items-center justify-center gap-2 h-10 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-all shadow-sm group active:scale-[0.98]"
-                >
-                  <RefreshCw className="w-3.5 h-3.5 transition-transform group-hover:rotate-180 duration-500" />
-                  إعادة فحص حالة الشيفت
-                </button>
+                {/* النصوص والعناوين باللون الرمادي الداكن والأخضر */}
+                <div className="space-y-2">
+                  <h2 className="text-xl font-bold tracking-tight text-gray-800">
+                    حالة نظام الكاشير
+                  </h2>
+                  <p className="text-sm font-semibold leading-relaxed text-emerald-700 bg-emerald-50/60 border border-emerald-100/80 px-4 py-2.5 rounded-xl">
+                    لابد من فتح الشيفت في جهاز الكاشير الأساسي أولاً
+                  </p>
+                </div>
+
+                {/* بطاقة توضيحية رمادية ناعمة لشرح الخطوة التالية */}
+                <div className="w-full p-4 text-right bg-gray-50 rounded-xl border border-gray-100 space-y-2">
+                  <div className="flex items-center gap-2 text-gray-500 text-xs font-bold">
+                    <Monitor className="w-4 h-4 text-emerald-600" />
+                    <span>الخطوات المطلوبة:</span>
+                  </div>
+                  <p className="text-[11px] text-gray-600 leading-normal pr-5 relative">
+                    <span className="absolute right-1 top-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    توجه إلى الشاشة الرئيسية لجهاز الكاشير السيرفر (الأساسي)، قم
+                    بتسجيل الدخول وبدء وردية جديدة لتفعيل النظام على باقي
+                    الأجهزة الفرعية.
+                  </p>
+                </div>
+
+                {/* أزرار التحكم - زر أساسي أخضر وزر فرعي رمادي */}
+                <div className="flex flex-col w-full gap-2 pt-2">
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="flex items-center justify-center gap-2 h-10 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-all shadow-sm group active:scale-[0.98]"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 transition-transform group-hover:rotate-180 duration-500" />
+                    إعادة فحص حالة الشيفت
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* الـ Keyframes حق الأنيميشن مدمجة هنا عشان تشتغل تلقائياً بدون تعديل tailwind.config */}
-          <style
-            dangerouslySetInnerHTML={{
-              __html: `
+            {/* الـ Keyframes حق الأنيميشن مدمجة هنا عشان تشتغل تلقائياً بدون تعديل tailwind.config */}
+            <style
+              dangerouslySetInnerHTML={{
+                __html: `
         @keyframes fadeIn {
           from { opacity: 0; }
           to { opacity: 1; }
@@ -233,10 +374,10 @@ function ShiftLogin() {
           to { transform: scale(1); opacity: 1; }
         }
       `,
-            }}
-          />
-        </div>
-      )}
+              }}
+            />
+          </div>
+        ))}
       {!isMicros && (
         <div dir="rtl" className="min-h-[70vh] grid place-items-center">
           <form
@@ -295,6 +436,7 @@ function PosScreen() {
   const [isMicros, setIsMicros] = useState(() => {
     return localStorage.getItem("isMicrosDevice") === "true";
   });
+  const isSecCashier = localStorage.getItem("isSecCashierDevice") === "true";
 
   // 🌟 دالة فتح الطاولة وإرسال قفل الحماية للستور بالترتيب الصحيح
   function handleOpenOrder(code: string | null) {
@@ -418,7 +560,7 @@ function PosScreen() {
 
     try {
       const res = await fetch(
-        "http://192.168.1.37:5000/api/pos/verify-captain",
+        "http://192.168.1.44:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -474,23 +616,37 @@ function PosScreen() {
       return toast.error("لا يوجد طلب على هذه الطاولة");
     setCheckoutConfirm(selectedTable);
   }
+  // 🌟 1. تحديد بيانات الكاشير الفرعي ودالة تسجيل الخروج الذكية
+  const secCashierName = localStorage.getItem("secCashierName");
+
+  function handleLogout() {
+    if (isSecCashier) {
+      localStorage.removeItem("secCashierName");
+      localStorage.removeItem("secCashierId");
+      window.location.reload(); // يرجعه لشاشة الـ PIN الفرعية
+    } else {
+      closeShift({
+        kitchenSales: 0,
+        barSales: 0,
+        shishaSales: 0,
+        taxValue: 0,
+        discountValue: 0,
+        dineinSales: 0,
+        takeawaySales: 0,
+        deliverySales: 0,
+      });
+    }
+  }
+
+  const currentCashierName = isSecCashier
+    ? secCashierName || "كاشير فرعي"
+    : pos.shift?.cashierName || "جاري التحميل...";
 
   if (zone === "takeaway") {
     return (
       <PosFrame
-        onLogout={() =>
-          closeShift({
-            kitchenSales: 0,
-            barSales: 0,
-            shishaSales: 0,
-            taxValue: 0,
-            discountValue: 0,
-            dineinSales: 0,
-            takeawaySales: 0,
-            deliverySales: 0,
-          })
-        }
-        cashierName={pos.shift?.cashierName || "جاري التحميل..."}
+        onLogout={handleLogout} // 👈 التعديل هنا
+        cashierName={currentCashierName} // 👈 التعديل هنا
         zoneTabs={<ZoneTabs zone={zone} setZone={setZone} />}
       >
         <TakeawayView onOpenOrder={(code) => handleOpenOrder(code)} />
@@ -509,19 +665,8 @@ function PosScreen() {
 
   return (
     <PosFrame
-      onLogout={() =>
-        closeShift({
-          kitchenSales: 0,
-          barSales: 0,
-          shishaSales: 0,
-          taxValue: 0,
-          discountValue: 0,
-          dineinSales: 0,
-          takeawaySales: 0,
-          deliverySales: 0,
-        })
-      }
-      cashierName={pos.shift?.cashierName || "جاري التحميل..."}
+      onLogout={handleLogout} // 👈 التعديل هنا
+      cashierName={currentCashierName} // 👈 التعديل هنا
       zoneTabs={<ZoneTabs zone={zone} setZone={setZone} />}
     >
       <div className="px-4 pt-3 flex gap-2 items-center shrink-0">
@@ -1198,7 +1343,14 @@ function OrderEntryDialog({
         }
         finalDeliveryPrice = Number(inputPrice) || 0;
         const computedType = finalDeliveryPrice > 0 ? "delivery" : "takeaway";
-
+        const isSecCashier =
+          localStorage.getItem("isSecCashierDevice") === "true";
+        const currentCashierName = isSecCashier
+          ? localStorage.getItem("secCashierName")
+          : pos.shift?.cashierName;
+        const currentCashierId = isSecCashier
+          ? localStorage.getItem("secCashierId")
+          : pos.shift?.cashierId;
         const inv: any = {
           id: crypto.randomUUID(),
           invoiceNumber: Math.floor(100000 + Math.random() * 900000),
@@ -1207,8 +1359,8 @@ function OrderEntryDialog({
           zone: "takeaway",
           customerName: order.customerName || null,
           customerAddress: order.customerAddress || null,
-          cashierId: pos.shift?.cashierId || null,
-          cashierName: pos.shift?.cashierName || null,
+          cashierId: currentCashierId || null,
+          cashierName: currentCashierName || null,
           captainName: (order as any).captainName || null,
           items: draftItems, // 🌟 استخدام المسودة هنا
           subtotal: totals.subtotal,
@@ -1968,6 +2120,14 @@ function CheckoutDialog({
 
       const deliveryPrice = (currentOrder as any).deliveryPrice || 0;
       const total = subtotal - discountValue + taxValue + deliveryPrice;
+      const isSecCashier =
+        localStorage.getItem("isSecCashierDevice") === "true";
+      const currentCashierName = isSecCashier
+        ? localStorage.getItem("secCashierName")
+        : pos.shift?.cashierName;
+      const currentCashierId = isSecCashier
+        ? localStorage.getItem("secCashierId")
+        : pos.shift?.cashierId;
 
       // 2️⃣ تعريف كائن الفاتورة الـ 'inv' اللي كان ناقص[cite: 12]
       const inv: any = {
@@ -1982,8 +2142,8 @@ function CheckoutDialog({
         zone: currentOrder.zone || (isTakeaway ? "takeaway" : "dine-in"),
         customerName: currentOrder.customerName || null,
         customerAddress: currentOrder.customerAddress || null,
-        cashierId: pos.shift?.cashierId || null,
-        cashierName: pos.shift?.cashierName || null,
+        cashierId: currentCashierId || null,
+        cashierName: currentCashierName || null,
         items: currentOrder.items,
         subtotal: subtotal,
         discountPct: currentOrder.discountPct || 0,

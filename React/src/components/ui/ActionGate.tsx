@@ -54,7 +54,7 @@ export default function ActionGate({
 
   useEffect(() => {
     if (isOpen && employees.length === 0) {
-      fetch("http://192.168.1.37:5000/api/employees")
+      fetch("http://192.168.1.44:5000/api/employees")
         .then((res) => res.json())
         .then((data: Employee[]) => setEmployees(data))
         .catch((err) => console.error("Error fetching employees:", err));

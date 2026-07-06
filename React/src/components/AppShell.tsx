@@ -85,7 +85,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const syncDeviceTypeWithServer = async () => {
       try {
-        const res = await fetch("http://192.168.1.37:5000/api/device-check");
+        const res = await fetch("http://192.168.1.44:5000/api/device-check");
         const data = await res.json();
         const fetchedType = data.deviceType; // "main" أو "micros" أو "sec_cashier"
 
@@ -238,17 +238,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
 
           {/* 🔴 زرار الخروج (مخفي من الميكروس) */}
-            <button className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg font-bold text-red-500 hover:bg-red-50 hover:text-red-600 transition-all duration-300 border border-transparent hover:border-red-100">
-              <UserPen className="w-4 h-4" />
-              <span className="hidden sm:inline">ENG: Youssif Hamed</span>
-            </button>
-
+          <button className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg font-bold text-red-500 hover:bg-red-50 hover:text-red-600 transition-all duration-300 border border-transparent hover:border-red-100">
+            <UserPen className="w-4 h-4" />
+            <span className="hidden sm:inline">ENG: Youssif Hamed</span>
+          </button>
         </div>
 
         {/* 📱 قائمة الشاشات الصغيرة / التابلت */}
         <nav className="md:hidden flex overflow-x-auto gap-2 px-4 pb-3 pt-2 hide-scrollbar">
           {[
-            ...( isSecCashier || isMain ? warehouseNav : []),
+            ...(isSecCashier || isMain ? warehouseNav : []),
             ...primaryNav.filter((n) => n.showFor.includes(deviceType)),
           ].map((n) => {
             const active = pathname === n.to;

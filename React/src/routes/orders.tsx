@@ -1242,31 +1242,34 @@ function OrderEntryDialog({
   function manufacturable(meal: Meal): number | null {
     if (meal.category === SHISHA_CATEGORY) return null;
     if (!meal.ingredients || meal.ingredients.length === 0) return 0;
+
     const dbRaw = db as unknown as Record<string, unknown>;
-    const allOrders = Object.values(
-      (dbRaw.orders as Record<string, unknown>[]) || {},
-    );
+
+    // 🌟 التعديل السحري هنا: ربطناها بالـ pos.orders الجديدة بدل القديمة
+    const allOrders = Object.values(pos.orders || {});
+
     let min = Infinity;
     for (const ing of meal.ingredients) {
       if (ing.refKind === "meal") continue;
       const it = items.find((x) => x.id === ing.itemId);
       if (!it) return 0;
-      const reservedQty = allOrders.reduce((sum: number, order: unknown) => {
-        const typedOrder = order as Record<string, unknown>;
-        const itemsList =
-          (typedOrder.items as Array<Record<string, unknown>>) || [];
-        const mealsUsingIt = itemsList.filter((i) => i.mealId === meal.id);
+
+      const reservedQty = allOrders.reduce((sum: number, order: any) => {
+        const itemsList = order.items || [];
+        const mealsUsingIt = itemsList.filter((i: any) => i.mealId === meal.id);
         const count = mealsUsingIt.reduce(
-          (s, i) => s + ((i.qty as number) || 0),
+          (s: number, i: any) => s + (i.qty || 0),
           0,
         );
         return sum + count * (ing.qty as number);
       }, 0);
+
       const targetDept = (meal.department || it.department) as "بار" | "مطبخ";
       const totalHave =
         (dbRaw.deptStock as Record<string, number>)?.[
           deptKey(targetDept, it.id)
         ] || 0;
+
       const have = clamp0(totalHave - reservedQty);
       const conversion =
         it.conversionFactor && it.conversionFactor > 0
@@ -1279,10 +1282,43 @@ function OrderEntryDialog({
         conversion,
         it.subUnitType as Parameters<typeof convertToBase>[4],
       );
+
       if (needBase <= 0) continue;
       min = Math.min(min, Math.floor(have / needBase));
     }
     return min === Infinity ? 99 : Math.max(0, min);
+  }
+  // 🌟 استرجاع دالة السحب الخاصة بالتيك أواي
+  function deductInventoryForTakeaway() {
+    const perDept: Record<string, { itemId: string; baseQty: number }[]> = {};
+    for (const line of draftItems) {
+      // بتسحب من مسودة الطلب
+      const meal = db.meals.find((m) => m.id === line.mealId);
+      if (!meal) continue;
+      if (meal.category === SHISHA_CATEGORY) continue;
+      const dept = meal.department || "عام";
+      for (const ing of meal.ingredients) {
+        if (ing.refKind === "meal") continue;
+        const it = db.items.find((x) => x.id === ing.itemId);
+        if (!it) continue;
+        const baseQty = round2(
+          clamp0(
+            convertToBase(
+              ing.qty,
+              ing.unit,
+              it.unit,
+              it.conversionFactor,
+              it.subUnitType,
+            ) * line.qty,
+          ),
+        );
+        if (baseQty <= 0) continue;
+        (perDept[dept] = perDept[dept] || []).push({ itemId: it.id, baseQty });
+      }
+    }
+    for (const [d, arr] of Object.entries(perDept)) {
+      deductSubStock(d as SubDept, arr);
+    }
   }
 
   // 🌟 التعديلات على المسودة (لا تُرسل للسيرفر فوراً)
@@ -1374,7 +1410,7 @@ function OrderEntryDialog({
         };
 
         await addInvoice(inv);
-
+        deductInventoryForTakeaway();
         if (order.customerName) {
           const c = pos.customers.find((c) => c.name === order.customerName);
           if (c) incCustomerOrders(c.id);

@@ -300,6 +300,8 @@ function defaultDB(): DB {
     meals: [],
     sales: [],
     audits: [],
+    shifts: [], // 🌟 ضفنا دي
+    invoices: [], // 🌟 وضفنا دي
     shift: null, // 🌟 الـ shift مطلوب في الـ DB
     // shift: [], // 🌟 حطينا المصفوفة الاحتياطية للورديات
   };
@@ -315,6 +317,8 @@ function migrate(db: any): DB {
   const base = defaultDB();
   const out: DB = {
     orders: db.orders,
+    shifts: Array.isArray(db.shifts) ? db.shifts : base.shifts, // 🌟 تحديث المايجريشن
+    invoices: Array.isArray(db.invoices) ? db.invoices : base.invoices, // 🌟 تحديث المايجريشن
     updateDeptStock: db.updateDeptStock,
     items: Array.isArray(db.items) ? db.items : base.items,
     vouchers: Array.isArray(db.vouchers) ? db.vouchers : [],
@@ -453,6 +457,8 @@ export function useDB() {
       : {
           orders: undefined as any,
           updateDeptStock: undefined as any,
+          shifts: [],       // 🌟 إضافة عشان التايب سكريبت
+          invoices: [],     // 🌟 إضافة عشان التايب سكريبت
           items: [],
           vouchers: [],
           deptStock: {},
@@ -1096,15 +1102,43 @@ export function useDB() {
   );
 
   const deductSubStock = useCallback(
-    (dept: SubDept, deltas: { itemId: string; baseQty: number }[]) => {
+    async (dept: SubDept, deltas: { itemId: string; baseQty: number }[]) => {
       const cur = load();
+      const updates = []; // 🌟 مصفوفة لتجميع الداتا اللي هتترفع للسيرفر
+
       for (const d of deltas) {
         const k = deptKey(dept, d.itemId);
-        cur.deptStock[k] = round2(
+        const newQty = round2(
           clamp0((cur.deptStock[k] || 0) - clamp0(d.baseQty)),
         );
+        cur.deptStock[k] = newQty; // الخصم المحلي
+
+        // تجهيز الداتا للإرسال
+        const itemName =
+          cur.items.find((i) => i.id === d.itemId)?.name || "غير محدد";
+        updates.push({
+          itemId: d.itemId,
+          itemName: itemName,
+          department: dept,
+          qty: newQty,
+        });
       }
+
       save(cur);
+      setDb(cur); // 🌟🌟 السطر ده اللي بيعمل Refresh للشاشة فوراً وتشوف الرقم الجديد!
+
+      // 🌟🌟 رفع الخصم على الداتابيز (pgAdmin)
+      for (const u of updates) {
+        try {
+          await fetch("http://192.168.1.44:5000/api/dept-stock", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(u),
+          });
+        } catch (err) {
+          console.error(`❌ فشل خصم رصيد ${u.department} من الداتابيز:`, err);
+        }
+      }
     },
     [],
   );

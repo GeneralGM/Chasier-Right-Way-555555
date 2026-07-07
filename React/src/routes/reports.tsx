@@ -19,6 +19,7 @@ import {
   LogOut,
   Bike,
 } from "lucide-react";
+import { toast } from "sonner";
 // شلنا الـ toast لو مش مستخدمة تحت
 
 export const Route = createFileRoute("/reports")({
@@ -111,6 +112,146 @@ function ReportsPage() {
       revenues: clamp0(finalNetCash),
     };
   }, [currentShiftInvoices, db.meals]);
+  // 🌟 دالة طباعة تقرير الوردية بدون تقفيل (X-Report)
+  const printCurrentReport = () => {
+    if (!pos.shift) {
+      toast.error("لا يوجد وردية مفتوحة للطباعة");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=600,height=800");
+    if (!printWindow) {
+      toast.error("يرجى السماح بالنوافذ المنبثقة (Pop-ups) للطباعة");
+      return;
+    }
+
+    // 💡 تجهيز المتغيرات للطباعة من الـ stats
+    const shiftOpenTime = new Date(pos.shift.openedAt).toLocaleString("ar-EG");
+    const shiftCloseTime = new Date().toLocaleString("ar-EG"); // الوقت الحالي لأن الشيفت لسه مفتوح
+    const cashierName = pos.shift.cashierName;
+
+    // حسابات الأقسام
+    const totalDineIn = stats.revenues - stats.takeaway - stats.deliveryTotal; // الصالة بس
+    const totalBar = stats.bar;
+    const totalShisha = stats.shisha;
+    const totalTakeaway = stats.takeaway;
+    const totalDelivery = stats.deliveryTotal;
+
+    const totalHospitality = 0; // لو عندك ضيافة مستقبلا
+    const totalTax = stats.tax;
+    const totalDiscount = stats.discount;
+    const netSales = stats.revenues;
+    const totalDeliveryFee = stats.deliveryFees; // رسوم التوصيل والخدمة
+
+    // طرق الدفع (مؤقتاً بنعتبر كله كاش لحد ما تفصلهم في السيستم)
+    const cashTotal = stats.total;
+    const visaTotal = 0;
+    const expectedDrawer = stats.total;
+
+    const htmlContent = `
+      <html dir="rtl">
+        <head>
+          <title>تقرير الوردية</title>
+          <style>
+            @page { margin: 0; size: auto; }
+            body {
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+              width: 100%;
+              max-width: 80mm;
+              margin: 0 auto;
+              padding: 10px 5px;
+              color: #000;
+              background: #fff;
+              font-size: 13px;
+              line-height: 1.5;
+              box-sizing: border-box;
+            }
+            h2 { text-align: center; margin: 0 0 10px 0; font-size: 18px; font-weight: bold; text-decoration: underline; }
+            .header-box {
+              border: 1.5px solid #000;
+              padding: 6px;
+              margin-bottom: 12px;
+              font-size: 12px;
+              font-weight: bold;
+            }
+            .header-row {
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 4px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 12px;
+              font-size: 13px;
+            }
+            th, td {
+              border: 1.5px solid #000;
+              padding: 5px;
+            }
+            td:first-child { width: 65%; font-weight: bold; }
+            td:last-child { width: 35%; text-align: center; font-family: monospace; font-size: 14px;}
+            .table-header {
+              text-align: center !important;
+              background-color: #f0f0f0 !important;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+              font-weight: bold;
+              font-size: 14px;
+            }
+            .bold { font-weight: bold; }
+          </style>
+        </head>
+        <body onload="setTimeout(() => { window.print(); window.close(); }, 500);">
+          
+          <h2>تقرير وردية (مؤقت)</h2>
+          
+          <div class="header-box">
+            <div class="header-row">
+              <span>من:</span>
+              <span dir="ltr">${shiftOpenTime}</span>
+            </div>
+            <div class="header-row">
+              <span>إلى:</span>
+              <span dir="ltr">${shiftCloseTime}</span>
+            </div>
+            <div class="header-row">
+              <span>الكاشير:</span>
+              <span>${cashierName || "غير معروف"}</span>
+            </div> 
+          </div>
+            
+          <table>
+            <tr><td colspan="2" class="table-header">تفاصيل المبيعات</td></tr>
+            <tr><td>صالة</td><td class="bold">${totalDineIn.toFixed(2)}</td></tr>
+            <tr><td>بار</td><td class="bold">${totalBar.toFixed(2)}</td></tr>
+            <tr><td>شيشة</td><td class="bold">${totalShisha.toFixed(2)}</td></tr>
+            <tr><td>ضيافة</td><td class="bold">${totalHospitality.toFixed(2)}</td></tr>
+            <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
+            <tr><td>تيك اواي</td><td class="bold">${totalTakeaway.toFixed(2)}</td></tr>
+            <tr><td>دليفري</td><td class="bold">${totalDelivery.toFixed(2)}</td></tr>
+            <tr><td>إجمالي الخصم</td><td class="bold">${totalDiscount.toFixed(2)}</td></tr>
+            <tr><td>إجمالي الإيرادات</td><td class="bold">${netSales.toFixed(2)}</td></tr>
+            <tr><td>إجمالي الخدمة/التوصيل</td><td class="bold">${totalDeliveryFee.toFixed(2)}</td></tr>
+          </table>
+
+          <table>
+            <tr><td colspan="2" class="table-header">طرق الدفع</td></tr>
+            <tr><td>نقدي</td><td class="bold">${cashTotal.toFixed(2)}</td></tr>
+            <tr><td>فيزا</td><td class="bold">${visaTotal.toFixed(2)}</td></tr>
+          </table>
+
+          <table>
+            <tr><td>الرصيد النهائي بالدرج</td><td class="bold">${expectedDrawer.toFixed(2)}</td></tr>
+          </table>
+
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
 
   async function closeShiftAndLogout() {
     // 1. طلب الفلوس الفعلية من الكاشير لعد الخزنة
@@ -123,7 +264,7 @@ function ReportsPage() {
     const isSecCashier = localStorage.getItem("isSecCashierDevice") === "true";
     const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
 
-    // 2. إرسال البيانات
+    // 2. إرسال البيانات للسيرفر
     const responseData = await closeShift({
       kitchenSales: stats.kitchen,
       barSales: stats.bar,
@@ -138,7 +279,7 @@ function ReportsPage() {
     } as any);
 
     if (responseData) {
-      // 3. طباعة بون حراري صغير (Z-Report)
+      // 3. طباعة بون حراري Z-Report بالتصميم الجديد المدمج
       if (responseData.auditReport) {
         const report = responseData.auditReport;
         const variance = report.variance;
@@ -146,43 +287,128 @@ function ReportsPage() {
         if (variance < 0) varianceStatus = `عجز: ${Math.abs(variance)} ج.م 🔴`;
         else if (variance > 0) varianceStatus = `زيادة: ${variance} ج.م 🔵`;
 
-        const printWindow = window.open("", "_blank");
+        // تجهيز متغيرات الأقسام للطباعة
+        const totalDineIn =
+          stats.revenues - stats.takeaway - stats.deliveryTotal;
+        const totalBar = stats.bar;
+        const totalShisha = stats.shisha;
+        const totalTakeaway = stats.takeaway;
+        const totalDelivery = stats.deliveryTotal;
+        const totalTax = stats.tax;
+        const totalDiscount = stats.discount;
+        const netSales = stats.revenues;
+        const totalDeliveryFee = stats.deliveryFees;
+        const shiftOpenTime = new Date(pos.shift!.openedAt).toLocaleString(
+          "ar-EG",
+        );
+        const shiftCloseTime = new Date().toLocaleString("ar-EG");
+
+        const printWindow = window.open("", "_blank", "width=600,height=800");
         if (printWindow) {
           printWindow.document.write(`
             <html dir="rtl">
               <head>
-                <title>تقرير تقفيل وردية</title>
+                <title>تقرير تقفيل وردية نهائي</title>
                 <style>
-                  body { font-family: 'Courier New', Courier, monospace; text-align: center; padding: 10px; width: 280px; margin: 0 auto; font-size: 13px; }
-                  .title { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
-                  .divider { border-top: 1px dashed #000; margin: 8px 0; }
-                  .row { display: flex; justify-content: space-between; margin: 4px 0; }
+                  @page { margin: 0; size: auto; }
+                  body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    width: 100%;
+                    max-width: 80mm;
+                    margin: 0 auto;
+                    padding: 10px 5px;
+                    color: #000;
+                    background: #fff;
+                    font-size: 13px;
+                    line-height: 1.5;
+                    box-sizing: border-box;
+                  }
+                  h2 { text-align: center; margin: 0 0 10px 0; font-size: 18px; font-weight: bold; text-decoration: underline; }
+                  .header-box {
+                    border: 1.5px solid #000;
+                    padding: 6px;
+                    margin-bottom: 12px;
+                    font-size: 12px;
+                    font-weight: bold;
+                  }
+                  .header-row {
+                    display: flex;
+                    justify-content: space-between;
+                    margin-bottom: 4px;
+                  }
+                  table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 12px;
+                    font-size: 13px;
+                  }
+                  th, td {
+                    border: 1.5px solid #000;
+                    padding: 5px;
+                  }
+                  td:first-child { width: 65%; font-weight: bold; }
+                  td:last-child { width: 35%; text-align: center; font-family: monospace; font-size: 14px;}
+                  .table-header {
+                    text-align: center !important;
+                    background-color: #f0f0f0 !important;
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                    font-weight: bold;
+                    font-size: 14px;
+                  }
                   .bold { font-weight: bold; }
-                  .status { font-size: 14px; margin-top: 8px; background: #eee; padding: 5px; font-weight: bold; border: 1px solid #ccc; }
+                  .variance-row td { background-color: #eee; -webkit-print-color-adjust: exact; }
                 </style>
               </head>
-              <body>
-                <div class="title">مجمع المول - Z Report</div>
-                <div>جهاز: ${currentTerminalId}</div>
-                <div>الكاشير: ${pos.shift?.cashierName || "كاشير"}</div>
-                <div>التاريخ: ${new Date().toLocaleDateString("ar-EG")}</div>
-                <div>الوقت: ${new Date().toLocaleTimeString("ar-EG")}</div>
+              <body onload="setTimeout(() => { window.print(); window.close(); }, 500);">
                 
-                <div class="divider"></div>
-                <div class="row bold"><span>نوع المبيعات</span><span>المبلغ</span></div>
-                <div class="divider"></div>
-                <div class="row"><span>صالة</span><span>${report.dineinTotal} ج</span></div>
-                <div class="row"><span>تيك أواي</span><span>${report.takeawayTotal} ج</span></div>
-                <div class="row"><span>دليفري</span><span>${report.deliveryTotal} ج</span></div>
+                <h2>Z-Report تقرير وردية</h2>
                 
-                <div class="divider"></div>
-                <div class="row bold"><span>إجمالي السيستم:</span><span>${report.databaseTotalSales} ج</span></div>
-                <div class="row bold"><span>الكاش بالدرج:</span><span>${report.actualCashReceived} ج</span></div>
-                
-                <div class="status">التسوية: ${varianceStatus}</div>
-                <div class="divider"></div>
-                <p style="font-size: 11px;">تم الجرد آلياً من قاعدة البيانات لهذا الجهاز</p>
-                <script>window.onload = function() { window.print(); window.close(); };</script>
+                <div class="header-box">
+                  <div class="header-row">
+                    <span>الجهاز:</span>
+                    <span dir="ltr">${currentTerminalId}</span>
+                  </div>
+                  <div class="header-row">
+                    <span>من:</span>
+                    <span dir="ltr">${shiftOpenTime}</span>
+                  </div>
+                  <div class="header-row">
+                    <span>إلى:</span>
+                    <span dir="ltr">${shiftCloseTime}</span>
+                  </div>
+                  <div class="header-row">
+                    <span>الكاشير:</span>
+                    <span>${pos.shift?.cashierName || "غير معروف"}</span>
+                  </div> 
+                </div>
+                  
+                <table>
+                  <tr><td colspan="2" class="table-header">تفاصيل المبيعات</td></tr>
+                  <tr><td>صالة</td><td class="bold">${totalDineIn.toFixed(2)}</td></tr>
+                  <tr><td>بار</td><td class="bold">${totalBar.toFixed(2)}</td></tr>
+                  <tr><td>شيشة</td><td class="bold">${totalShisha.toFixed(2)}</td></tr>
+                  <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
+                  <tr><td>تيك اواي</td><td class="bold">${totalTakeaway.toFixed(2)}</td></tr>
+                  <tr><td>دليفري</td><td class="bold">${totalDelivery.toFixed(2)}</td></tr>
+                  <tr><td>إجمالي الخصم</td><td class="bold">${totalDiscount.toFixed(2)}</td></tr>
+                  <tr><td>إجمالي الإيرادات</td><td class="bold">${netSales.toFixed(2)}</td></tr>
+                  <tr><td>إجمالي الخدمة / التوصيل</td><td class="bold">${totalDeliveryFee.toFixed(2)}</td></tr>
+                </table>
+
+                <table>
+                  <tr><td colspan="2" class="table-header">طرق الدفع</td></tr>
+                  <tr><td>نقدي (المدخل فعلياً)</td><td class="bold">${report.actualCashReceived.toFixed(2)}</td></tr>
+                  <tr><td>فيزا</td><td class="bold">0.00</td></tr>
+                </table>
+
+                <table>
+                  <tr><td colspan="2" class="table-header">تسوية العهدة (الجرد)</td></tr>
+                  <tr><td>إجمالي السيستم المطلوب</td><td class="bold">${report.databaseTotalSales.toFixed(2)}</td></tr>
+                  <tr><td>الكاش الفعلي بالدرج</td><td class="bold">${report.actualCashReceived.toFixed(2)}</td></tr>
+                  <tr class="variance-row"><td>نتيجة الجرد</td><td class="bold" style="font-size: 12px;">${varianceStatus}</td></tr>
+                </table>
+
               </body>
             </html>
           `);

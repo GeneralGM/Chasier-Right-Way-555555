@@ -105,9 +105,7 @@ function SecCashierLogin({
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch(
-          "http://192.168.100.195:5000/api/employees",
-        );
+        const response = await fetch("http://192.168.1.44:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -251,9 +249,7 @@ function ShiftLogin() {
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch(
-          "http://192.168.100.195:5000/api/employees",
-        );
+        const response = await fetch("http://192.168.1.44:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -312,63 +308,62 @@ function ShiftLogin() {
 
   return (
     <>
-      {isMicros ||
-        (isSecCashier && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-md animate-[fadeIn_0.2s_ease-out_forwards]">
-            {/* البوكس الأساسي - ثيم أبيض ونظيف مع حواف رمادية وإضاءة خضراء خفيفة */}
-            <div className="relative w-full max-w-md p-6 overflow-hidden border shadow-2xl bg-white rounded-2xl border-gray-200 animate-[scaleUp_0.3s_cubic-bezier(0.34,1.56,0.64,1)_forwards]">
-              {/* إضاءة نيون خضراء خافتة في الخلفية للحركة */}
-              <div className="absolute -top-12 -left-12 w-32 h-32 bg-emerald-100 rounded-full blur-3xl animate-pulse" />
-              <div className="absolute -bottom-12 -right-12 w-32 h-32 bg-gray-100 rounded-full blur-3xl animate-pulse" />
+      {isMicros && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-md animate-[fadeIn_0.2s_ease-out_forwards]">
+          {/* البوكس الأساسي - ثيم أبيض ونظيف مع حواف رمادية وإضاءة خضراء خفيفة */}
+          <div className="relative w-full max-w-md p-6 overflow-hidden border shadow-2xl bg-white rounded-2xl border-gray-200 animate-[scaleUp_0.3s_cubic-bezier(0.34,1.56,0.64,1)_forwards]">
+            {/* إضاءة نيون خضراء خافتة في الخلفية للحركة */}
+            <div className="absolute -top-12 -left-12 w-32 h-32 bg-emerald-100 rounded-full blur-3xl animate-pulse" />
+            <div className="absolute -bottom-12 -right-12 w-32 h-32 bg-gray-100 rounded-full blur-3xl animate-pulse" />
 
-              <div className="relative flex flex-col items-center text-center space-y-5">
-                {/* حاوية الأيقونة الخضراء مع أنيميشن نبض رادار (Ping) خفيف */}
-                <div className="relative flex items-center justify-center w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100">
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400/20 opacity-75 animate-ping" />
-                  <ShieldCheck className="w-8 h-8 relative z-10 animate-bounce" />
-                </div>
+            <div className="relative flex flex-col items-center text-center space-y-5">
+              {/* حاوية الأيقونة الخضراء مع أنيميشن نبض رادار (Ping) خفيف */}
+              <div className="relative flex items-center justify-center w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400/20 opacity-75 animate-ping" />
+                <ShieldCheck className="w-8 h-8 relative z-10 animate-bounce" />
+              </div>
 
-                {/* النصوص والعناوين باللون الرمادي الداكن والأخضر */}
-                <div className="space-y-2">
-                  <h2 className="text-xl font-bold tracking-tight text-gray-800">
-                    حالة نظام الكاشير
-                  </h2>
-                  <p className="text-sm font-semibold leading-relaxed text-emerald-700 bg-emerald-50/60 border border-emerald-100/80 px-4 py-2.5 rounded-xl">
-                    لابد من فتح الشيفت في جهاز الكاشير الأساسي أولاً
-                  </p>
-                </div>
+              {/* النصوص والعناوين باللون الرمادي الداكن والأخضر */}
+              <div className="space-y-2">
+                <h2 className="text-xl font-bold tracking-tight text-gray-800">
+                  حالة نظام الكاشير
+                </h2>
+                <p className="text-sm font-semibold leading-relaxed text-emerald-700 bg-emerald-50/60 border border-emerald-100/80 px-4 py-2.5 rounded-xl">
+                  لابد من فتح الشيفت في جهاز الكاشير الأساسي أولاً
+                </p>
+              </div>
 
-                {/* بطاقة توضيحية رمادية ناعمة لشرح الخطوة التالية */}
-                <div className="w-full p-4 text-right bg-gray-50 rounded-xl border border-gray-100 space-y-2">
-                  <div className="flex items-center gap-2 text-gray-500 text-xs font-bold">
-                    <Monitor className="w-4 h-4 text-emerald-600" />
-                    <span>الخطوات المطلوبة:</span>
-                  </div>
-                  <p className="text-[11px] text-gray-600 leading-normal pr-5 relative">
-                    <span className="absolute right-1 top-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    توجه إلى الشاشة الرئيسية لجهاز الكاشير السيرفر (الأساسي)، قم
-                    بتسجيل الدخول وبدء وردية جديدة لتفعيل النظام على باقي
-                    الأجهزة الفرعية.
-                  </p>
+              {/* بطاقة توضيحية رمادية ناعمة لشرح الخطوة التالية */}
+              <div className="w-full p-4 text-right bg-gray-50 rounded-xl border border-gray-100 space-y-2">
+                <div className="flex items-center gap-2 text-gray-500 text-xs font-bold">
+                  <Monitor className="w-4 h-4 text-emerald-600" />
+                  <span>الخطوات المطلوبة:</span>
                 </div>
+                <p className="text-[11px] text-gray-600 leading-normal pr-5 relative">
+                  <span className="absolute right-1 top-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  توجه إلى الشاشة الرئيسية لجهاز الكاشير السيرفر (الأساسي)، قم
+                  بتسجيل الدخول وبدء وردية جديدة لتفعيل النظام على باقي الأجهزة
+                  الفرعية.
+                </p>
+              </div>
 
-                {/* أزرار التحكم - زر أساسي أخضر وزر فرعي رمادي */}
-                <div className="flex flex-col w-full gap-2 pt-2">
-                  <button
-                    onClick={() => window.location.reload()}
-                    className="flex items-center justify-center gap-2 h-10 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-all shadow-sm group active:scale-[0.98]"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5 transition-transform group-hover:rotate-180 duration-500" />
-                    إعادة فحص حالة الشيفت
-                  </button>
-                </div>
+              {/* أزرار التحكم - زر أساسي أخضر وزر فرعي رمادي */}
+              <div className="flex flex-col w-full gap-2 pt-2">
+                <button
+                  onClick={() => window.location.reload()}
+                  className="flex items-center justify-center gap-2 h-10 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-all shadow-sm group active:scale-[0.98]"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 transition-transform group-hover:rotate-180 duration-500" />
+                  إعادة فحص حالة الشيفت
+                </button>
               </div>
             </div>
+          </div>
 
-            {/* الـ Keyframes حق الأنيميشن مدمجة هنا عشان تشتغل تلقائياً بدون تعديل tailwind.config */}
-            <style
-              dangerouslySetInnerHTML={{
-                __html: `
+          {/* الـ Keyframes حق الأنيميشن مدمجة هنا عشان تشتغل تلقائياً بدون تعديل tailwind.config */}
+          <style
+            dangerouslySetInnerHTML={{
+              __html: `
         @keyframes fadeIn {
           from { opacity: 0; }
           to { opacity: 1; }
@@ -378,10 +373,10 @@ function ShiftLogin() {
           to { transform: scale(1); opacity: 1; }
         }
       `,
-              }}
-            />
-          </div>
-        ))}
+            }}
+          />
+        </div>
+      )}
       {!isMicros && (
         <div dir="rtl" className="min-h-[70vh] grid place-items-center">
           <form
@@ -564,7 +559,7 @@ function PosScreen() {
 
     try {
       const res = await fetch(
-        "http://192.168.100.195:5000/api/pos/verify-captain",
+        "http://192.168.1.44:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

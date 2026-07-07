@@ -140,10 +140,12 @@ export interface Invoice {
 }
 
 export interface ShiftState {
+  id?: string; // 👈 ضفنا الـ id كاختياري
   cashierId: string;
   cashierName: string;
   openedAt: number;
-  closedAt?: number;
+  closedAt?: number | null; // 👈 خليناه يقبل null أو undefined عشان الأخطاء تموت
+  terminalId?: string;
 }
 
 interface PosDB {
@@ -204,47 +206,57 @@ export function usePosDB() {
       window.removeEventListener("storage", r);
     };
   }, []);
+
+  // 1. مزامنة منفصلة تطلب شيفت الجهاز الحالي بس وتترجم البيانات للواجهة
   useEffect(() => {
-    // لو المزامنة شغالة مسبقاً في كامبوننت تاني، اخرج فوراً وماتعملش Interval جديد
     if (typeof window === "undefined" || syncLocks.isPollingOrders) return;
     syncLocks.isPollingOrders = true;
 
     const fetchActiveOrders = async () => {
       try {
+        const isSecCashier =
+          localStorage.getItem("isSecCashierDevice") === "true";
+        const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
+        
         const [ordersRes, shiftRes] = await Promise.all([
-          fetch("http://192.168.100.195:5000/api/pos/orders").catch(() => null),
-          fetch("http://192.168.100.195:5000/api/pos/shift").catch(() => null),
+          fetch("http://192.168.1.44:5000/api/pos/orders").catch(() => null),
+          // 👈 بنبعت رقم الجهاز الحالي (Sub-1 للتابلت) عشان السيرفر يرد بالشيفت بتاعه
+          fetch(
+            `http://192.168.1.44:5000/api/pos/shift?terminalId=${currentTerminalId}`,
+          ).catch(() => null),
         ]);
 
-        // 1️⃣ حماية: لو السيرفر مقفول أو الأوردرات مجتش، نوقف المزامنة للمرة دي بهدوء بدون كراش
         if (!ordersRes || !ordersRes.ok) return;
-
         const serverOrders = await ordersRes.json();
 
-        // 2️⃣ حماية حديدية: مانعملش parse للـ JSON إلا لو السيرفر رد بـ 200 OK
         let serverShift = null;
         if (shiftRes && shiftRes.ok) {
-          const data = await shiftRes.json();
-          // بناءً على استجابة السيرفر، الداتا ممكن تكون جوا activeShift أو مباشرة
-          serverShift =
-            data.activeShift !== undefined ? data.activeShift : data;
+          const rawShift = await shiftRes.json();
+          // 🔥 السحر هنا: المترجم اللي بيحول بيانات الداتابيز لصيغة تفهمها الواجهة
+          if (rawShift && (rawShift.opened_at || rawShift.openedAt)) {
+            serverShift = {
+              id: rawShift.id,
+              cashierId: rawShift.cashier_id || rawShift.cashierId,
+              cashierName:
+                rawShift.cashier_name || rawShift.cashierName || "كاشير",
+              openedAt: Number(rawShift.opened_at || rawShift.openedAt),
+              closedAt: rawShift.closed_at
+                ? Number(rawShift.closed_at)
+                : undefined, // 👈 غيرناها لـ undefined
+              terminalId:
+                rawShift.terminal_id ||
+                rawShift.terminalId ||
+                currentTerminalId,
+            };
+          }
         }
 
         const cur = load();
-
-        // تحديث الشيفت محلياً لو موجود
-        if (serverShift && serverShift.openedAt) {
-          cur.shift = serverShift;
-        } else {
-          cur.shift = null;
-        }
+        cur.shift = serverShift; // تحديث شيفت الجهاز الحالي فقط محلياً بالبيانات المترجمة
 
         let hasChanges = false;
-
-        // تحديث الطاولات من السيرفر (مع تجاهل الطاولة المفتوحة حالياً في الشاشة)
         for (const code in serverOrders) {
-          if (code === syncLocks.editingTable) continue; // 🔒 حماية الطاولة النشطة من المسح
-
+          if (code === syncLocks.editingTable) continue;
           if (
             JSON.stringify(cur.orders[code]) !==
             JSON.stringify(serverOrders[code])
@@ -254,32 +266,159 @@ export function usePosDB() {
           }
         }
 
-        // المسح من الكاش المحلي
         for (const code in cur.orders) {
-          if (code === syncLocks.editingTable) continue; // 🔒 الحماية هنا
+          if (code === syncLocks.editingTable) continue;
           if (!serverOrders[code]) {
             delete cur.orders[code];
             hasChanges = true;
           }
         }
 
-        if (hasChanges) {
-          save(cur);
-        }
+        if (hasChanges) save(cur);
+        setDb(cur);
       } catch (err) {
-        // مفيش Error هيطبع في الكونسول يزعجك تاني إلا لو فيه مصيبة حقيقية
-        // console.error("🚨 خطأ أثناء المزامنة:", err);
+        /* empty */
       }
     };
 
     fetchActiveOrders();
     const interval = setInterval(fetchActiveOrders, 1500);
-
     return () => {
       clearInterval(interval);
-      syncLocks.isPollingOrders = false; // فك القفل عند تدمير الكامبوننت
+      syncLocks.isPollingOrders = false;
     };
   }, []);
+
+  // 🌟 دالة فتح الشيفت المتوافقة تماماً والمترجمة للواجهة
+  const openShift = useCallback(
+    async (cashierId: string, cashierName: string) => {
+      const isSecCashier =
+        localStorage.getItem("isSecCashierDevice") === "true";
+      const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
+
+      const newShiftData = {
+        cashierId,
+        cashierName,
+        openedAt: Date.now(),
+        terminalId: currentTerminalId,
+      };
+
+      try {
+        const res = await fetch("http://192.168.1.44:5000/api/pos/shift/open", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newShiftData),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || "فشل فتح الوردية بالسيرفر");
+        }
+
+        const serverResponse = await res.json();
+
+        if (serverResponse.success && serverResponse.shift) {
+          const savedShift = serverResponse.shift;
+
+          // 🔥 ترجمة البيانات فوراً وقت الفتح عشان الشاشة تدخلك على طول
+          const formattedShift = {
+            id: savedShift.id,
+            cashierId: savedShift.cashier_id || savedShift.cashierId,
+            cashierName:
+              savedShift.cashier_name || savedShift.cashierName || cashierName,
+            openedAt: Number(savedShift.opened_at || savedShift.openedAt),
+            closedAt: savedShift.closed_at
+              ? Number(savedShift.closed_at)
+              : undefined, // 👈 غيرناها لـ undefined
+            terminalId:
+              savedShift.terminal_id ||
+              savedShift.terminalId ||
+              currentTerminalId,
+          };
+
+          const cur = load();
+          cur.shift = formattedShift;
+          save(cur);
+          setDb(cur);
+
+          toast.success(`🚀 تم بدء الوردية بنجاح للجهاز ${currentTerminalId}`);
+          return true;
+        } else {
+          throw new Error("استجابة غير صالحة من السيرفر");
+        }
+      } catch (err: any) {
+        toast.error(err.message || "خطأ في الاتصال بالسيرفر");
+        return false;
+      }
+    },
+    [],
+  );
+
+  // 3. دالة إغلاق الشيفت للجهاز الحالي حصراً
+  const closeShift = useCallback(
+    async (totalsData: {
+      kitchenSales: number;
+      barSales: number;
+      shishaSales: number;
+      taxValue: number;
+      discountValue: number;
+      dineinSales: number;
+      takeawaySales: number;
+      deliverySales: number;
+      terminalId?: string;
+      actualCash?: number;
+    }) => {
+      const isSecCashier =
+        localStorage.getItem("isSecCashierDevice") === "true";
+      const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
+      const activeShift = load().shift;
+
+      if (!activeShift) {
+        toast.error("لا يوجد وردية مفتوحة لإغلاقها على هذا الجهاز!");
+        return false;
+      }
+
+      const closedShiftData = {
+        cashierId: activeShift.cashierId,
+        cashierName: activeShift.cashierName,
+        openedAt: activeShift.openedAt,
+        closedAt: Date.now(),
+        ...totalsData,
+        terminalId: currentTerminalId,
+      };
+
+      try {
+        const res = await fetch("http://192.168.1.44:5000/api/shifts", {
+          method: "POST",
+          mode: "cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(closedShiftData),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || "فشل الحفظ على السيرفر");
+        }
+
+        const savedShiftFromServer = await res.json();
+        const cur = load();
+        cur.shifts = [savedShiftFromServer, ...cur.shifts];
+        cur.shift = null; // تصفير كاش الوردية للجهاز ده بس
+
+        save(cur);
+        setDb(cur);
+
+        toast.success(
+          `🎉 تم إغلاق الوردية وحفظ تقرير المطابقة للجهاز ${currentTerminalId}`,
+        );
+        return savedShiftFromServer;
+      } catch (err: any) {
+        toast.error(err.message || "فشل الاتصال بالسيرفر");
+        return false;
+      }
+    },
+    [],
+  );
 
   const addEmployee = useCallback(
     async (name: string, role: EmployeeRole, pin: string) => {
@@ -401,7 +540,7 @@ export function usePosDB() {
     // 2️⃣ إرسال التحديث للسيرفر (قاعدة البيانات الحقيقية)
     try {
       const response = await fetch(
-        "http://192.168.100.195:5000/api/pos/orders/upsert",
+        "http://192.168.1.44:5000/api/pos/orders/upsert",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -430,7 +569,7 @@ export function usePosDB() {
 
     // 2️⃣ إبلاغ السيرفر بمسح الطاولة عشان تتشال من عند الميكروس برضه
     try {
-      await fetch("http://192.168.100.195:5000/api/pos/orders/clear", {
+      await fetch("http://192.168.1.44:5000/api/pos/orders/clear", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableCode }),
@@ -459,15 +598,12 @@ export function usePosDB() {
 
       // 🌟 السحر هنا: إرسال الفاتورة فوراً لقاعدة البيانات (pgAdmin) على بورت 5000 المظبوط
       try {
-        const response = await fetch(
-          "http://192.168.100.195:5000/api/invoices",
-          {
-            method: "POST",
-            mode: "cors", // 🛡️ رجعنا الـ cors عشان الأجهزة الفرعية تشوف السيرفر
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(fullInvoice),
-          },
-        );
+        const response = await fetch("http://192.168.1.44:5000/api/invoices", {
+          method: "POST",
+          mode: "cors", // 🛡️ رجعنا الـ cors عشان الأجهزة الفرعية تشوف السيرفر
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fullInvoice),
+        });
 
         if (response.ok) {
           console.log("✅ تم حفظ الفاتورة بنجاح في قاعدة البيانات PostgreSQL!");
@@ -492,7 +628,7 @@ export function usePosDB() {
     },
     [],
   );
-
+  /*
   const openShift = useCallback(
     async (cashierId: string, cashierName: string) => {
       const shiftData = { cashierId, cashierName, openedAt: Date.now() };
@@ -505,7 +641,7 @@ export function usePosDB() {
 
       // 2. إبلاغ السيرفر عشان يفتح أجهزة الميكروس
       try {
-        await fetch("http://192.168.100.195:5000/api/pos/shift/open", {
+        await fetch("http://192.168.1.44:5000/api/pos/shift/open", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(shiftData),
@@ -527,26 +663,34 @@ export function usePosDB() {
       dineinSales: number;
       takeawaySales: number;
       deliverySales: number;
-      terminalId?: string; // 🌟 أضفنا الحقلين دول هنا
-      actualCash?: number; // 🌟
+      terminalId?: string;
+      actualCash?: number;
     }) => {
+      const isSecCashier =
+        localStorage.getItem("isSecCashierDevice") === "true";
+      const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
+
       const activeShift = load().shift;
 
-      if (!activeShift) {
-        toast.error("لا يوجد وردية مفتوحة لإغلاقها!");
-        return false;
-      }
+      // 🌟 الأمان: لو الكاشير الأساسي قفل والـ activeShift بقا null، نقرأ من اللي سجلناه في الـ useEffect
+      const storedOpenedAt = Number(localStorage.getItem("subShiftOpenedAt"));
+      const storedCashierName = localStorage.getItem("currentCashierName");
 
       const closedShiftData = {
-        cashierId: activeShift.cashierId,
-        cashierName: activeShift.cashierName,
-        openedAt: activeShift.openedAt,
+        cashierId: activeShift ? activeShift.cashierId : "sec-cashier",
+        cashierName: activeShift
+          ? activeShift.cashierName
+          : storedCashierName || "كاشير فرعي",
+        openedAt: activeShift
+          ? activeShift.openedAt
+          : storedOpenedAt || Date.now() - 3600000,
         closedAt: Date.now(),
-        ...totalsData, // 🌟 ده هيدمج الـ terminalId و actualCash أوتوماتيك
+        ...totalsData,
+        terminalId: currentTerminalId,
       };
 
       try {
-        const res = await fetch("http://192.168.100.195:5000/api/shifts", {
+        const res = await fetch("http://192.168.1.44:5000/api/shifts", {
           method: "POST",
           mode: "cors",
           headers: { "Content-Type": "application/json" },
@@ -554,30 +698,35 @@ export function usePosDB() {
         });
 
         if (!res.ok) {
-          throw new Error("فشل الحفظ على السيرفر");
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || "فشل الحفظ على السيرفر");
         }
 
         const savedShiftFromServer = await res.json();
         const cur = load();
         cur.shifts = [savedShiftFromServer, ...cur.shifts];
-        cur.shift = null;
+
+        // 🌟 تفريغ المتغيرات عشان الشيفت يقفل بجد
+        if (!isSecCashier) {
+          cur.shift = null;
+        }
+        localStorage.removeItem("subShiftOpenedAt");
 
         save(cur);
         localStorage.setItem("pos_shifts", JSON.stringify(cur.shifts));
         setDb(cur);
 
-        toast.success(`🎉 تم إغلاق الوردية وحفظها بنجاح!`);
-        
-        // 🌟 نرجع الداتا كلها (بما فيها تقرير المطابقة) بدل ما كنا بنرجع true بس
-        return savedShiftFromServer; 
-      } catch (err) {
+        toast.success(`🎉 تم إغلاق الوردية للجهاز ${currentTerminalId} بنجاح!`);
+        return savedShiftFromServer;
+      } catch (err: any) {
         console.error("❌ خطأ أثناء إغلاق الشفت بالسيرفر:", err);
-        toast.error("حدث خطأ أثناء الاتصال بالسيرفر لحفظ بيانات الوردية");
+        toast.error(`حدث خطأ: ${err.message || "فشل الاتصال بالسيرفر"}`);
         return false;
       }
     },
     [],
   );
+  */
 
   const incCustomerOrders = useCallback((id?: string) => {
     if (!id) return;
@@ -658,41 +807,41 @@ export function usePosDB() {
   );
 
   // تحديث مزامنة الداتابيز مع اللوكال ستوريدج
-  useEffect(() => {
-    async function syncServerToLocalStorage() {
-      try {
-        const [invoicesRes, shiftsRes, employeesRes] = await Promise.all([
-          fetch("http://192.168.100.195:5000/api/invoices"),
-          fetch("http://192.168.100.195:5000/api/shifts"),
-          fetch("http://192.168.100.195:5000/api/employees"),
-        ]);
+  // useEffect(() => {
+  //   async function syncServerToLocalStorage() {
+  //     try {
+  //       const [invoicesRes, shiftsRes, employeesRes] = await Promise.all([
+  //         fetch("http://192.168.1.44:5000/api/invoices"),
+  //         fetch("http://192.168.1.44:5000/api/shifts"),
+  //         fetch("http://192.168.1.44:5000/api/employees"),
+  //       ]);
 
-        if (invoicesRes.ok && shiftsRes.ok && employeesRes.ok) {
-          const invoices = await invoicesRes.json();
-          const shifts = await shiftsRes.json();
-          const employees = await employeesRes.json();
+  //       if (invoicesRes.ok && shiftsRes.ok && employeesRes.ok) {
+  //         const invoices = await invoicesRes.json();
+  //         const shifts = await shiftsRes.json();
+  //         const employees = await employeesRes.json();
 
-          const cur = load();
-          // تحديث اللوكال ستوريدج بالداتا اللي جاية من الداتابيز
-          cur.shifts = shifts;
-          cur.employees = employees;
-          cur.invoices = invoices;
+  //         const cur = load();
+  //         // تحديث اللوكال ستوريدج بالداتا اللي جاية من الداتابيز
+  //         cur.shifts = shifts;
+  //         cur.employees = employees;
+  //         cur.invoices = invoices;
 
-          save(cur); // دالة save بتعمل dispatch لـ 'pos-update'
-          setDb(cur); // مهم جداً عشان الـ UI يحس بالتحديث ويغير الـ 6 فواتير
-        }
-      } catch (error) {
-        console.error("❌ فشل تحديث الكاش المحلى من السيرفر:", error);
-      }
-    }
+  //         save(cur); // دالة save بتعمل dispatch لـ 'pos-update'
+  //         setDb(cur); // مهم جداً عشان الـ UI يحس بالتحديث ويغير الـ 6 فواتير
+  //       }
+  //     } catch (error) {
+  //       console.error("❌ فشل تحديث الكاش المحلى من السيرفر:", error);
+  //     }
+  //   }
 
-    // استدعاء المزامنة أول مرة
-    syncServerToLocalStorage();
+  //   // استدعاء المزامنة أول مرة
+  //   syncServerToLocalStorage();
 
-    // اختياري: لو عايز الفواتير تسمع بين الأجهزة كل 10 ثواني
-    const interval = setInterval(syncServerToLocalStorage, 10000);
-    return () => clearInterval(interval);
-  }, []);
+  //   // اختياري: لو عايز الفواتير تسمع بين الأجهزة كل 10 ثواني
+  //   const interval = setInterval(syncServerToLocalStorage, 10000);
+  //   return () => clearInterval(interval);
+  // }, []);
 
   return {
     db,

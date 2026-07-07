@@ -217,7 +217,7 @@ export function usePosDB() {
         const isSecCashier =
           localStorage.getItem("isSecCashierDevice") === "true";
         const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
-        
+
         const [ordersRes, shiftRes] = await Promise.all([
           fetch("http://192.168.1.44:5000/api/pos/orders").catch(() => null),
           // 👈 بنبعت رقم الجهاز الحالي (Sub-1 للتابلت) عشان السيرفر يرد بالشيفت بتاعه
@@ -502,17 +502,30 @@ export function usePosDB() {
   const addCustomer = useCallback(
     async (name: string, phone?: string, address?: string) => {
       const cur = load();
-      cur.customers.push({
+      const newCustomer = {
         id: crypto.randomUUID(),
         name,
-        phone,
-        address,
+        phone: phone || "",
+        address: address || "",
         orderCount: 0,
         createdAt: Date.now(),
-      });
+      };
+
+      cur.customers.push(newCustomer);
       save(cur);
       setDb(cur);
       toast.success("تم إضافة العميل بنجاح 🎉");
+
+      // 🌟 إرسال للباك إند (pgAdmin)
+      try {
+        await fetch("http://192.168.1.44:5000/api/customers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newCustomer),
+        });
+      } catch (err) {
+        console.error("❌ فشل حفظ العميل في قاعدة البيانات:", err);
+      }
     },
     [],
   );
@@ -520,16 +533,33 @@ export function usePosDB() {
   const updateCustomer = useCallback(
     async (id: string, name: string, phone?: string, address?: string) => {
       const cur = load();
+      const updatedCustomer = {
+        id,
+        name,
+        phone: phone || "",
+        address: address || "",
+      };
+
       cur.customers = cur.customers.map((c) =>
-        c.id === id ? { ...c, name, phone, address } : c,
+        c.id === id ? { ...c, ...updatedCustomer } : c,
       );
       save(cur);
       setDb(cur);
       toast.success("تم تعديل بيانات العميل");
+
+      // 🌟 تحديث في الباك إند (pgAdmin)
+      try {
+        await fetch(`http://192.168.1.44:5000/api/customers/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatedCustomer),
+        });
+      } catch (err) {
+        console.error("❌ فشل تحديث العميل في قاعدة البيانات:", err);
+      }
     },
     [],
   );
-
   const upsertOrder = useCallback(async (order: ActiveOrder) => {
     // 1️⃣ التحديث المحلي السريع فوراً (Optimistic UI) عشان الشاشة طلقة وماتهنجش
     const cur = load();
@@ -585,45 +615,60 @@ export function usePosDB() {
       const invoiceNumber = Math.floor(100000 + Math.random() * 900000);
       const createdAt = Date.now();
 
-      const fullInvoice: Invoice = {
+      // 1️⃣ حساب القيم بالملي
+      const currentTaxPct = inv.type === "dinein" ? 14 : 0;
+      const totals = computeTotals(
+        inv.items,
+        inv.discountPct || 0,
+        currentTaxPct,
+      );
+
+      const deliveryPrice = Number(inv.deliveryPrice || 0); // 🌟 تأمين قيمة الدليفري
+
+      const fullInvoice: any = {
         ...inv,
         id: crypto.randomUUID(),
         invoiceNumber,
         createdAt,
-        deliveryPrice: Number(inv.deliveryPrice || 0),
-        // 🌟 الحقول الجديدة بتتقرأ هنا بأمان تام لو مبعوتة من الشاشة، ولو مش مبعوتة بتنزل الرئيسي
+        subtotal: totals.subtotal,
+        discountValue: totals.discountValue,
+        deliveryPrice: deliveryPrice,
+
+        // 2️⃣ تأمين الأسماء للداتابيز والباك إند بالصيغتين
+        taxPct: totals.taxPct,
+        tax_pct: totals.tax_pct,
+
+        taxValue: totals.taxValue,
+        tax_value: totals.tax_value,
+
+        // 🌟🌟 إصلاح المشكلة القاتلة: إضافة الدليفري للإجمالي النهائي
+        total: totals.total + deliveryPrice,
+
         terminalId: inv.terminal_id || inv.terminalId || "Main",
         createdBy: inv.createdBy || inv.cashierName || "Main Cashier",
       };
 
-      // 🌟 السحر هنا: إرسال الفاتورة فوراً لقاعدة البيانات (pgAdmin) على بورت 5000 المظبوط
+      // 3️⃣ إرسال الفاتورة
       try {
         const response = await fetch("http://192.168.1.44:5000/api/invoices", {
           method: "POST",
-          mode: "cors", // 🛡️ رجعنا الـ cors عشان الأجهزة الفرعية تشوف السيرفر
+          mode: "cors",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(fullInvoice),
         });
-
         if (response.ok) {
-          console.log("✅ تم حفظ الفاتورة بنجاح في قاعدة البيانات PostgreSQL!");
+          console.log("✅ تم حفظ الفاتورة بنجاح في قاعدة البيانات!");
         } else {
-          console.error("⚠️ السيرفر رجع خطأ أثناء حفظ الفاتورة");
+          console.error("❌ السيرفر رفض حفظ الفاتورة، تشيك على الراوت");
         }
       } catch (error) {
-        console.error(
-          "❌ فشل الاتصال بالسيرفر لحفظ الفاتورة بالداتابيز:",
-          error,
-        );
+        console.error("❌ فشل الاتصال بالسيرفر:", error);
       }
 
-      // التحديث المحلي المستقر بتاعك زي ما هو بالظبط
       cur.invoices = [fullInvoice, ...cur.invoices];
       save(cur);
       setDb(cur);
-      toast.success(
-        `🎉 تم اعتماد الفاتورة محلياً ورفعها رقم: ${invoiceNumber}`,
-      );
+      toast.success(`🎉 تم اعتماد الفاتورة رقم: ${invoiceNumber}`);
       return fullInvoice;
     },
     [],
@@ -728,8 +773,11 @@ export function usePosDB() {
   );
   */
 
-  const incCustomerOrders = useCallback((id?: string) => {
+  // 🌟 دالة تزويد العداد مربوطة بالسيرفر
+  const incCustomerOrders = useCallback(async (id?: string) => {
     if (!id) return;
+
+    // التحديث محلياً فوراً لسرعة الاستجابة
     setDb((cur) => {
       const updated = cur.customers.map((c) =>
         c.id === id ? { ...c, orderCount: (c.orderCount || 0) + 1 } : c,
@@ -738,6 +786,42 @@ export function usePosDB() {
       save(next);
       return next;
     });
+
+    // إرسال التحديث لـ PostgreSQL
+    try {
+      await fetch(`http://192.168.1.44:5000/api/customers/${id}/increment`, {
+        method: "PATCH",
+      });
+    } catch (err) {
+      console.error("❌ فشل تزويد العداد في الداتابيز:", err);
+    }
+  }, []);
+
+  // 🌟 مزامنة العملاء في الخلفية كل 10 ثواني عشان يسمعوا في كل الأجهزة
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const fetchCustomers = async () => {
+      try {
+        const res = await fetch("http://192.168.1.44:5000/api/customers");
+        if (!res.ok) return;
+        const serverCustomers = await res.json();
+
+        const cur = load();
+        // بنقارن عشان مانعملش ريندر للصفحة على الفاضي
+        if (JSON.stringify(cur.customers) !== JSON.stringify(serverCustomers)) {
+          cur.customers = serverCustomers;
+          save(cur);
+          setDb(cur);
+        }
+      } catch (err) {
+        /* صمت */
+      }
+    };
+
+    fetchCustomers();
+    const interval = setInterval(fetchCustomers, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   // 🌟 تعديل الـ transferItems لحل مشكلة التيك أواي مع الحفاظ على بقية الصفحات
@@ -865,7 +949,7 @@ export function usePosDB() {
 export function computeTotals(
   items: OrderItem[],
   discountPct: number,
-  taxPct: number,
+  taxPct: number, // الـ 14%
 ) {
   const subtotal = round2(
     items.reduce(
@@ -877,9 +961,24 @@ export function computeTotals(
       0,
     ),
   );
+
   const discountValue = round2((subtotal * clamp0(discountPct)) / 100);
   const afterDiscount = round2(subtotal - discountValue);
+
+  // 🌟 حساب قيمة الضريبة/الخدمة الحقيقية بالجنيه
   const taxValue = round2((afterDiscount * clamp0(taxPct)) / 100);
+
+  // 🌟 الإجمالي النهائي = الصافي بعد الخصم + قيمة الضريبة بالجنيه
   const total = round2(afterDiscount + taxValue);
-  return { subtotal, discountValue, taxValue, total };
+
+  // بنرجع الأسماء بالطريقتين عشان نضمن إن مفيش سطر كود قديم يضرب
+  return {
+    subtotal,
+    discountValue,
+    taxValue,
+    tax_value: taxValue,
+    taxPct,
+    tax_pct: taxPct,
+    total,
+  };
 }

@@ -425,9 +425,9 @@ app.post("/api/shifts", async (req, res) => {
   try {
     const finalClosedAt = closedAt ? Number(closedAt) : Date.now();
     const finalOpenedAt = Number(openedAt);
-    const termId = terminalId || "Main"; // الافتراضي Main لو مش مبعوث
+    const termId = terminalId || "Main";
 
-    // 1️⃣ جلب إحصائيات الفواتير المؤمنة والمسجلة بالجهاز ده بالذات في الداتابيز
+    // 1️⃣ جلب إحصائيات الفواتير المؤمنة والمسجلة بالجهاز ده بالذات
     const statsResult = await pool.query(
       `SELECT 
         COALESCE(SUM(total), 0) as verified_total_sales,
@@ -448,21 +448,32 @@ app.post("/api/shifts", async (req, res) => {
       verified_delivery,
     } = statsResult.rows[0];
 
-    // 2️⃣ احتساب إجمالي الإيراد بناءً على مبيعات الأقسام المبعوثة
-    const totalRevenue =
-      (Number(kitchenSales) || 0) +
-      (Number(barSales) || 0) +
-      (Number(shishaSales) || 0) +
-      (Number(taxValue) || 0) -
-      (Number(discountValue) || 0);
+    // 2️⃣ إجمالي الإيراد الحقيقي من الأقسام (صالة + تيك أواي + دليفري) المبعوث من الفرونت
+    const frontendTotalRevenue =
+      (Number(dineinSales) || 0) +
+      (Number(takeawaySales) || 0) +
+      (Number(deliverySales) || 0);
 
-    // لو مفيش فواتير مسجلة في الداتابيز للجهاز ده، بنعتمد على الإيراد المحسوب تقديرياً
-    const finalRevenueToSave =
-      Number(verified_total_sales) > 0
-        ? Number(verified_total_sales)
-        : totalRevenue;
+    // 🌟 سحر الحماية: هناخد الرقم الأكبر دايماً!
+    // عشان لو فاتورة مسقطة من الداتابيز، نثق في حسابات الفرونت إند
+    const finalRevenueToSave = Math.max(
+      Number(verified_total_sales),
+      frontendTotalRevenue,
+    );
+    const finalDineinToSave = Math.max(
+      Number(dineinSales),
+      Number(verified_dinein),
+    );
+    const finalTakeawayToSave = Math.max(
+      Number(takeawaySales),
+      Number(verified_takeaway),
+    );
+    const finalDeliveryToSave = Math.max(
+      Number(deliverySales),
+      Number(verified_delivery),
+    );
 
-    // 3️⃣ تحديث الوردية المفتوحة الخاصة بهذا الجهاز حصراً
+    // 3️⃣ تحديث الوردية المفتوحة
     const result = await pool.query(
       `UPDATE shifts 
        SET 
@@ -485,14 +496,10 @@ app.post("/api/shifts", async (req, res) => {
         Number(shishaSales) || 0,
         Number(taxValue) || 0,
         Number(discountValue) || 0,
-        finalRevenueToSave,
-        Number(dineinSales) > 0 ? Number(dineinSales) : Number(verified_dinein),
-        Number(takeawaySales) > 0
-          ? Number(takeawaySales)
-          : Number(verified_takeaway),
-        Number(deliverySales) > 0
-          ? Number(deliverySales)
-          : Number(verified_delivery),
+        finalRevenueToSave, // الإجمالي المضمون 100%
+        finalDineinToSave,
+        finalTakeawayToSave,
+        finalDeliveryToSave,
         finalOpenedAt,
         termId,
       ],
@@ -506,7 +513,7 @@ app.post("/api/shifts", async (req, res) => {
 
     const row = result.rows[0];
 
-    // 4️⃣ إرجاع الصف المحدث مع تقرير تسوية الخزينة (Audit Report) لطباعة البون الصغير
+    // 4️⃣ إرجاع الصف المحدث للفرونت للطباعة
     res.status(200).json({
       ...row,
       openedAt: Number(row.opened_at),
@@ -514,12 +521,12 @@ app.post("/api/shifts", async (req, res) => {
       auditReport: {
         terminalId: termId,
         cashierName: cashierName,
-        databaseTotalSales: Number(verified_total_sales),
-        dineinTotal: Number(verified_dinein),
-        takeawayTotal: Number(verified_takeaway),
-        deliveryTotal: Number(verified_delivery),
+        databaseTotalSales: finalRevenueToSave,
+        dineinTotal: finalDineinToSave,
+        takeawayTotal: finalTakeawayToSave,
+        deliveryTotal: finalDeliveryToSave,
         actualCashReceived: Number(actualCash) || 0,
-        variance: (Number(actualCash) || 0) - Number(verified_total_sales), // حساب العجز أو الزيادة
+        variance: (Number(actualCash) || 0) - finalRevenueToSave,
       },
     });
   } catch (err) {
@@ -1102,6 +1109,83 @@ app.post("/api/pos/verify-captain", async (req, res) => {
     res.status(500).json({ success: false, error: "حدث خطأ في السيرفر" });
   }
 });
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////// Add Customer /////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 🌟 مسار حفظ عميل جديد
+app.post("/api/customers", async (req, res) => {
+  const { id, name, phone, address, orderCount, createdAt } = req.body;
+  try {
+    await pool.query(
+      "INSERT INTO customers (id, name, phone, address, order_count, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+      [id, name, phone, address, orderCount || 0, new Date(createdAt)],
+    );
+    res.status(201).json({ success: true, message: "تم حفظ العميل بنجاح" });
+  } catch (err) {
+    console.error("❌ خطأ أثناء حفظ العميل:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 🌟 مسار تحديث بيانات العميل
+app.put("/api/customers/:id", async (req, res) => {
+  const { id } = req.params;
+  const { name, phone, address } = req.body;
+  try {
+    await pool.query(
+      "UPDATE customers SET name = $1, phone = $2, address = $3 WHERE id = $4",
+      [name, phone, address, id],
+    );
+    res.json({ success: true, message: "تم تحديث العميل بنجاح" });
+  } catch (err) {
+    console.error("❌ خطأ أثناء تحديث العميل:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+// 🌟 1. مسار جلب كل العملاء (عشان الأجهزة التانية تشوفهم لحظياً)
+app.get("/api/customers", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM customers ORDER BY created_at DESC",
+    );
+
+    // تحويل الـ snake_case لـ camelCase عشان الفرونت إند يفهمه
+    const formattedCustomers = result.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      phone: row.phone || "",
+      address: row.address || "",
+      orderCount: Number(row.order_count) || 0,
+      createdAt: new Date(row.created_at).getTime(),
+    }));
+
+    res.json(formattedCustomers);
+  } catch (err) {
+    console.error("❌ خطأ أثناء جلب العملاء:", err.message);
+    res.status(500).json({ error: "فشل جلب العملاء" });
+  }
+});
+
+// 🌟 2. مسار تزويد عداد طلبات العميل
+app.patch("/api/customers/:id/increment", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      "UPDATE customers SET order_count = order_count + 1 WHERE id = $1 RETURNING *",
+      [id],
+    );
+    if (result.rowCount === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: "العميل غير موجود" });
+    }
+    res.json({ success: true, customer: result.rows[0] });
+  } catch (err) {
+    console.error("❌ خطأ أثناء تزويد عداد العميل:", err.message);
+    res.status(500).json({ success: false, error: "فشل تحديث العداد" });
+  }
+});
+//////////////////////////////////////////////////////////////////////////////////////
 const PORT = 5000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server is running on all network interfaces on port ${PORT}`);

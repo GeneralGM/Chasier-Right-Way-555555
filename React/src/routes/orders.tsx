@@ -1378,18 +1378,18 @@ function OrderEntryDialog({
         }
         finalDeliveryPrice = Number(inputPrice) || 0;
         const computedType = finalDeliveryPrice > 0 ? "delivery" : "takeaway";
-        const isSecCashier =
-          localStorage.getItem("isSecCashierDevice") === "true";
-        const currentCashierName = isSecCashier
-          ? localStorage.getItem("secCashierName")
-          : pos.shift?.cashierName;
-        const currentCashierId = isSecCashier
-          ? localStorage.getItem("secCashierId")
-          : pos.shift?.cashierId;
-
+        // 🌟 تعريفات الكاشير والجهاز المظبوطة 100%
         const isSecDevice =
           localStorage.getItem("isSecCashierDevice") === "true";
         const secName = localStorage.getItem("secCashierName") || "كاشير فرعي";
+        const currentCashierName = isSecDevice
+          ? secName
+          : pos.shift?.cashierName || "كاشير رئيسي";
+        const currentCashierId = isSecDevice
+          ? localStorage.getItem("secCashierId")
+          : pos.shift?.cashierId;
+        const currentTerminalId = isSecDevice ? "Sub-1" : "Main";
+
         const inv: any = {
           id: crypto.randomUUID(),
           invoiceNumber: Math.floor(100000 + Math.random() * 900000),
@@ -1399,9 +1399,9 @@ function OrderEntryDialog({
           customerName: order.customerName || null,
           customerAddress: order.customerAddress || null,
           cashierId: currentCashierId || null,
-          // cashierName: currentCashierName || null,
+          cashierName: currentCashierName,
           captainName: (order as any).captainName || null,
-          items: draftItems, // 🌟 استخدام المسودة هنا
+          items: draftItems,
           subtotal: totals.subtotal,
           discountPct: order.discountPct,
           discountValue: totals.discountValue,
@@ -1411,13 +1411,9 @@ function OrderEntryDialog({
           total: totals.subtotal - totals.discountValue + finalDeliveryPrice,
           createdAt: Date.now(),
 
-          cashierName: currentCashierName
-            ? secName
-            : db.shift?.cashierName || "كاشير رئيسي",
-          terminalId: currentCashierName ? "Sub-1" : "Main",
-          createdBy: currentCashierName
-            ? secName
-            : db.shift?.cashierName || "كاشير رئيسي",
+          // 🌟 تأمين الأجهزة والتقارير
+          terminalId: currentTerminalId,
+          createdBy: currentCashierName,
         };
 
         await addInvoice(inv);
@@ -2149,42 +2145,34 @@ function CheckoutDialog({
           .startsWith("T");
 
       const todayStr = new Date().toISOString().split("T")[0];
+      const deliveryPrice = Number((currentOrder as any).deliveryPrice) || 0;
+      const computedType = isTakeaway
+        ? deliveryPrice > 0
+          ? "delivery"
+          : "takeaway"
+        : "dinein";
 
-      /// 1️⃣ حساب إجمالي العناصر قبل الخصم
-      const subtotal = currentOrder.items.reduce(
-        (sum: number, item: any) => sum + item.price * item.qty,
-        0,
+      // 🌟 الاعتماد الكلي على الدالة الأصلية لمنع التضارب وازدواجية الضريبة
+      const totals = computeTotals(
+        currentOrder.items,
+        currentOrder.discountPct || 0,
+        isTakeaway ? 0 : (currentOrder as any).taxPct || 14,
       );
 
-      // 2️⃣ حل المشكلة: هنقرأ الـ discountPct أولاً، ونحسب القيمة بناءً عليه بأمان
-      const discountPct = (currentOrder as any).discountPct || 0;
-      const discountValue =
-        (currentOrder as any).discountValue || subtotal * (discountPct / 100);
-
-      // 3️⃣ حساب الخدمة والـ Total
-      const taxPct = isTakeaway ? 0 : (currentOrder as any).taxPct || 14;
-      const taxValue = isTakeaway ? 0 : subtotal * (taxPct / 100);
-
-      const deliveryPrice = (currentOrder as any).deliveryPrice || 0;
-      const total = subtotal - discountValue + taxValue + deliveryPrice;
       const isSecCashier =
         localStorage.getItem("isSecCashierDevice") === "true";
+      const secName = localStorage.getItem("secCashierName") || "كاشير فرعي";
       const currentCashierName = isSecCashier
-        ? localStorage.getItem("secCashierName")
+        ? secName
         : pos.shift?.cashierName;
       const currentCashierId = isSecCashier
         ? localStorage.getItem("secCashierId")
         : pos.shift?.cashierId;
 
-      // 2️⃣ تعريف كائن الفاتورة الـ 'inv' اللي كان ناقص[cite: 12]
       const inv: any = {
         id: crypto.randomUUID(),
-        invoiceNumber: Math.floor(100000 + Math.random() * 900000), // أو الدالة بتاعتك getNextInvoiceNumber
-        type: isTakeaway
-          ? deliveryPrice > 0
-            ? "delivery"
-            : "takeaway"
-          : "dinein", // ✅ الصح بدون شرطة
+        invoiceNumber: Math.floor(100000 + Math.random() * 900000),
+        type: computedType,
         tableCode: tableCode || currentOrder.tableCode,
         zone: currentOrder.zone || (isTakeaway ? "takeaway" : "dine-in"),
         customerName: currentOrder.customerName || null,
@@ -2192,20 +2180,23 @@ function CheckoutDialog({
         cashierId: currentCashierId || null,
         cashierName: currentCashierName || null,
         items: currentOrder.items,
-        subtotal: subtotal,
+
+        // 🌟 إرسال الحسابات السليمة المظبوطة
+        subtotal: totals.subtotal,
         discountPct: currentOrder.discountPct || 0,
-        discountValue: discountValue,
-        taxPct: taxPct, // 👈 0% للتيك أواي[cite: 12]
-        taxValue: taxValue,
+        discountValue: totals.discountValue,
+        taxPct: totals.taxPct,
+        taxValue: totals.taxValue,
         deliveryPrice: deliveryPrice,
-        total: total,
+        total: totals.total + deliveryPrice,
+
         createdAt: Date.now(),
         terminalId: isSecCashier ? "Sub-1" : "Main",
         createdBy: currentCashierName || "كاشير رئيسي",
       };
 
       // 3️⃣ حفظ الفاتورة وتحديث المخزون
-      await addInvoice(inv); // 👈 هنا الـ TS هيقرأ الـ inv بنجاح![cite: 12]
+      await addInvoice(inv);
       deductInventory();
       // 🌟 استدعاء الطباعة كـ "فاتورة نهائية" (true)
       triggerPrint(inv, true);

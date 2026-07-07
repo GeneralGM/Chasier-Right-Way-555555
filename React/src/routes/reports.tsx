@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo } from "react"; // 👈 شلنا الـ useState لأننا مش محتاجين range
 import { useDB } from "@/lib/store";
 import { usePosDB } from "@/lib/pos-store.ts";
-import { fmt2, clamp0 } from "@/lib/format";
+import { fmt2, clamp0, round2 } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import {
   DollarSign,
@@ -46,7 +46,7 @@ function ReportsPage() {
     );
   }, [pos.invoices, pos.shift]);
 
-  // 🌟 الحل السحري 2: الحسابات بتتم على فواتير الشيفت الحالي فقط
+  // 🌟 الحسابات الذكية بناءً على الفواتير المكتملة والمظبوطة
   const stats = useMemo(() => {
     let kitchen = 0,
       bar = 0,
@@ -56,24 +56,27 @@ function ReportsPage() {
       deliveryFeesOnly = 0;
     let subtotal = 0,
       discount = 0,
-      tax = 0;
+      tax = 0; // 👈 هتمثل القيمة المضافة/الخدمة (14%)
 
     for (const inv of currentShiftInvoices) {
       subtotal += inv.subtotal;
       discount += inv.discountValue;
-      tax += inv.taxValue;
+
+      // نعتمد على القيمة المحسوبة والمحفوظة في الفاتورة (عشان منكررش الحساب)
+      tax += inv.taxValue || 0;
 
       const deliveryFee =
         Number(inv.deliveryPrice) || Number((inv as any).delivery_price) || 0;
-
       deliveryFeesOnly += deliveryFee;
 
+      // 🌟 تجميع الإحصائيات حسب نوع الأوردر (للعرض فقط وليس للتجميع النهائي)
       if (inv.type === "takeaway") {
         takeawayOnly += inv.total - deliveryFee;
       } else if (inv.type === "delivery") {
         deliveryOnly += inv.total - deliveryFee;
       }
 
+      // تجميع مبيعات الأقسام من الأصناف
       for (const line of inv.items) {
         const meal = db.meals.find((m) => m.id === line.mealId);
         if (!meal) continue;
@@ -91,22 +94,23 @@ function ReportsPage() {
       }
     }
 
-    const finalNetCash = kitchen + bar + shisha + tax - discount;
+    // 🌟 المعادلة النهائية المظبوطة: بدون إضافة رسوم التوصيل للدرج
+    const finalNetCash = kitchen + bar + shisha + deliveryOnly + tax - discount;
 
     return {
       kitchen: clamp0(kitchen),
       bar: clamp0(bar),
       shisha: clamp0(shisha),
-      takeaway: clamp0(takeawayOnly),
-      deliveryTotal: clamp0(deliveryOnly),
-      deliveryFees: clamp0(deliveryFeesOnly),
+      takeaway: clamp0(takeawayOnly), // إحصائية للعرض بس
+      deliveryTotal: clamp0(deliveryOnly), // إحصائية للعرض بس
+      deliveryFees: clamp0(deliveryFeesOnly), // إحصائية للعرض بس
       subtotal: clamp0(subtotal),
       discount: clamp0(discount),
       tax: clamp0(tax),
       total: clamp0(finalNetCash),
       revenues: clamp0(finalNetCash),
     };
-  }, [currentShiftInvoices, db.meals]); // 👈 ربطنا الـ useMemo بالـ currentShiftInvoices
+  }, [currentShiftInvoices, db.meals]);
 
   async function closeShiftAndLogout() {
     // 1. طلب الفلوس الفعلية من الكاشير لعد الخزنة

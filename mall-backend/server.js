@@ -211,7 +211,6 @@ function formatInvoiceToFrontend(inv) {
 
 // 1️⃣ تعديل مسار حفظ الفاتورة (POST) لضمان تسجيل الضريبة والخصم صح
 app.post("/api/invoices", async (req, res) => {
-  // قراءة البيانات بكل الأشكال الممكنة لعدم حدوث أي لغبطة
   const {
     id,
     type,
@@ -237,7 +236,6 @@ app.post("/api/invoices", async (req, res) => {
   } = req.body;
 
   try {
-    // 🌟 حماية وتأمين الـ subtotal
     let finalSubtotal = Number(subtotal);
     if (!finalSubtotal && Array.isArray(items)) {
       finalSubtotal = items.reduce((sum, item) => {
@@ -250,7 +248,6 @@ app.post("/api/invoices", async (req, res) => {
       }, 0);
     }
 
-    // 🌟 التأكد التام من قراءة قيم الضريبة والخصم والإجمالي وتجنب الـ undefined
     const finalTaxPct = Number(taxPct) || Number(req.body.tax_pct) || 0;
     const finalTaxValue = Number(taxValue) || Number(req.body.tax_value) || 0;
     const finalDiscountPct =
@@ -260,6 +257,16 @@ app.post("/api/invoices", async (req, res) => {
     const finalDeliveryPrice =
       Number(deliveryPrice) || Number(req.body.delivery_price) || 0;
     const finalTotal = Number(total) || Number(req.body.total) || 0;
+
+    // 🌟 السحر هنا: تأمين قراءة الـ terminalId و createdBy من أي صيغة فرونت إند لمنع التصفير
+    const finalTerminalId =
+      terminalId || req.body.terminal_id || req.body.terminalId || "Main";
+    const finalCreatedBy =
+      createdBy ||
+      req.body.created_by ||
+      req.body.createdBy ||
+      cashierName ||
+      null;
 
     const query = `
       INSERT INTO invoices (
@@ -286,15 +293,14 @@ app.post("/api/invoices", async (req, res) => {
       finalDiscountPct,
       finalDiscountValue,
       finalTaxPct,
-      finalTaxValue, // 🌟 بتنزل هنا في الداتابيز بشكل صحيح ومؤمن
+      finalTaxValue,
       finalDeliveryPrice,
       finalTotal,
       new Date(createdAt || req.body.created_at || Date.now()),
-      terminalId || "Main",
-      createdBy || null,
+      finalTerminalId, // 🌟 مررنا المتغير المؤمن
+      finalCreatedBy, // 🌟 مررنا المتغير المؤمن
     ]);
 
-    // تحويل النتيجة للشكل المتوقع في الفرونت إند (camelCase)
     res.status(201).json(formatInvoiceToFrontend(result.rows[0]));
   } catch (err) {
     console.error("❌ خطأ أثناء حفظ الفاتورة:", err.message);
@@ -903,27 +909,29 @@ app.get("/api/audits", async (req, res) => {
 });
 ///////////////////////////////////////////////// IP /////////////////////////////////////////////////
 // 🖥️ قائمة بالـ IPs الثابتة لأجهزة الميكروس في المول
-const MICROS_IPS = [
-  "192.168.100.205", // تابلت 2
-];
+const MICROS_IPS = [];
 // 🖥️ قائمة بالـ IPs الثابتة لأجهزة الكاشير الفرعي 🌟 (الجديدة)
 const Sec_chasierIPs = [
+  "192.168.100.205", // تابلت 2
   "192.168.1.32", // تابلت 1
   "192.168.1.40", // جهاز كاشير فرعي 1
   "192.168.1.41", // جهاز كاشير فرعي 2
 ];
-// 🔍 تعديل الـ API عشان تدعم التحققين سوا
+// 🔍 تعديل الـ API عشان تدعم تنظيف الـ IP والتحققين سوا
 app.get("/api/device-check", (req, res) => {
-  // جلب الـ IP بتاع الجهاز اللي باعت الطلب حالياً
-  const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+  let clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+
+  // 🌟 تنظيف الـ IP لو جاى مسبوق بـ ::ffff: بسبب خصائص الشبكة المحلية
+  if (clientIp && clientIp.includes("::ffff:")) {
+    clientIp = clientIp.split("::ffff:")[1];
+  }
 
   // 1. نتحقق هل هو في قائمة الميكروس؟
   const isMicros = MICROS_IPS.includes(clientIp);
 
-  // 2. نتحقق هل هو في قائمة الكاشير الفرعي؟ 🌟
+  // 2. نتحقق هل هو في قائمة الكاشير الفرعي؟
   const isSecCashier = Sec_chasierIPs.includes(clientIp);
 
-  // السيرفر هيرد بنوع الجهاز بالظبط بناءً على الـ IP
   let deviceType = "main";
   if (isMicros) deviceType = "micros";
   else if (isSecCashier) deviceType = "sec_cashier";

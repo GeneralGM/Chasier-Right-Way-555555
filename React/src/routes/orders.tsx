@@ -105,7 +105,9 @@ function SecCashierLogin({
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch("http://192.168.1.44:5000/api/employees");
+        const response = await fetch(
+          "http://192.168.100.195:5000/api/employees",
+        );
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -249,7 +251,9 @@ function ShiftLogin() {
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch("http://192.168.1.44:5000/api/employees");
+        const response = await fetch(
+          "http://192.168.100.195:5000/api/employees",
+        );
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -560,7 +564,7 @@ function PosScreen() {
 
     try {
       const res = await fetch(
-        "http://192.168.1.44:5000/api/pos/verify-captain",
+        "http://192.168.100.195:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1387,6 +1391,10 @@ function OrderEntryDialog({
         const currentCashierId = isSecCashier
           ? localStorage.getItem("secCashierId")
           : pos.shift?.cashierId;
+
+        const isSecDevice =
+          localStorage.getItem("isSecCashierDevice") === "true";
+        const secName = localStorage.getItem("secCashierName") || "كاشير فرعي";
         const inv: any = {
           id: crypto.randomUUID(),
           invoiceNumber: Math.floor(100000 + Math.random() * 900000),
@@ -1396,7 +1404,7 @@ function OrderEntryDialog({
           customerName: order.customerName || null,
           customerAddress: order.customerAddress || null,
           cashierId: currentCashierId || null,
-          cashierName: currentCashierName || null,
+          // cashierName: currentCashierName || null,
           captainName: (order as any).captainName || null,
           items: draftItems, // 🌟 استخدام المسودة هنا
           subtotal: totals.subtotal,
@@ -1407,6 +1415,14 @@ function OrderEntryDialog({
           deliveryPrice: finalDeliveryPrice,
           total: totals.subtotal - totals.discountValue + finalDeliveryPrice,
           createdAt: Date.now(),
+
+          cashierName: currentCashierName
+            ? secName
+            : db.shift?.cashierName || "كاشير رئيسي",
+          terminalId: currentCashierName ? "Sub-1" : "Main",
+          createdBy: currentCashierName
+            ? secName
+            : db.shift?.cashierName || "كاشير رئيسي",
         };
 
         await addInvoice(inv);
@@ -2189,6 +2205,8 @@ function CheckoutDialog({
         deliveryPrice: deliveryPrice,
         total: total,
         createdAt: Date.now(),
+        terminalId: isSecCashier ? "Sub-1" : "Main",
+        createdBy: currentCashierName || "كاشير رئيسي",
       };
 
       // 3️⃣ حفظ الفاتورة وتحديث المخزون

@@ -222,7 +222,9 @@ function InvoicesTab() {
     async function fetchInvoicesFromPostgres() {
       try {
         setIsLoading(true);
-        const response = await fetch("http://192.168.1.44:5000/api/invoices");
+        const response = await fetch(
+          "http://192.168.100.195:5000/api/invoices",
+        );
         if (response.ok) {
           const data = await response.json();
           setServerInvoices(data);
@@ -575,8 +577,8 @@ function ShiftsTab() {
       try {
         setIsLoading(true);
         const [shiftsRes, invoicesRes] = await Promise.all([
-          fetch("http://192.168.1.44:5000/api/shifts"),
-          fetch("http://192.168.1.44:5000/api/invoices"),
+          fetch("http://192.168.100.195:5000/api/shifts"),
+          fetch("http://192.168.100.195:5000/api/invoices"),
         ]);
 
         if (shiftsRes.ok && invoicesRes.ok) {

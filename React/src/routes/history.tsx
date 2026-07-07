@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
@@ -76,7 +77,9 @@ function HistoryPage() {
   useEffect(() => {
     async function fetchVouchersFromDB() {
       try {
-        const response = await fetch("http://192.168.1.44:5000/api/vouchers");
+        const response = await fetch(
+          "http://192.168.100.195:5000/api/vouchers",
+        );
         if (response.ok) {
           const data = await response.json();
           setServerVouchers(data);

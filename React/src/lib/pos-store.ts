@@ -527,8 +527,10 @@ export function usePosDB() {
       dineinSales: number;
       takeawaySales: number;
       deliverySales: number;
+      terminalId?: string; // 🌟 أضفنا الحقلين دول هنا
+      actualCash?: number; // 🌟
     }) => {
-      const activeShift = load().shift; // 🌟 التعديل هنا: نقرأ مباشرة من الـ localStorage لضمان أحدث داتا
+      const activeShift = load().shift;
 
       if (!activeShift) {
         toast.error("لا يوجد وردية مفتوحة لإغلاقها!");
@@ -540,7 +542,7 @@ export function usePosDB() {
         cashierName: activeShift.cashierName,
         openedAt: activeShift.openedAt,
         closedAt: Date.now(),
-        ...totalsData,
+        ...totalsData, // 🌟 ده هيدمج الـ terminalId و actualCash أوتوماتيك
       };
 
       try {
@@ -557,16 +559,17 @@ export function usePosDB() {
 
         const savedShiftFromServer = await res.json();
         const cur = load();
-
         cur.shifts = [savedShiftFromServer, ...cur.shifts];
-        cur.shift = null; // 🌟 تصفير الشيفت صراحة
+        cur.shift = null;
 
         save(cur);
         localStorage.setItem("pos_shifts", JSON.stringify(cur.shifts));
         setDb(cur);
 
-        toast.success(`🎉 تم إغلاق الوردية وحفظها بنجاح في الداتابيز والكاش!`);
-        return true; // 🌟 نرجع true عشان الفرونت إند يعرف إنه نجح ويقفل الشاشة فوراً
+        toast.success(`🎉 تم إغلاق الوردية وحفظها بنجاح!`);
+        
+        // 🌟 نرجع الداتا كلها (بما فيها تقرير المطابقة) بدل ما كنا بنرجع true بس
+        return savedShiftFromServer; 
       } catch (err) {
         console.error("❌ خطأ أثناء إغلاق الشفت بالسيرفر:", err);
         toast.error("حدث خطأ أثناء الاتصال بالسيرفر لحفظ بيانات الوردية");

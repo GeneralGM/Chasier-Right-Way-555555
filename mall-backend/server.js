@@ -405,7 +405,7 @@ app.post("/api/pos/shift/open", async (req, res) => {
   }
 });
 
-// 🌟 3. إغلاق الوردية الحالية (نهاية الشيفت للجهاز فقط)
+// 🌟 3. إغلاق الوردية الحالية واحتساب تقرير الخزينة المؤمن من الداتابيز
 app.post("/api/shifts", async (req, res) => {
   const {
     cashierId,
@@ -420,14 +420,38 @@ app.post("/api/shifts", async (req, res) => {
     dineinSales,
     takeawaySales,
     deliverySales,
-    terminalId, // 🌟 استلام رقم الجهاز
+    terminalId, // 🌟 استلام رقم الجهاز (Main أو Sub-1)
+    actualCash, // 👈 ضفنا استقبال الكاش الفعلي اللي في الدرج لو الفرونت إند بيبعته
   } = req.body;
 
   try {
     const finalClosedAt = closedAt ? Number(closedAt) : Date.now();
     const finalOpenedAt = Number(openedAt);
-    const termId = terminalId || "Main"; // 🌟
+    const termId = terminalId || "Main";
 
+    // 📊 خطوة الأمان الثلاثية: جلب المبيعات الحقيقية المسجلة بالفواتير لهذا الجهاز فقط أثناء الشيفت
+    // بوسطجرس بيتعامل مع التواريخ بـ timestamp، عشان كدا هنحول الـ Opened والـ Closed لتواريخ صريحة
+    const statsResult = await pool.query(
+      `SELECT 
+        COALESCE(SUM(total), 0) as verified_total_sales,
+        COALESCE(SUM(CASE WHEN type = 'dinein' THEN total ELSE 0 END), 0) as verified_dinein,
+        COALESCE(SUM(CASE WHEN type = 'takeaway' THEN total ELSE 0 END), 0) as verified_takeaway,
+        COALESCE(SUM(CASE WHEN type = 'delivery' THEN total ELSE 0 END), 0) as verified_delivery
+       FROM invoices 
+       WHERE terminal_id = $1 
+         AND created_at >= TO_TIMESTAMP($2 / 1000.0) 
+         AND created_at <= TO_TIMESTAMP($3 / 1000.0)`,
+      [termId, finalOpenedAt, finalClosedAt],
+    );
+
+    const {
+      verified_total_sales,
+      verified_dinein,
+      verified_takeaway,
+      verified_delivery,
+    } = statsResult.rows[0];
+
+    // حساب صافي الإيرادات المبعوثة من الفرونت إند كدعم إضافي لقيمك الحالية
     const totalRevenue =
       (Number(kitchenSales) || 0) +
       (Number(barSales) || 0) +
@@ -435,13 +459,26 @@ app.post("/api/shifts", async (req, res) => {
       (Number(taxValue) || 0) -
       (Number(discountValue) || 0);
 
-    // 💡 بنقفل الوردية الخاصة بالجهاز ده بس (WHERE terminal_id = $12)
+    // نستخدم القيمة الأعلى أو المؤمنة من الداتابيز لضمان عدم التلاعب
+    const finalRevenueToSave =
+      Number(verified_total_sales) > 0
+        ? Number(verified_total_sales)
+        : totalRevenue;
+
+    // 💡 تحديث وقفل الوردية الخاصة بالجهاز ده بس (WHERE terminal_id = $12)
     const query = `
       UPDATE shifts 
       SET 
-        closed_at = $1, kitchen_sales = $2, bar_sales = $3, shisha_sales = $4, 
-        tax_value = $5, discount_value = $6, total_revenue = $7, dinein_sales = $8, 
-        takeaway_sales = $9, delivery_sales = $10 
+        closed_at = $1, 
+        kitchen_sales = $2, 
+        bar_sales = $3, 
+        shisha_sales = $4, 
+        tax_value = $5, 
+        discount_value = $6, 
+        total_revenue = $7, 
+        dinein_sales = $8, 
+        takeaway_sales = $9, 
+        delivery_sales = $10
       WHERE opened_at = $11 AND terminal_id = $12 AND closed_at IS NULL 
       RETURNING *
     `;
@@ -453,12 +490,16 @@ app.post("/api/shifts", async (req, res) => {
       Number(shishaSales) || 0,
       Number(taxValue) || 0,
       Number(discountValue) || 0,
-      Number(totalRevenue) || 0,
-      Number(dineinSales) || 0,
-      Number(takeawaySales) || 0,
-      Number(deliverySales) || 0,
+      finalRevenueToSave, // 🌟 الإيراد المحسوب والمؤمن
+      Number(dineinSales) > 0 ? Number(dineinSales) : Number(verified_dinein),
+      Number(takeawaySales) > 0
+        ? Number(takeawaySales)
+        : Number(verified_takeaway),
+      Number(deliverySales) > 0
+        ? Number(deliverySales)
+        : Number(verified_delivery),
       finalOpenedAt,
-      termId, // 🌟 تمرير رقم الجهاز
+      termId, // 🌟 تمرير رقم الجهاز المقفول
     ]);
 
     if (result.rows.length === 0) {
@@ -468,14 +509,28 @@ app.post("/api/shifts", async (req, res) => {
     }
 
     const row = result.rows[0];
+
+    // 🚀 بنرجع الرد للفرونت إند مضاف إليه تقرير المطابقة المالي
     res.status(200).json({
       ...row,
       openedAt: Number(row.opened_at),
       closedAt: Number(row.closed_at),
+      auditReport: {
+        terminalId: termId,
+        cashierName: cashierName,
+        databaseTotalSales: Number(verified_total_sales),
+        dineinTotal: Number(verified_dinein),
+        takeawayTotal: Number(verified_takeaway),
+        deliveryTotal: Number(verified_delivery),
+        actualCashReceived: Number(actualCash) || 0,
+        variance: (Number(actualCash) || 0) - Number(verified_total_sales), // لمعرفة العجز أو الزيادة في الدرج
+      },
     });
   } catch (err) {
     console.error("❌ خطأ أثناء تحديث وإغلاق الوردية:", err.message);
-    res.status(500).json({ error: "حدث خطأ أثناء إغلاق الوردية" });
+    res
+      .status(500)
+      .json({ error: "حدث خطأ أثناء إغلاق الوردية", details: err.message });
   }
 });
 // 🌟 4. جلب أرشيف كل الورديات (لشاشة التقارير)

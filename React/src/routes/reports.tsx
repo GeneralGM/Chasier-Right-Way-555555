@@ -30,11 +30,20 @@ function ReportsPage() {
   const { db } = useDB();
   const { db: pos, closeShift } = usePosDB();
 
-  // 🌟 الحل السحري 1: فواتير الشيفت الحالي فقط!
-  // بنجيب الفواتير اللي اتعملت بعد وقت فتح الشيفت المفتوح حالياً، ملناش دعوة باليوم ولا التاريخ.
+  // 🌟 تعديل الفلترة لتعرض مبيعات الجهاز الحالي فقط (سواء Main أو Sub-1)
   const currentShiftInvoices = useMemo(() => {
-    if (!pos.shift) return []; // لو مفيش شيفت مفتوح، مفيش فواتير هتتعرض
-    return pos.invoices.filter((inv) => inv.createdAt >= pos.shift!.openedAt);
+    if (!pos.shift) return [];
+
+    // معرفة جهاز الكاشير الحالي
+    const isSecCashier = localStorage.getItem("isSecCashierDevice") === "true";
+    const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
+
+    return pos.invoices.filter(
+      (inv) =>
+        inv.createdAt >= pos.shift!.openedAt &&
+        (inv.terminalId === currentTerminalId ||
+          inv.terminal_id === currentTerminalId),
+    );
   }, [pos.invoices, pos.shift]);
 
   // 🌟 الحل السحري 2: الحسابات بتتم على فواتير الشيفت الحالي فقط
@@ -100,9 +109,18 @@ function ReportsPage() {
   }, [currentShiftInvoices, db.meals]); // 👈 ربطنا الـ useMemo بالـ currentShiftInvoices
 
   async function closeShiftAndLogout() {
-    window.print();
+    // 1. طلب الفلوس الفعلية من الكاشير
+    const userCashInput = prompt(
+      "برجاء إدخال مبلغ الكاش الفعلي الموجود بالدرج حالياً لتسوية العهدة:",
+    );
+    if (userCashInput === null) return; // المستخدم داس Cancel
+    const actualCash = Number(userCashInput) || 0;
 
-    const isSuccess = await closeShift({
+    // 2. إرسال البيانات المجمعة زي ما إنت كنت عامل بالظبط، بس ضفنا الفلوس الفعلية ورقم الجهاز
+    const isSecCashier = localStorage.getItem("isSecCashierDevice") === "true";
+    const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
+
+    const responseData = await closeShift({
       kitchenSales: stats.kitchen,
       barSales: stats.bar,
       shishaSales: stats.shisha,
@@ -111,14 +129,86 @@ function ReportsPage() {
       dineinSales: stats.revenues - stats.takeaway - stats.deliveryTotal,
       takeawaySales: stats.takeaway,
       deliverySales: stats.deliveryTotal,
+      terminalId: currentTerminalId, // 🌟 بنبعت الجهاز الحالي
+      actualCash: actualCash, // 🌟 بنبعت الفلوس اللي في الدرج
     });
 
-    if (isSuccess) {
+    if (responseData) {
+      // 3. طباعة بون الـ Z-Report اللي راجع من الداتابيز
+      if (responseData.auditReport) {
+        printZReport(
+          responseData.auditReport,
+          pos.shift?.cashierName || "كاشير",
+          currentTerminalId,
+        );
+      } else {
+        window.print(); // لو التقرير مارجعش، اطبع الصفحة العادية زي ما كنت بتعمل
+      }
+
       setTimeout(() => {
         window.location.reload();
-      }, 1000);
+      }, 1500);
     }
   }
+
+  // 🌟 دالة طباعة البون المخصصة للتقفيل (Z-Report) نضيفها جوه الكومبوننت أو براه
+  const printZReport = (
+    report: any,
+    cashierName: string,
+    terminalId: string,
+  ) => {
+    const variance = report.variance;
+    let varianceStatus = "متطابق 🟢";
+    if (variance < 0) varianceStatus = `عجز: ${Math.abs(variance)} ج.م 🔴`;
+    else if (variance > 0) varianceStatus = `زيادة: ${variance} ج.م 🔵`;
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+
+    printWindow.document.write(`
+      <html dir="rtl">
+        <head>
+          <title>تقرير تقفيل وردية</title>
+          <style>
+            body { font-family: 'Courier New', Courier, monospace; text-align: center; padding: 10px; width: 280px; margin: 0 auto; font-size: 13px; }
+            .title { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+            .divider { border-top: 1px dashed #000; margin: 8px 0; }
+            .row { display: flex; justify-content: space-between; margin: 4px 0; }
+            .bold { font-weight: bold; }
+            .status { font-size: 14px; margin-top: 8px; background: #eee; padding: 5px; font-weight: bold; border: 1px solid #ccc; }
+          </style>
+        </head>
+        <body>
+          <div class="title">مجمع المول - Z Report</div>
+          <div>جهاز: ${terminalId}</div>
+          <div>الكاشير: ${cashierName}</div>
+          <div>التاريخ: ${new Date().toLocaleDateString("ar-EG")}</div>
+          <div>الوقت: ${new Date().toLocaleTimeString("ar-EG")}</div>
+          
+          <div class="divider"></div>
+          
+          <div class="row bold"><span>نوع المبيعات</span><span>المبلغ</span></div>
+          <div class="divider"></div>
+          <div class="row"><span>صالة</span><span>${report.dineinTotal} ج</span></div>
+          <div class="row"><span>تيك أواي</span><span>${report.takeawayTotal} ج</span></div>
+          <div class="row"><span>دليفري</span><span>${report.deliveryTotal} ج</span></div>
+          
+          <div class="divider"></div>
+          
+          <div class="row bold"><span>إجمالي السيستم:</span><span>${report.databaseTotalSales} ج</span></div>
+          <div class="row bold"><span>الكاش بالدرج:</span><span>${report.actualCashReceived} ج</span></div>
+          
+          <div class="status">التسوية: ${varianceStatus}</div>
+          
+          <div class="divider"></div>
+          <p style="font-size: 11px;">تم الجرد آلياً من قاعدة البيانات للجهاز الحالي فقط</p>
+          
+          <script>window.onload = function() { window.print(); window.close(); };</script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
 
   return (
     <div dir="rtl" className="space-y-4">

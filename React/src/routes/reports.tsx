@@ -96,7 +96,7 @@ function ReportsPage() {
     }
 
     // 🌟 المعادلة النهائية المظبوطة: بدون إضافة رسوم التوصيل للدرج
-    const finalNetCash = kitchen + bar + shisha + deliveryOnly + tax - discount;
+    const finalNetCash = kitchen + bar + shisha + tax - discount;
 
     return {
       kitchen: clamp0(kitchen),
@@ -423,65 +423,6 @@ function ReportsPage() {
       }, 1500);
     }
   }
-
-  // 🌟 دالة طباعة البون المخصصة للتقفيل (Z-Report) نضيفها جوه الكومبوننت أو براه
-  const printZReport = (
-    report: any,
-    cashierName: string,
-    terminalId: string,
-  ) => {
-    const variance = report.variance;
-    let varianceStatus = "متطابق 🟢";
-    if (variance < 0) varianceStatus = `عجز: ${Math.abs(variance)} ج.م 🔴`;
-    else if (variance > 0) varianceStatus = `زيادة: ${variance} ج.م 🔵`;
-
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return;
-
-    printWindow.document.write(`
-      <html dir="rtl">
-        <head>
-          <title>تقرير تقفيل وردية</title>
-          <style>
-            body { font-family: 'Courier New', Courier, monospace; text-align: center; padding: 10px; width: 280px; margin: 0 auto; font-size: 13px; }
-            .title { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
-            .divider { border-top: 1px dashed #000; margin: 8px 0; }
-            .row { display: flex; justify-content: space-between; margin: 4px 0; }
-            .bold { font-weight: bold; }
-            .status { font-size: 14px; margin-top: 8px; background: #eee; padding: 5px; font-weight: bold; border: 1px solid #ccc; }
-          </style>
-        </head>
-        <body>
-          <div class="title">مجمع المول - Z Report</div>
-          <div>جهاز: ${terminalId}</div>
-          <div>الكاشير: ${cashierName}</div>
-          <div>التاريخ: ${new Date().toLocaleDateString("ar-EG")}</div>
-          <div>الوقت: ${new Date().toLocaleTimeString("ar-EG")}</div>
-          
-          <div class="divider"></div>
-          
-          <div class="row bold"><span>نوع المبيعات</span><span>المبلغ</span></div>
-          <div class="divider"></div>
-          <div class="row"><span>صالة</span><span>${report.dineinTotal} ج</span></div>
-          <div class="row"><span>تيك أواي</span><span>${report.takeawayTotal} ج</span></div>
-          <div class="row"><span>دليفري</span><span>${report.deliveryTotal} ج</span></div>
-          
-          <div class="divider"></div>
-          
-          <div class="row bold"><span>إجمالي السيستم:</span><span>${report.databaseTotalSales} ج</span></div>
-          <div class="row bold"><span>الكاش بالدرج:</span><span>${report.actualCashReceived} ج</span></div>
-          
-          <div class="status">التسوية: ${varianceStatus}</div>
-          
-          <div class="divider"></div>
-          <p style="font-size: 11px;">تم الجرد آلياً من قاعدة البيانات للجهاز الحالي فقط</p>
-          
-          <script>window.onload = function() { window.print(); window.close(); };</script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-  };
 
   return (
     <div dir="rtl" className="space-y-4">

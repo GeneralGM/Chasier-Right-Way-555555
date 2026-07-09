@@ -45,131 +45,161 @@ app.get("/api/test", (req, res) => {
 
 // --- مسارات الموظفين (Employees) ---
 
+// 🌟 1. جلب الموظفين مع توليد الهاش الحقيقي SHA256 للفرونت إند
+app.get("/api/employees", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, name, role, pin_hash FROM employees",
+    );
+
+    const formattedEmployees = result.rows.map((row) => {
+      const clearPin = row.pin_hash || ""; // البين الصافي المخزن بالداتابيز
+      // توليد الهاش عشان الفرونت إند لما يقارن بـ sha256 يلاقيها متطابقة
+      const generatedHash = crypto
+        .createHash("sha256")
+        .update(clearPin)
+        .digest("hex");
+
+      return {
+        id: row.id,
+        name: row.name,
+        role: row.role,
+        pinHash: generatedHash, // الهاش للمقارنات المؤمنة
+        pin: clearPin, // الصافي لزرار العين
+      };
+    });
+
+    res.json(formattedEmployees);
+  } catch (err) {
+    console.error("❌ خطأ في جلب الموظفين:", err);
+    res.status(500).json({ error: "خطأ في جلب البيانات" });
+  }
+});
+
+// 🌟 2. إضافة موظف جديد
 app.post("/api/employees", async (req, res) => {
-  console.log("📥 بيانات الموظف الجديد وصلت للسيرفر:", req.body);
-
   const { name, role } = req.body;
-
-  // 🌟 تأمين استقبال الـ PIN بجميع الأشكال الممكنة عشان مفيش صفحة تبوظ
-  const pinHash =
-    req.body.pinHash ||
-    req.body.pin_hash ||
-    req.body.pin ||
-    req.body.password ||
-    "";
+  const inputPin = req.body.pin || req.body.pinHash || req.body.password || "";
   const id = req.body.id || crypto.randomUUID();
 
-  // التحقق من وجود البيانات الأساسية
-  if (!name || !pinHash) {
+  if (!name || !inputPin) {
     return res.status(400).json({ message: "الاسم والرقم السري مطلوبان" });
   }
 
   try {
+    // بنخزن الصافي في الداتابيز للحفاظ على كودك القديم
     const query = `
       INSERT INTO employees (id, name, role, pin_hash) 
       VALUES ($1, $2, $3, $4)
-      RETURNING id, name, role, pin_hash AS "pinHash"
+      RETURNING id, name, role, pin_hash
     `;
-
     const result = await pool.query(query, [
       id,
       name,
       role || "cashier",
-      pinHash,
+      inputPin,
     ]);
+    const emp = result.rows[0];
 
-    // 🌟 توحيد الـ Response بكل المسميات الممكنة عشان الصفحات التانية متقفلش أو تضرب
+    const generatedHash = crypto
+      .createHash("sha256")
+      .update(emp.pin_hash || "")
+      .digest("hex");
+
     res.status(201).json({
-      ...result.rows[0],
-      pinHash: result.rows[0].pinHash, // للشاشات الجديدة
-      pin_hash: result.rows[0].pinHash, // للاحتياط
-      pin: result.rows[0].pinHash, // للشاشات القديمة
+      id: emp.id,
+      name: emp.name,
+      role: emp.role,
+      pinHash: generatedHash,
+      pin: emp.pin || emp.pin_hash,
     });
   } catch (error) {
-    // 🔍 الكود 23505 في بوسطجرس معناه تكرار حقل فريد (Unique Violation)
     if (error.code === "23505") {
-      return res.status(400).json({
-        message:
-          "عذراً، هذا الرقم السري مستخدم بالفعل لموظف آخر! اختر رقماً مختلفاً.",
-      });
+      return res
+        .status(400)
+        .json({ message: "عذراً، هذا الرقم السري مستخدم بالفعل!" });
     }
-
-    console.error("❌ خطأ سيرفر داخلي:", error);
     res.status(500).json({ message: "حدث خطأ داخلي في السيرفر" });
   }
 });
 
-app.get("/api/employees", async (req, res) => {
-  try {
-    const result = await pool.query(
-      'SELECT id, name, role, pin_hash AS "pinHash" FROM employees',
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: "خطأ في جلب البيانات" });
-  }
-});
-// --- مسار التعديل (PUT) ---
+// 🌟 3. تعديل بيانات موظف
 app.put("/api/employees/:id", async (req, res) => {
   const { id } = req.params;
-  const { name, role, pinHash } = req.body;
+  const { name, role } = req.body;
+  const inputPin = req.body.pin || req.body.pinHash || req.body.password;
 
   try {
-    let query;
-    let values;
-
-    // لو الموظف كتب باسوورد جديد، هنحدث الـ pin_hash مع الاسم والرتبة
-    if (pinHash) {
-      query = `
-        UPDATE employees 
-        SET name = $1, role = $2, pin_hash = $3 
-        WHERE id = $4
-        RETURNING id, name, role, pin_hash AS "pinHash"
-      `;
-      values = [name, role, pinHash, id];
+    let query, values;
+    if (inputPin) {
+      query = `UPDATE employees SET name = $1, role = $2, pin_hash = $3 WHERE id = $4 RETURNING id, name, role, pin_hash`;
+      values = [name, role, inputPin, id];
     } else {
-      // لو مش باعت باسوورد (عايز يعدل الاسم أو الرتبة بس)
-      query = `
-        UPDATE employees 
-        SET name = $1, role = $2 
-        WHERE id = $3
-        RETURNING id, name, role, pin_hash AS "pinHash"
-      `;
+      query = `UPDATE employees SET name = $1, role = $2 WHERE id = $3 RETURNING id, name, role, pin_hash`;
       values = [name, role, id];
     }
 
     const result = await pool.query(query, values);
-
-    // نتأكد إن الموظف موجود أصلاً
     if (result.rowCount === 0) {
       return res.status(404).json({ message: "الموظف غير موجود" });
     }
 
-    res.json(result.rows[0]);
+    const emp = result.rows[0];
+    const generatedHash = crypto
+      .createHash("sha256")
+      .update(emp.pin_hash || "")
+      .digest("hex");
+
+    res.json({
+      id: emp.id,
+      name: emp.name,
+      role: emp.role,
+      pinHash: generatedHash,
+      pin: emp.pin_hash,
+    });
   } catch (error) {
-    console.error("❌ خطأ أثناء التعديل في الداتابيز:", error);
     res.status(500).json({ message: "فشل التعديل في قاعدة البيانات" });
   }
 });
 
 // --- مسار الحذف (DELETE) ---
+// 🌟 مسار حذف موظف - متوافق تماماً مع الفرونت إند
 app.delete("/api/employees/:id", async (req, res) => {
   const { id } = req.params;
-
   try {
+    // بنعمل RETURNING * عشان نضمن إن العملية تمت بنجاح وبيرجع الصف اللي اتمسح
     const result = await pool.query(
-      "DELETE FROM employees WHERE id = $1 RETURNING id",
+      "DELETE FROM employees WHERE id = $1 RETURNING *",
       [id],
     );
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ message: "الموظف غير موجود أصلاً" });
+      return res.status(404).json({ message: "الموظف غير موجود أصلاً!" });
     }
 
-    res.json({ success: true, message: "تم حذف الموظف بنجاح" });
-  } catch (error) {
-    console.error("❌ خطأ أثناء الحذف من الداتابيز:", error);
-    res.status(500).json({ message: "فشل الحذف من قاعدة البيانات" });
+    const deletedEmp = result.rows[0];
+
+    // بنولد الهاش عشان التوافق التام
+    const generatedHash = crypto
+      .createHash("sha256")
+      .update(deletedEmp.pin_hash || "")
+      .digest("hex");
+
+    // بنرجع الاستجابة بنجاح
+    res.json({
+      success: true,
+      message: "تم حذف الموظف بنجاح",
+      employee: {
+        id: deletedEmp.id,
+        name: deletedEmp.name,
+        role: deletedEmp.role,
+        pinHash: generatedHash,
+        pin: deletedEmp.pin_hash,
+      },
+    });
+  } catch (err) {
+    console.error("❌ خطأ في حذف الموظف:", err);
+    res.status(500).json({ message: "فشل حذف الموظف من قاعدة البيانات" });
   }
 });
 // --- مسارات الفواتير (Invoices) ---

@@ -84,8 +84,10 @@ function RolesPage() {
 
   const employeesList = useMemo(() => {
     const map = new Map();
-    serverEmployees.forEach((e) => map.set(e.name, e));
+    // 1. نحط بيانات الكاش المحلي الأول
     db.employees.forEach((e) => map.set(e.name, e));
+    // 2. نحط بيانات السيرفر بعدها عشان الـ ID الحقيقي والـ PIN الصافي هما اللي يكسبوا ويظهروا في الشاشة!
+    serverEmployees.forEach((e) => map.set(e.name, e));
     return Array.from(map.values());
   }, [serverEmployees, db.employees]);
 
@@ -126,7 +128,7 @@ function RolesPage() {
   }) => {
     try {
       // ==========================================
-      // 1. حالة إضافة موظف جديد (شغالة وسليمة)
+      // 1. حالة إضافة موظف جديد (تم تأمينها ومنع التكرار)
       // ==========================================
       if (editing === "new") {
         const response = await fetch(`${API_BASE_URL}/api/employees`, {
@@ -135,15 +137,30 @@ function RolesPage() {
           body: JSON.stringify({
             name: data.name,
             role: data.role,
-            pinHash: data.pin,
+            pin: data.pin, // 🌟 بعتنا الحقل باسم pin عشان السيرفر يفهمه صح كباسوورد صافي
           }),
         });
 
         if (response.ok) {
           const savedEmp = await response.json();
-          await addEmployee(savedEmp.name, savedEmp.role, savedEmp.pinHash);
-          setServerEmployees((prev) => [...prev, savedEmp]);
-          toast.success("تم إضافة الموظف الجديد في السيرفر بنجاح");
+          // savedEmp الحين يحتوي على: { id, name, role, pin, pinHash }
+
+          // 1. إضافة للمستودع المحلي بالـ pin الصافي (عشان اللوكال ستوريدج يعمل الهاش بتاعه براحته)
+          await addEmployee(savedEmp.name, savedEmp.role, savedEmp.pin);
+
+          // 2. تحديث قائمة السيرفر بالـ savedEmp الحقيقي اللي راجع من قاعدة البيانات
+          setServerEmployees((prev) => {
+            // زيادة أمان: نمنع التكرار بالاسم تماماً جوه الـ State
+            const exists = prev.some((emp) => emp.name === savedEmp.name);
+            if (exists) {
+              return prev.map((emp) =>
+                emp.name === savedEmp.name ? savedEmp : emp,
+              );
+            }
+            return [...prev, savedEmp];
+          });
+
+          toast.success("تم إضافة الموظف الجديد في السيرفر والكاش بنجاح");
         } else {
           const errorData = await response.json().catch(() => ({}));
           toast.error(errorData.message || "فشل إضافة الموظف في السيرفر");
@@ -199,19 +216,28 @@ function RolesPage() {
   };
   const handleDeleteEmployee = async (empId: string) => {
     try {
+      // 🌟 أولاً: نجيب اسم الموظف قبل ما نحذفه عشان نضمن مسحه بالاسم لو الـ ID علق
+      const targetEmp = employeesList.find((e) => e.id === empId);
+
       // 1. أرسل طلب الحذف للسيرفر
       const response = await fetch(`${API_BASE_URL}/api/employees/${empId}`, {
         method: "DELETE",
       });
 
       if (response.ok) {
-        // 2. احذفه من الكاش المحلي (لوكال ستوريدج)
+        // 2. احذفه من الكاش المحلي (لوكال ستوريدج) - مهم جداً!
         await deleteEmployee(empId);
 
-        // 3. حدّث الـ State في الشاشة عشان يختفي فوراً
-        setServerEmployees((prev) => prev.filter((emp) => emp.id !== empId));
+        // 3. حدّث الـ State في الشاشة بفلترة صارمة (بالـ ID وبالاسم كزيادة أمان)
+        setServerEmployees((prev) =>
+          prev.filter(
+            (emp) =>
+              emp.id !== empId &&
+              (targetEmp ? emp.name !== targetEmp.name : true),
+          ),
+        );
 
-        toast.success("تم حذف الموظف نهائياً من قاعدة البيانات");
+        toast.success("تم حذف الموظف نهائياً واختفائه من الشاشة");
       } else {
         const errorData = await response.json().catch(() => ({}));
         toast.error(errorData.message || "فشل حذف الموظف من السيرفر");
@@ -337,7 +363,7 @@ function RolesPage() {
                         <>
                           <span className="tracking-widest">
                             {revealed[e.id]
-                              ? e.pinHash || e.pin || "####"
+                              ? e.pin || e.pin_hash || "####"
                               : "####"}
                           </span>
                           {revealed[e.id] ? (
@@ -384,7 +410,10 @@ function RolesPage() {
                           actionName={`تعديل بيانات الموظف: ${e.name}`}
                           onSuccess={(operator: any) => {
                             setCurrentOperator(operator);
-                            setEditing(e); // 👈 هيفتح المودال بس ويقعد مستنيك تعدل وتدوس حفظ
+                            // 🌟 التأخير السحري هنا كمان لمنع التداخل
+                            setTimeout(() => {
+                              setEditing(e);
+                            }, 150);
                           }}
                         >
                           <button className="p-1.5 rounded hover:bg-secondary text-blue-600">

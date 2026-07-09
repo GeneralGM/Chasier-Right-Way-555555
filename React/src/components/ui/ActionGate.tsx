@@ -23,6 +23,7 @@ interface Employee {
   name: string;
   role: EmployeeRole;
   pinHash: string;
+  pin?: string;
 }
 
 interface ActionGateProps {
@@ -64,7 +65,10 @@ export default function ActionGate({
   const handleVerify = () => {
     setError("");
 
-    const employee = employees.find((emp) => emp.pinHash === pin);
+    // 🌟 التعديل هنا: بنقارن الـ pin المدخل بالـ pin الصافي اللي جاي من السيرفر، أو الـ pinHash كزيادة أمان
+    const employee = employees.find(
+      (emp) => (emp).pin === pin || emp.pinHash === pin,
+    );
 
     if (!employee) {
       setError("الرقم السري غير صحيح!");

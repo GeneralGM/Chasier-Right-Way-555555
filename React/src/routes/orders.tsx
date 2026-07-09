@@ -105,7 +105,9 @@ function SecCashierLogin({
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch("http://192.168.1.44:5000/api/employees");
+        const response = await fetch(
+          "http://192.168.100.195:5000/api/employees",
+        );
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -253,7 +255,9 @@ function ShiftLogin() {
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch("http://192.168.1.44:5000/api/employees");
+        const response = await fetch(
+          "http://192.168.100.195:5000/api/employees",
+        );
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -567,7 +571,7 @@ function PosScreen() {
 
     try {
       const res = await fetch(
-        "http://192.168.1.44:5000/api/pos/verify-captain",
+        "http://192.168.100.195:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -862,8 +866,11 @@ function PosScreen() {
           onClose={() => setOpenOrder(null)}
         />
       )}
-      {transferOpen && (
-        <TransferDialog onClose={() => setTransferOpen(false)} />
+      {transferOpen && selectedTable && (
+        <TransferDialog
+          sourceTable={selectedTable}
+          onClose={() => setTransferOpen(false)}
+        />
       )}
       {printOrder && pos.orders[printOrder] && (
         <PrintDialog
@@ -1790,72 +1797,252 @@ function ModifierDialog({
   );
 }
 
-function TransferDialog({ onClose }: { onClose: () => void }) {
+// function TransferDialog({ onClose }: { onClose: () => void }) {
+//   const { db: pos, transferItems } = usePosDB();
+//   const [from, setFrom] = useState("");
+//   const [to, setTo] = useState("");
+//   const [search, setSearch] = useState("");
+//   const [showList, setShowList] = useState(false);
+//   const [picks, setPicks] = useState<Record<string, number>>({});
+//   const allTables = useMemo(() => {
+//     const cTables = Array.from({ length: 70 }, (_, i) => `C${i + 1}`);
+//     const oTables = Array.from({ length: 70 }, (_, i) => `O${i + 1}`);
+//     return [...cTables, ...oTables];
+//   }, []);
+//   const filteredTables = allTables.filter((t) =>
+//     t.toLowerCase().includes(search.toLowerCase()),
+//   );
+//   const src = from ? pos.orders[from.trim()] : null;
+//   async function doTransfer() {
+//     // 👈 ضفنا async هنا
+//     if (!from.trim() || !to.trim()) return toast.error("أدخل الطاولتين");
+//     const itemsToMove = Object.entries(picks).map(([id, qty]) => ({ id, qty }));
+//     if (itemsToMove.length === 0) return toast.error("اختر أصنافاً للنقل");
+
+//     const targetZone = to.startsWith("C") ? "dining" : "takeaway";
+
+//     // 👈 ضفنا await هنا عشان الكود يستنى السيرفر يرد
+//     const r = await transferItems(
+//       from.trim(),
+//       to.trim(),
+//       itemsToMove,
+//       targetZone as any,
+//     );
+
+//     if (!r.ok) return toast.error((r as any).error || "فشل نقل الأصناف");
+//     toast.success("تم النقل بنجاح");
+//     onClose();
+//   }
+//   return (
+//     <Dialog open onOpenChange={(o) => !o && onClose()}>
+//       <DialogContent dir="rtl" className="max-w-2xl">
+//         <DialogHeader>
+//           <DialogTitle>تحويل أصناف</DialogTitle>
+//         </DialogHeader>
+//         {/* ... (نفس كود الترانزفير كما هو بدون تعديل) ... */}
+//         <div className="grid grid-cols-2 gap-4">
+//           <div className="space-y-2">
+//             <label className="text-xs font-medium">المنقول منها</label>
+//             <Input
+//               value={from}
+//               onChange={(e) => {
+//                 setFrom(e.target.value);
+//                 setPicks({});
+//               }}
+//               placeholder="مثال: C1"
+//             />
+//             {src && (
+//               <div className="border rounded-lg max-h-60 overflow-auto p-2">
+//                 {src.items.map((l) => {
+//                   const isSelected = picks[l.id] !== undefined;
+//                   return (
+//                     <div
+//                       key={l.id}
+//                       className="flex items-center gap-2 border-b py-2 text-sm"
+//                     >
+//                       <input
+//                         type="checkbox"
+//                         checked={isSelected}
+//                         onChange={(e) => {
+//                           if (e.target.checked)
+//                             setPicks((prev) => ({ ...prev, [l.id]: l.qty }));
+//                           else
+//                             setPicks((prev) => {
+//                               const n = { ...prev };
+//                               delete n[l.id];
+//                               return n;
+//                             });
+//                         }}
+//                       />
+//                       <span className="flex-1">{l.name}</span>
+//                       {isSelected && (
+//                         <div className="flex items-center gap-1 bg-secondary rounded px-2">
+//                           <button
+//                             onClick={() =>
+//                               setPicks((p) => ({
+//                                 ...p,
+//                                 [l.id]: Math.min(l.qty, (p[l.id] || 0) + 1),
+//                               }))
+//                             }
+//                           >
+//                             +
+//                           </button>
+//                           <span className="w-6 text-center">{picks[l.id]}</span>
+//                           <button
+//                             onClick={() =>
+//                               setPicks((p) => ({
+//                                 ...p,
+//                                 [l.id]: Math.max(1, (p[l.id] || 0) - 1),
+//                               }))
+//                             }
+//                           >
+//                             -
+//                           </button>
+//                         </div>
+//                       )}
+//                     </div>
+//                   );
+//                 })}
+//               </div>
+//             )}
+//           </div>
+//           <div className="space-y-2 relative">
+//             <label className="text-xs font-medium">المنقول إليها</label>
+//             <Input
+//               value={search}
+//               placeholder="بحث (مثال: C5)..."
+//               onChange={(e) => {
+//                 setSearch(e.target.value);
+//                 setShowList(true);
+//               }}
+//               onFocus={() => setShowList(true)}
+//             />
+//             {showList && (
+//               <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-auto">
+//                 {filteredTables.map((t) => (
+//                   <div
+//                     key={t}
+//                     className="p-2 cursor-pointer hover:bg-secondary text-sm border-b"
+//                     onClick={() => {
+//                       setTo(t);
+//                       setSearch(t);
+//                       setShowList(false);
+//                     }}
+//                   >
+//                     {t}
+//                   </div>
+//                 ))}
+//               </div>
+//             )}
+//           </div>
+//         </div>
+//         <DialogFooter>
+//           <Button variant="outline" onClick={onClose}>
+//             إلغاء
+//           </Button>
+//           <Button onClick={doTransfer}>تنفيذ التحويل</Button>
+//         </DialogFooter>
+//       </DialogContent>
+//     </Dialog>
+//   );
+// }
+// 🌟 التعديل 1: خلينا الدالة تستقبل sourceTable كـ Prop أساسي
+function TransferDialog({
+  sourceTable,
+  onClose,
+}: {
+  sourceTable: string;
+  onClose: () => void;
+}) {
   const { db: pos, transferItems } = usePosDB();
-  const [from, setFrom] = useState("");
+
+  // 🌟 التعديل 2: ثبتنا الطاولة المنقول منها (from) بالـ sourceTable ومفيش setFrom لأنها مقفولة
+  const [from] = useState(sourceTable);
   const [to, setTo] = useState("");
   const [search, setSearch] = useState("");
   const [showList, setShowList] = useState(false);
   const [picks, setPicks] = useState<Record<string, number>>({});
+  const [isTransferring, setIsTransferring] = useState(false);
+
+  // 🌟 التعديل 3: ضفنا كل الطاولات الحقيقية واستبعدنا أي حاجة تخص التيك أواي أو الدليفري
   const allTables = useMemo(() => {
     const cTables = Array.from({ length: 70 }, (_, i) => `C${i + 1}`);
     const oTables = Array.from({ length: 70 }, (_, i) => `O${i + 1}`);
-    return [...cTables, ...oTables];
+    const smallTables = Array.from({ length: 30 }, (_, i) => `ص${i + 1}`);
+    const largeTables = Array.from({ length: 50 }, (_, i) => `ك${i + 1}`);
+    const kidsTables = Array.from({ length: 20 }, (_, i) => `K${i + 1}`);
+
+    return [
+      ...cTables,
+      ...oTables,
+      ...smallTables,
+      ...largeTables,
+      ...kidsTables,
+    ];
   }, []);
+
   const filteredTables = allTables.filter((t) =>
     t.toLowerCase().includes(search.toLowerCase()),
   );
+
   const src = from ? pos.orders[from.trim()] : null;
+
   async function doTransfer() {
-    // 👈 ضفنا async هنا
-    if (!from.trim() || !to.trim()) return toast.error("أدخل الطاولتين");
+    if (!to.trim()) return toast.error("أدخل الطاولة المنقول إليها");
+    if (from.trim() === to.trim())
+      return toast.error("لا يمكن التحويل لنفس الطاولة!");
+
     const itemsToMove = Object.entries(picks).map(([id, qty]) => ({ id, qty }));
     if (itemsToMove.length === 0) return toast.error("اختر أصنافاً للنقل");
 
-    const targetZone = to.startsWith("C") ? "dining" : "takeaway";
+    // حددنا الزون دايماً بـ dining لأننا منعنا التحويل للتيك أواي
+    const targetZone = "dining";
 
-    // 👈 ضفنا await هنا عشان الكود يستنى السيرفر يرد
+    setIsTransferring(true);
     const r = await transferItems(
       from.trim(),
-      to.trim(),
+      to.trim().toUpperCase(),
       itemsToMove,
       targetZone as any,
     );
+    setIsTransferring(false);
 
     if (!r.ok) return toast.error((r as any).error || "فشل نقل الأصناف");
-    toast.success("تم النقل بنجاح");
+    toast.success(`تم نقل الأصناف بنجاح إلى ${to.trim().toUpperCase()}`);
     onClose();
   }
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent dir="rtl" className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>تحويل أصناف</DialogTitle>
+          <DialogTitle>تحويل أصناف من طاولة ({sourceTable})</DialogTitle>
         </DialogHeader>
-        {/* ... (نفس كود الترانزفير كما هو بدون تعديل) ... */}
+
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <label className="text-xs font-medium">المنقول منها</label>
+            <label className="text-xs font-bold text-muted-foreground">
+              المنقول منها (ثابتة)
+            </label>
+            {/* 🌟 التعديل 4: قفلنا حقل الإدخال ده تماماً (disabled) */}
             <Input
               value={from}
-              onChange={(e) => {
-                setFrom(e.target.value);
-                setPicks({});
-              }}
-              placeholder="مثال: C1"
+              disabled
+              className="bg-secondary/50 font-bold cursor-not-allowed border-muted"
             />
             {src && (
-              <div className="border rounded-lg max-h-60 overflow-auto p-2">
+              <div className="border rounded-lg max-h-60 overflow-auto p-2 bg-card">
                 {src.items.map((l) => {
                   const isSelected = picks[l.id] !== undefined;
                   return (
                     <div
                       key={l.id}
-                      className="flex items-center gap-2 border-b py-2 text-sm"
+                      className={`flex items-center gap-2 border-b py-2 text-sm transition-colors ${isSelected ? "bg-primary/5" : ""}`}
                     >
                       <input
                         type="checkbox"
                         checked={isSelected}
+                        className="w-4 h-4 cursor-pointer"
                         onChange={(e) => {
                           if (e.target.checked)
                             setPicks((prev) => ({ ...prev, [l.id]: l.qty }));
@@ -1867,10 +2054,11 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
                             });
                         }}
                       />
-                      <span className="flex-1">{l.name}</span>
+                      <span className="flex-1 font-medium">{l.name}</span>
                       {isSelected && (
-                        <div className="flex items-center gap-1 bg-secondary rounded px-2">
+                        <div className="flex items-center gap-1 bg-background border rounded px-2 shadow-sm">
                           <button
+                            className="w-6 h-6 flex items-center justify-center hover:bg-secondary rounded font-bold"
                             onClick={() =>
                               setPicks((p) => ({
                                 ...p,
@@ -1880,8 +2068,11 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
                           >
                             +
                           </button>
-                          <span className="w-6 text-center">{picks[l.id]}</span>
+                          <span className="w-6 text-center font-bold text-primary">
+                            {picks[l.id]}
+                          </span>
                           <button
+                            className="w-6 h-6 flex items-center justify-center hover:bg-secondary rounded font-bold"
                             onClick={() =>
                               setPicks((p) => ({
                                 ...p,
@@ -1899,47 +2090,60 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
               </div>
             )}
           </div>
+
           <div className="space-y-2 relative">
-            <label className="text-xs font-medium">المنقول إليها</label>
+            <label className="text-xs font-bold text-primary">
+              إلى الطاولة (الجديدة)
+            </label>
             <Input
               value={search}
-              placeholder="بحث (مثال: C5)..."
+              placeholder="ابحث واختر طاولة (مثال: C5)..."
               onChange={(e) => {
                 setSearch(e.target.value);
+                setTo(e.target.value.toUpperCase());
                 setShowList(true);
               }}
               onFocus={() => setShowList(true)}
+              className="border-primary focus-visible:ring-primary"
             />
             {showList && (
               <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-auto">
-                {filteredTables.map((t) => (
-                  <div
-                    key={t}
-                    className="p-2 cursor-pointer hover:bg-secondary text-sm border-b"
-                    onClick={() => {
-                      setTo(t);
-                      setSearch(t);
-                      setShowList(false);
-                    }}
-                  >
-                    {t}
+                {filteredTables.length === 0 ? (
+                  <div className="p-3 text-center text-sm text-muted-foreground">
+                    لا توجد طاولات مطابقة
                   </div>
-                ))}
+                ) : (
+                  filteredTables.map((t) => (
+                    <div
+                      key={t}
+                      className="p-2 cursor-pointer hover:bg-primary/10 hover:text-primary font-medium text-sm border-b transition-colors"
+                      onClick={() => {
+                        setTo(t);
+                        setSearch(t);
+                        setShowList(false);
+                      }}
+                    >
+                      طاولة {t}
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </div>
         </div>
+
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={onClose} disabled={isTransferring}>
             إلغاء
           </Button>
-          <Button onClick={doTransfer}>تنفيذ التحويل</Button>
+          <Button onClick={doTransfer} disabled={isTransferring}>
+            {isTransferring ? "جاري التحويل..." : "تنفيذ التحويل"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
-
 function PrintDialog({
   tableCode,
   order,

@@ -55,7 +55,7 @@ export default function ActionGate({
 
   useEffect(() => {
     if (isOpen && employees.length === 0) {
-      fetch("http://192.168.1.44:5000/api/employees")
+      fetch("http://192.168.100.195:5000/api/employees")
         .then((res) => res.json())
         .then((data: Employee[]) => setEmployees(data))
         .catch((err) => console.error("Error fetching employees:", err));
@@ -67,7 +67,7 @@ export default function ActionGate({
 
     // 🌟 التعديل هنا: بنقارن الـ pin المدخل بالـ pin الصافي اللي جاي من السيرفر، أو الـ pinHash كزيادة أمان
     const employee = employees.find(
-      (emp) => (emp).pin === pin || emp.pinHash === pin,
+      (emp) => emp.pin === pin || emp.pinHash === pin,
     );
 
     if (!employee) {

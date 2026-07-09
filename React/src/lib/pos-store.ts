@@ -220,10 +220,10 @@ export function usePosDB() {
         const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
 
         const [ordersRes, shiftRes] = await Promise.all([
-          fetch("http://192.168.1.44:5000/api/pos/orders").catch(() => null),
+          fetch("http://192.168.100.195:5000/api/pos/orders").catch(() => null),
           // 👈 بنبعت رقم الجهاز الحالي (Sub-1 للتابلت) عشان السيرفر يرد بالشيفت بتاعه
           fetch(
-            `http://192.168.1.44:5000/api/pos/shift?terminalId=${currentTerminalId}`,
+            `http://192.168.100.195:5000/api/pos/shift?terminalId=${currentTerminalId}`,
           ).catch(() => null),
         ]);
 
@@ -308,11 +308,14 @@ export function usePosDB() {
       };
 
       try {
-        const res = await fetch("http://192.168.1.44:5000/api/pos/shift/open", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(newShiftData),
-        });
+        const res = await fetch(
+          "http://192.168.100.195:5000/api/pos/shift/open",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newShiftData),
+          },
+        );
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -400,7 +403,7 @@ export function usePosDB() {
       };
 
       try {
-        const res = await fetch("http://192.168.1.44:5000/api/shifts", {
+        const res = await fetch("http://192.168.100.195:5000/api/shifts", {
           method: "POST",
           mode: "cors",
           headers: { "Content-Type": "application/json" },
@@ -533,7 +536,7 @@ export function usePosDB() {
 
       // 🌟 إرسال للباك إند (pgAdmin)
       try {
-        await fetch("http://192.168.1.44:5000/api/customers", {
+        await fetch("http://192.168.100.195:5000/api/customers", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(newCustomer),
@@ -564,7 +567,7 @@ export function usePosDB() {
 
       // 🌟 تحديث في الباك إند (pgAdmin)
       try {
-        await fetch(`http://192.168.1.44:5000/api/customers/${id}`, {
+        await fetch(`http://192.168.100.195:5000/api/customers/${id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(updatedCustomer),
@@ -585,7 +588,7 @@ export function usePosDB() {
     // 2️⃣ إرسال التحديث للسيرفر (قاعدة البيانات الحقيقية)
     try {
       const response = await fetch(
-        "http://192.168.1.44:5000/api/pos/orders/upsert",
+        "http://192.168.100.195:5000/api/pos/orders/upsert",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -614,7 +617,7 @@ export function usePosDB() {
 
     // 2️⃣ إبلاغ السيرفر بمسح الطاولة عشان تتشال من عند الميكروس برضه
     try {
-      await fetch("http://192.168.1.44:5000/api/pos/orders/clear", {
+      await fetch("http://192.168.100.195:5000/api/pos/orders/clear", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableCode }),
@@ -665,12 +668,15 @@ export function usePosDB() {
 
       // 3️⃣ إرسال الفاتورة
       try {
-        const response = await fetch("http://192.168.1.44:5000/api/invoices", {
-          method: "POST",
-          mode: "cors",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fullInvoice),
-        });
+        const response = await fetch(
+          "http://192.168.100.195:5000/api/invoices",
+          {
+            method: "POST",
+            mode: "cors",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(fullInvoice),
+          },
+        );
         if (response.ok) {
           console.log("✅ تم حفظ الفاتورة بنجاح في قاعدة البيانات!");
         } else {
@@ -704,7 +710,7 @@ export function usePosDB() {
 
     // إرسال التحديث لـ PostgreSQL
     try {
-      await fetch(`http://192.168.1.44:5000/api/customers/${id}/increment`, {
+      await fetch(`http://192.168.100.195:5000/api/customers/${id}/increment`, {
         method: "PATCH",
       });
     } catch (err) {
@@ -718,7 +724,7 @@ export function usePosDB() {
 
     const fetchCustomers = async () => {
       try {
-        const res = await fetch("http://192.168.1.44:5000/api/customers");
+        const res = await fetch("http://192.168.100.195:5000/api/customers");
         if (!res.ok) return;
         const serverCustomers = await res.json();
 
@@ -807,7 +813,7 @@ export function usePosDB() {
 
       // 🌟 4. إرسال التحويل للسيرفر (قاعدة البيانات active_orders)
       try {
-        await fetch("http://192.168.1.44:5000/api/pos/orders/transfer", {
+        await fetch("http://192.168.100.195:5000/api/pos/orders/transfer", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -826,44 +832,6 @@ export function usePosDB() {
     },
     [],
   );
-
-  // تحديث مزامنة الداتابيز مع اللوكال ستوريدج
-  // useEffect(() => {
-  //   async function syncServerToLocalStorage() {
-  //     try {
-  //       const [invoicesRes, shiftsRes, employeesRes] = await Promise.all([
-  //         fetch("http://192.168.1.44:5000/api/invoices"),
-  //         fetch("http://192.168.1.44:5000/api/shifts"),
-  //         fetch("http://192.168.1.44:5000/api/employees"),
-  //       ]);
-
-  //       if (invoicesRes.ok && shiftsRes.ok && employeesRes.ok) {
-  //         const invoices = await invoicesRes.json();
-  //         const shifts = await shiftsRes.json();
-  //         const employees = await employeesRes.json();
-
-  //         const cur = load();
-  //         // تحديث اللوكال ستوريدج بالداتا اللي جاية من الداتابيز
-  //         cur.shifts = shifts;
-  //         cur.employees = employees;
-  //         cur.invoices = invoices;
-
-  //         save(cur); // دالة save بتعمل dispatch لـ 'pos-update'
-  //         setDb(cur); // مهم جداً عشان الـ UI يحس بالتحديث ويغير الـ 6 فواتير
-  //       }
-  //     } catch (error) {
-  //       console.error("❌ فشل تحديث الكاش المحلى من السيرفر:", error);
-  //     }
-  //   }
-
-  //   // استدعاء المزامنة أول مرة
-  //   syncServerToLocalStorage();
-
-  //   // اختياري: لو عايز الفواتير تسمع بين الأجهزة كل 10 ثواني
-  //   const interval = setInterval(syncServerToLocalStorage, 10000);
-  //   return () => clearInterval(interval);
-  // }, []);
-
   return {
     db,
     isLoadingEmployees,

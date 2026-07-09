@@ -1106,7 +1106,10 @@ app.post("/api/pos/orders/clear", async (req, res) => {
 app.post("/api/pos/orders/transfer", async (req, res) => {
   const { fromCode, toCode, fromOrder, toOrder } = req.body;
   const client = await pool.connect();
-
+// 🛡️ حماية الباك إند الصارمة: منع التحويل للتيك أواي أو الدليفري
+  if (toCode.startsWith("T") || toCode.startsWith("DEL") || toCode === "تيك أواي") {
+    return res.status(400).json({ success: false, error: "غير مسموح بالتحويل إلى طلبات التيك أواي أو الدليفري" });
+  }
   try {
     await client.query("BEGIN"); // بداية عملية النقل المزدوجة
 

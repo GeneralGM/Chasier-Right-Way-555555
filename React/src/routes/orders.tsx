@@ -1806,17 +1806,22 @@ function TransferDialog({ onClose }: { onClose: () => void }) {
     t.toLowerCase().includes(search.toLowerCase()),
   );
   const src = from ? pos.orders[from.trim()] : null;
-  function doTransfer() {
+  async function doTransfer() {
+    // 👈 ضفنا async هنا
     if (!from.trim() || !to.trim()) return toast.error("أدخل الطاولتين");
     const itemsToMove = Object.entries(picks).map(([id, qty]) => ({ id, qty }));
     if (itemsToMove.length === 0) return toast.error("اختر أصنافاً للنقل");
+
     const targetZone = to.startsWith("C") ? "dining" : "takeaway";
-    const r = transferItems(
+
+    // 👈 ضفنا await هنا عشان الكود يستنى السيرفر يرد
+    const r = await transferItems(
       from.trim(),
       to.trim(),
       itemsToMove,
       targetZone as any,
     );
+
     if (!r.ok) return toast.error((r as any).error || "فشل نقل الأصناف");
     toast.success("تم النقل بنجاح");
     onClose();

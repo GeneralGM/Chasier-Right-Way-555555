@@ -1101,6 +1101,61 @@ app.post("/api/pos/orders/clear", async (req, res) => {
       .json({ success: false, error: "فشل مسح الطاولة من السيرفر" });
   }
 });
+
+// 🌟 مسار التحويل بين الطاولات (مهم جداً لنقل الأوردرات في الداتابيز)
+app.post("/api/pos/orders/transfer", async (req, res) => {
+  const { fromCode, toCode, fromOrder, toOrder } = req.body;
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN"); // بداية عملية النقل المزدوجة
+
+    // 1. تحديث أو إنشاء الطاولة المنقول إليها (to)
+    const upsertToQuery = `
+      INSERT INTO active_orders (table_code, state, order_data, updated_at)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (table_code)
+      DO UPDATE SET state = $2, order_data = $3, updated_at = $4;
+    `;
+    await client.query(upsertToQuery, [
+      toCode,
+      toOrder.state || "active",
+      JSON.stringify(toOrder),
+      Date.now(),
+    ]);
+
+    // 2. تحديث أو مسح الطاولة المنقول منها (from)
+    if (!fromOrder || !fromOrder.items || fromOrder.items.length === 0) {
+      // لو الطاولة فضيت، نمسحها من النشط
+      await client.query("DELETE FROM active_orders WHERE table_code = $1", [
+        fromCode,
+      ]);
+    } else {
+      // لو لسه عليها حاجة، نحدث بياناتها
+      const updateFromQuery = `
+        UPDATE active_orders 
+        SET order_data = $1, updated_at = $2 
+        WHERE table_code = $3
+      `;
+      await client.query(updateFromQuery, [
+        JSON.stringify(fromOrder),
+        Date.now(),
+        fromCode,
+      ]);
+    }
+
+    await client.query("COMMIT"); // تأكيد العملية بنجاح
+    res.json({ success: true, message: "تم تحويل الأصناف بنجاح" });
+  } catch (err) {
+    await client.query("ROLLBACK"); // التراجع لو حصل أي خطأ
+    console.error("🚨 خطأ أثناء تحويل الأصناف:", err);
+    res
+      .status(500)
+      .json({ success: false, error: "فشل التحويل في قاعدة البيانات" });
+  } finally {
+    client.release(); // قفل الاتصال
+  }
+});
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////// Vertify Captian /////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////

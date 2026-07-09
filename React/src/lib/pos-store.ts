@@ -281,7 +281,7 @@ export function usePosDB() {
         if (hasChanges) save(cur);
         setDb(cur);
       } catch (err) {
-        toast("Wrong!!!!!!")
+        toast("Wrong!!!!!!");
       }
     };
 
@@ -739,9 +739,10 @@ export function usePosDB() {
     return () => clearInterval(interval);
   }, []);
 
-  // 🌟 تعديل الـ transferItems لحل مشكلة التيك أواي مع الحفاظ على بقية الصفحات
+  // 🌟 تعديل الـ transferItems عشان يرمي التعديل في السيرفر
   const transferItems = useCallback(
-    (
+    async (
+      // 👈 ضفنا async هنا
       from: string,
       to: string,
       itemsToMove: { id: string; qty: number }[],
@@ -749,9 +750,9 @@ export function usePosDB() {
     ) => {
       const cur = load();
       const src = cur.orders[from];
-      if (!src) return { ok: false };
+      if (!src) return { ok: false, error: "الطاولة غير موجودة" };
 
-      // 1. معالجة الـ targetZone لضمان تحويل المسميات المختصرة (مثل O) إلى الـ ID الحقيقي (open)
+      // 1. معالجة الـ targetZone
       let finalZone: ZoneId = targetZone as ZoneId;
       const foundZone = ZONES.find(
         (z) =>
@@ -763,7 +764,7 @@ export function usePosDB() {
         finalZone = foundZone.id;
       }
 
-      // 2. إنشاء الأوردر الجديد مع وراثة الخصائص الأصلية (العميل، الخصم، الضرائب) حتى لا تضيع البيانات
+      // 2. إنشاء الأوردر الجديد
       const dst = cur.orders[to] || {
         ...src,
         tableCode: to,
@@ -775,11 +776,11 @@ export function usePosDB() {
         openedAt: src.openedAt || Date.now(),
       };
 
-      // 3. مسح خاصية الـ type التيك أواي طالما الأوردر منقول لصالة حقيقية حتي لا يقرأه السيستم كتيك أواي
       if (finalZone !== "takeaway") {
         delete dst.type;
       }
 
+      // 3. النقل المحلي للأصناف
       for (const move of itemsToMove) {
         const idx = src.items.findIndex((i) => i.id === move.id);
         if (idx === -1) continue;
@@ -796,10 +797,30 @@ export function usePosDB() {
           });
         }
       }
+
       cur.orders[to] = dst;
       if (src.items.length === 0) delete cur.orders[from];
+
       save(cur);
       setDb(cur);
+
+      // 🌟 4. إرسال التحويل للسيرفر (قاعدة البيانات active_orders)
+      try {
+        await fetch("http://192.168.1.44:5000/api/pos/orders/transfer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fromCode: from,
+            toCode: to,
+            fromOrder: cur.orders[from] || null,
+            toOrder: dst,
+          }),
+        });
+      } catch (err) {
+        console.error("🚨 خطأ أثناء مزامنة التحويل مع السيرفر:", err);
+        return { ok: false, error: "فشل الاتصال بالسيرفر أثناء التحويل" };
+      }
+
       return { ok: true };
     },
     [],

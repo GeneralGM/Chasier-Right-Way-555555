@@ -979,7 +979,7 @@ function ShiftsTab() {
                     </div>
                   </td>
                   <td className="p-3 font-medium">
-                    {report.shift.cashierName}
+                    {report.shift.cashierName || report.shift.cashier_name || "Unkonwn يا يوسف"}
                   </td>
                   <td className="p-3">{report.invoiceCount}</td>
                   <td className="p-3 font-bold text-emerald-600">

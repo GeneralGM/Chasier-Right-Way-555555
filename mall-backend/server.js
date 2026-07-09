@@ -516,7 +516,8 @@ app.post("/api/shifts", async (req, res) => {
          total_revenue = $7, 
          dinein_sales = $8, 
          takeaway_sales = $9, 
-         delivery_sales = $10
+         delivery_sales = $10,
+         cashier_name = COALESCE($13, cashier_name) -- 🌟 إجبار تحديث الاسم هنا!
        WHERE opened_at = $11 AND terminal_id = $12 AND closed_at IS NULL 
        RETURNING *`,
       [
@@ -526,12 +527,13 @@ app.post("/api/shifts", async (req, res) => {
         Number(shishaSales) || 0,
         Number(taxValue) || 0,
         Number(discountValue) || 0,
-        finalRevenueToSave, // الإجمالي المضمون 100%
+        finalRevenueToSave,
         finalDineinToSave,
         finalTakeawayToSave,
         finalDeliveryToSave,
         finalOpenedAt,
         termId,
+        cashierName || "كاشير فرعي", // 👈 تمرير الاسم المتأمن كمتغير 13
       ],
     );
 

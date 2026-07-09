@@ -140,6 +140,7 @@ export interface Invoice {
 }
 
 export interface ShiftState {
+  cashier_name?: string;
   id?: string; // 👈 ضفنا الـ id كاختياري
   cashierId: string;
   cashierName: string;
@@ -238,7 +239,10 @@ export function usePosDB() {
               id: rawShift.id,
               cashierId: rawShift.cashier_id || rawShift.cashierId,
               cashierName:
-                rawShift.cashier_name || rawShift.cashierName || "كاشير",
+                rawShift.cashier_name ||
+                rawShift.cashierName ||
+                localStorage.getItem("backupCashierName") ||
+                "كاشير",
               openedAt: Number(rawShift.opened_at || rawShift.openedAt),
               closedAt: rawShift.closed_at
                 ? Number(rawShift.closed_at)
@@ -341,6 +345,9 @@ export function usePosDB() {
           save(cur);
           setDb(cur);
 
+          // 🌟 إضافة حماية: حفظ اسم الكاشير احتياطياً في الـ localStorage
+          localStorage.setItem("backupCashierName", formattedShift.cashierName);
+
           toast.success(`🚀 تم بدء الوردية بنجاح للجهاز ${currentTerminalId}`);
           return true;
         } else {
@@ -373,14 +380,19 @@ export function usePosDB() {
       const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
       const activeShift = load().shift;
 
+      // 🌟 الأمان النهائي: جلب الاسم من الاحتياطي لو الشيفت سقط من الـ State
+      const fallbackName =
+        localStorage.getItem("backupCashierName") || "كاشير احتياطي";
+
       if (!activeShift) {
         toast.error("لا يوجد وردية مفتوحة لإغلاقها على هذا الجهاز!");
         return false;
       }
 
+      // 🌟 تأمين الـ Payload عشان الاسم ميتبعتش فاضي أبداً
       const closedShiftData = {
-        cashierId: activeShift.cashierId,
-        cashierName: activeShift.cashierName,
+        cashierId: activeShift.cashierId || "sec-cashier",
+        cashierName: activeShift.cashierName || fallbackName, // 👈 التأمين السحري هنا
         openedAt: activeShift.openedAt,
         closedAt: Date.now(),
         ...totalsData,
@@ -404,6 +416,9 @@ export function usePosDB() {
         const cur = load();
         cur.shifts = [savedShiftFromServer, ...cur.shifts];
         cur.shift = null; // تصفير كاش الوردية للجهاز ده بس
+
+        // 🌟 تصفير الاحتياطي بعد التقفيل الناجح
+        localStorage.removeItem("backupCashierName");
 
         save(cur);
         setDb(cur);
@@ -673,106 +688,6 @@ export function usePosDB() {
     },
     [],
   );
-  /*
-  const openShift = useCallback(
-    async (cashierId: string, cashierName: string) => {
-      const shiftData = { cashierId, cashierName, openedAt: Date.now() };
-
-      // 1. الحفظ محلياً
-      const cur = load();
-      cur.shift = shiftData;
-      save(cur);
-      setDb(cur);
-
-      // 2. إبلاغ السيرفر عشان يفتح أجهزة الميكروس
-      try {
-        await fetch("http://192.168.1.44:5000/api/pos/shift/open", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(shiftData),
-        });
-      } catch (err) {
-        console.error("🚨 خطأ في إرسال الشيفت للسيرفر", err);
-      }
-    },
-    [],
-  );
-
-  const closeShift = useCallback(
-    async (totalsData: {
-      kitchenSales: number;
-      barSales: number;
-      shishaSales: number;
-      taxValue: number;
-      discountValue: number;
-      dineinSales: number;
-      takeawaySales: number;
-      deliverySales: number;
-      terminalId?: string;
-      actualCash?: number;
-    }) => {
-      const isSecCashier =
-        localStorage.getItem("isSecCashierDevice") === "true";
-      const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
-
-      const activeShift = load().shift;
-
-      // 🌟 الأمان: لو الكاشير الأساسي قفل والـ activeShift بقا null، نقرأ من اللي سجلناه في الـ useEffect
-      const storedOpenedAt = Number(localStorage.getItem("subShiftOpenedAt"));
-      const storedCashierName = localStorage.getItem("currentCashierName");
-
-      const closedShiftData = {
-        cashierId: activeShift ? activeShift.cashierId : "sec-cashier",
-        cashierName: activeShift
-          ? activeShift.cashierName
-          : storedCashierName || "كاشير فرعي",
-        openedAt: activeShift
-          ? activeShift.openedAt
-          : storedOpenedAt || Date.now() - 3600000,
-        closedAt: Date.now(),
-        ...totalsData,
-        terminalId: currentTerminalId,
-      };
-
-      try {
-        const res = await fetch("http://192.168.1.44:5000/api/shifts", {
-          method: "POST",
-          mode: "cors",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(closedShiftData),
-        });
-
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || "فشل الحفظ على السيرفر");
-        }
-
-        const savedShiftFromServer = await res.json();
-        const cur = load();
-        cur.shifts = [savedShiftFromServer, ...cur.shifts];
-
-        // 🌟 تفريغ المتغيرات عشان الشيفت يقفل بجد
-        if (!isSecCashier) {
-          cur.shift = null;
-        }
-        localStorage.removeItem("subShiftOpenedAt");
-
-        save(cur);
-        localStorage.setItem("pos_shifts", JSON.stringify(cur.shifts));
-        setDb(cur);
-
-        toast.success(`🎉 تم إغلاق الوردية للجهاز ${currentTerminalId} بنجاح!`);
-        return savedShiftFromServer;
-      } catch (err: any) {
-        console.error("❌ خطأ أثناء إغلاق الشفت بالسيرفر:", err);
-        toast.error(`حدث خطأ: ${err.message || "فشل الاتصال بالسيرفر"}`);
-        return false;
-      }
-    },
-    [],
-  );
-  */
-
   // 🌟 دالة تزويد العداد مربوطة بالسيرفر
   const incCustomerOrders = useCallback(async (id?: string) => {
     if (!id) return;

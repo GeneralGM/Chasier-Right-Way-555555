@@ -1106,10 +1106,6 @@ app.post("/api/pos/orders/clear", async (req, res) => {
 app.post("/api/pos/orders/transfer", async (req, res) => {
   const { fromCode, toCode, fromOrder, toOrder } = req.body;
   const client = await pool.connect();
-// 🛡️ حماية الباك إند الصارمة: منع التحويل للتيك أواي أو الدليفري
-  if (toCode.startsWith("T") || toCode.startsWith("DEL") || toCode === "تيك أواي") {
-    return res.status(400).json({ success: false, error: "غير مسموح بالتحويل إلى طلبات التيك أواي أو الدليفري" });
-  }
   try {
     await client.query("BEGIN"); // بداية عملية النقل المزدوجة
 
@@ -1304,6 +1300,41 @@ app.get("/api/pos/shifts-archive", async (req, res) => {
     res.status(500).json({ error: "فشل جلب أرشيف الشيفتات" });
   }
 });
+// 🌟 مسار تحديث وخصم المخازن الفرعية من قاعدة البيانات
+app.post("/api/inventory/deduct-substock", async (req, res) => {
+  const { department, items } = req.body; // items = [{ itemId, baseQty }]
+
+  if (!department || !items || !Array.isArray(items)) {
+    return res.status(400).json({ error: "بيانات غير مكتملة" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    for (const item of items) {
+      // 🌟 تم تصحيح اسم الجدول لـ department_stock والعمود لـ qty
+      const queryText = `
+        UPDATE department_stock 
+        SET qty = COALESCE(qty, 0) - $1 
+        WHERE item_id = $2 AND department = $3
+      `;
+      await client.query(queryText, [item.baseQty, item.itemId, department]);
+    }
+
+    await client.query("COMMIT");
+    res.json({
+      success: true,
+      message: "تم خصم الكميات من قاعدة البيانات بنجاح!",
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("❌ خطأ أثناء خصم المخزن من الداتابيز:", err.message);
+    res.status(500).json({ error: "فشل تحديث كميات المخزن في قاعدة البيانات" });
+  } finally {
+    client.release();
+  }
+  });
 //////////////////////////////////////////////////////////////////////////////////////
 const PORT = 5000;
 app.listen(PORT, "0.0.0.0", () => {

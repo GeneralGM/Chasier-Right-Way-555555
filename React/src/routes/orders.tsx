@@ -8,6 +8,7 @@ import {
   deptKey,
   convertToBase,
   SHISHA_CATEGORY,
+  expandMealToBase,
   type Meal,
   type SubDept,
   type Item,
@@ -1303,56 +1304,96 @@ function OrderEntryDialog({
     return min === Infinity ? 99 : Math.max(0, min);
   }
   // 🌟 استرجاع دالة السحب الخاصة بالتيك أواي
+  // function deductInventoryForTakeaway() {
+  //   const perDept: Record<string, { itemId: string; baseQty: number }[]> = {};
+  //   for (const line of draftItems) {
+  //     // بتسحب من مسودة الطلب
+  //     const meal = db.meals.find((m) => m.id === line.mealId);
+  //     if (!meal) continue;
+  //     if (meal.category === SHISHA_CATEGORY) continue;
+  //     const dept = meal.department || "عام";
+  //     for (const ing of meal.ingredients) {
+  //       if (ing.refKind === "meal") continue;
+  //       const it = db.items.find((x) => x.id === ing.itemId);
+  //       if (!it) continue;
+  //       const baseQty = round2(
+  //         clamp0(
+  //           convertToBase(
+  //             ing.qty,
+  //             ing.unit,
+  //             it.unit,
+  //             it.conversionFactor,
+  //             it.subUnitType,
+  //           ) * line.qty,
+  //         ),
+  //       );
+  //       if (baseQty <= 0) continue;
+  //       (perDept[dept] = perDept[dept] || []).push({ itemId: it.id, baseQty });
+  //     }
+  //   }
+  //   for (const [d, arr] of Object.entries(perDept)) {
+  //     deductSubStock(d as SubDept, arr);
+  //   }
+  // }
+  // 🌟 استرجاع دالة السحب الخاصة بالتيك أواي والدليفري
+  // 🌟 استرجاع دالة السحب الخاصة بالتيك أواي والدليفري مجمعة
   function deductInventoryForTakeaway() {
-    const perDept: Record<string, { itemId: string; baseQty: number }[]> = {};
+    const perDept: Record<string, Record<string, number>> = {};
     for (const line of draftItems) {
-      // بتسحب من مسودة الطلب
       const meal = db.meals.find((m) => m.id === line.mealId);
-      if (!meal) continue;
-      if (meal.category === SHISHA_CATEGORY) continue;
+      if (!meal || meal.category === SHISHA_CATEGORY) continue;
+
       const dept = meal.department || "عام";
-      for (const ing of meal.ingredients) {
-        if (ing.refKind === "meal") continue;
-        const it = db.items.find((x) => x.id === ing.itemId);
-        if (!it) continue;
-        const baseQty = round2(
-          clamp0(
-            convertToBase(
-              ing.qty,
-              ing.unit,
-              it.unit,
-              it.conversionFactor,
-              it.subUnitType,
-            ) * line.qty,
-          ),
-        );
+      if (!perDept[dept]) perDept[dept] = {};
+
+      const baseIngredients = expandMealToBase(meal, db.meals, db.items);
+
+      for (const [itemId, info] of baseIngredients) {
+        // 🌟 الضرب في العدد المطلوب وتجميع الأصناف المتشابهة
+        const baseQty = round2(clamp0(info.qty * line.qty));
         if (baseQty <= 0) continue;
-        (perDept[dept] = perDept[dept] || []).push({ itemId: it.id, baseQty });
+        perDept[dept][itemId] = (perDept[dept][itemId] || 0) + baseQty;
       }
     }
-    for (const [d, arr] of Object.entries(perDept)) {
-      deductSubStock(d as SubDept, arr);
+    for (const [deptName, itemsMap] of Object.entries(perDept)) {
+      const arr = Object.entries(itemsMap).map(([itemId, baseQty]) => ({
+        itemId,
+        baseQty,
+      }));
+      deductSubStock(deptName as SubDept, arr);
     }
   }
-
   // 🌟 التعديلات على المسودة (لا تُرسل للسيرفر فوراً)
   function addLine(
     meal: Meal,
     extras: { label: string; price: number }[] = [],
     summary?: string,
   ) {
-    const line: OrderItem = {
-      id: crypto.randomUUID(),
-      mealId: meal.id,
-      name: meal.name,
-      qty: 1,
-      unitPrice: round2(meal.sellingPrice),
-      extras,
-      modifiersSummary: summary,
-      mealName: undefined,
-      department: "",
-    };
-    setDraftItems([...draftItems, line]);
+    // 1. ندور هل الصنف ده موجود بنفس الإضافات بالظبط في السلة؟
+    const existingLineIndex = draftItems.findIndex(
+      (item) => item.mealId === meal.id && item.modifiersSummary === summary,
+    );
+
+    if (existingLineIndex >= 0) {
+      // 2. لو موجود: ننسخ المسودة، نزود العدد بواحد، ونحدث السلة من غير سطور جديدة
+      const newDraftItems = [...draftItems];
+      newDraftItems[existingLineIndex].qty += 1;
+      setDraftItems(newDraftItems);
+    } else {
+      // 3. لو صنف جديد تماماً (أو نفس الصنف بس بإضافات مختلفة): ننزله كسطر جديد
+      const line: OrderItem = {
+        id: crypto.randomUUID(),
+        mealId: meal.id,
+        name: meal.name,
+        qty: 1,
+        unitPrice: round2(meal.sellingPrice),
+        extras,
+        modifiersSummary: summary,
+        mealName: undefined,
+        department: "",
+      };
+      setDraftItems([...draftItems, line]);
+    }
   }
 
   function changeQty(lineId: string, qty: number) {
@@ -2313,37 +2354,63 @@ function CheckoutDialog({
     currentOrder.taxPct,
   );
 
-  function deductInventory() {
-    const perDept: Record<string, { itemId: string; baseQty: number }[]> = {};
-    for (const line of currentOrder.items) {
-      const meal = db.meals.find((m) => m.id === line.mealId);
-      if (!meal) continue;
-      if (meal.category === SHISHA_CATEGORY) continue;
-      const dept = meal.department;
-      for (const ing of meal.ingredients) {
-        if (ing.refKind === "meal") continue;
-        const it = db.items.find((x) => x.id === ing.itemId);
-        if (!it) continue;
-        const baseQty = round2(
-          clamp0(
-            convertToBase(
-              ing.qty,
-              ing.unit,
-              it.unit,
-              it.conversionFactor,
-              it.subUnitType,
-            ) * line.qty,
-          ),
-        );
-        if (baseQty <= 0) continue;
-        (perDept[dept] = perDept[dept] || []).push({ itemId: it.id, baseQty });
-      }
-    }
-    for (const [d, arr] of Object.entries(perDept))
-      deductSubStock(d as SubDept, arr);
-  }
+  // function deductInventory() {
+  //   const perDept: Record<string, { itemId: string; baseQty: number }[]> = {};
+  //   for (const line of currentOrder.items) {
+  //     const meal = db.meals.find((m) => m.id === line.mealId);
+  //     if (!meal) continue;
+  //     if (meal.category === SHISHA_CATEGORY) continue;
+  //     const dept = meal.department;
+  //     for (const ing of meal.ingredients) {
+  //       if (ing.refKind === "meal") continue;
+  //       const it = db.items.find((x) => x.id === ing.itemId);
+  //       if (!it) continue;
+  //       const baseQty = round2(
+  //         clamp0(
+  //           convertToBase(
+  //             ing.qty,
+  //             ing.unit,
+  //             it.unit,
+  //             it.conversionFactor,
+  //             it.subUnitType,
+  //           ) * line.qty,
+  //         ),
+  //       );
+  //       if (baseQty <= 0) continue;
+  //       (perDept[dept] = perDept[dept] || []).push({ itemId: it.id, baseQty });
+  //     }
+  //   }
+  //   for (const [d, arr] of Object.entries(perDept))
+  //     deductSubStock(d as SubDept, arr);
+  // }
 
   // 1. ضيف الـ State دي في بداية الكومبوننت لو مش ضايفها
+  function deductInventory() {
+    const perDept: Record<string, Record<string, number>> = {};
+    for (const line of currentOrder.items) {
+      const meal = db.meals.find((m) => m.id === line.mealId);
+      if (!meal || meal.category === SHISHA_CATEGORY) continue;
+
+      const dept = meal.department;
+      if (!perDept[dept]) perDept[dept] = {};
+
+      const baseIngredients = expandMealToBase(meal, db.meals, db.items);
+
+      for (const [itemId, info] of baseIngredients) {
+        // 🌟 الضرب في العدد المطلوب وتجميع الأصناف المتشابهة
+        const baseQty = round2(clamp0(info.qty * line.qty));
+        if (baseQty <= 0) continue;
+        perDept[dept][itemId] = (perDept[dept][itemId] || 0) + baseQty;
+      }
+    }
+    for (const [deptName, itemsMap] of Object.entries(perDept)) {
+      const arr = Object.entries(itemsMap).map(([itemId, baseQty]) => ({
+        itemId,
+        baseQty,
+      }));
+      deductSubStock(deptName as SubDept, arr);
+    }
+  }
   const [isSubmitting, setIsSubmitting] = useState(false);
   async function finalize() {
     if (isSubmitting) return; // منع الضغط المزدوج
@@ -2421,7 +2488,9 @@ function CheckoutDialog({
       // 4️⃣ توزيع المبيعات على الأقسام والتقرير اليومي
       const salesByDept: Record<string, any[]> = {};
       currentOrder.items.forEach((item: any) => {
-        const dept = item.department || "عام";
+        // 🌟 نجيب القسم المظبوط من الداتابيز
+        const meal = db.meals.find((m) => m.id === item.mealId);
+        const dept = meal?.department || "عام";
         if (!salesByDept[dept]) {
           salesByDept[dept] = [];
         }
@@ -2432,17 +2501,23 @@ function CheckoutDialog({
         const lines = deptLines as any[];
 
         if (lines.length > 0) {
-          // لو تيك أواي هينزل في خانة مستقلة باسم "التيك اوي"[cite: 12]
           const reportCategory = isTakeaway ? "التيك اوي" : deptName;
 
           const totalSales = lines.reduce(
-            (sum: number, l: any) => sum + l.price * l.qty,
+            (sum: number, l: any) =>
+              sum + (l.unitPrice || l.price || 0) * l.qty,
             0,
           );
-          const totalCost = lines.reduce(
-            (sum: number, l: any) => sum + (l.costPrice || 0) * l.qty,
-            0,
-          );
+
+          // 🌟 حساب التكلفة بدقة للمواد المصنعة
+          let totalCost = 0;
+          for (const l of lines) {
+            const m = db.meals.find((x) => x.id === l.mealId);
+            if (m) {
+              const baseDeds = expandMealToBase(m, db.meals, db.items);
+              for (const [, info] of baseDeds) totalCost += info.cost * l.qty;
+            }
+          }
 
           const newSale = {
             id: "sale_" + crypto.randomUUID().split("-")[0] + "_" + Date.now(),
@@ -2454,9 +2529,16 @@ function CheckoutDialog({
             createdAt: Date.now(),
           };
 
-          // await addDailySale(newSale);
+          // 🌟 إرسال المبيعات للسيرفر مباشرة عشان تظهر في صفحة النتائج والجرد
+          fetch("http://192.168.100.195:5000/api/sales", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newSale),
+          }).catch((err) => console.error("❌ فشل تسجيل المبيعات:", err));
         }
       }
+
+      onDone();
 
       onDone();
     } catch (e) {

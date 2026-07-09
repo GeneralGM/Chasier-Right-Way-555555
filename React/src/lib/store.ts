@@ -1110,39 +1110,42 @@ export function useDB() {
   const deductSubStock = useCallback(
     async (dept: SubDept, deltas: { itemId: string; baseQty: number }[]) => {
       const cur = load();
-      const updates = []; // 🌟 مصفوفة لتجميع الداتا اللي هتترفع للسيرفر
+      const payloadItems = [];
 
       for (const d of deltas) {
         const k = deptKey(dept, d.itemId);
+        // تحديث الكاش المحلي
         const newQty = round2(
           clamp0((cur.deptStock[k] || 0) - clamp0(d.baseQty)),
         );
-        cur.deptStock[k] = newQty; // الخصم المحلي
+        cur.deptStock[k] = newQty;
 
-        // تجهيز الداتا للإرسال
-        const itemName =
-          cur.items.find((i) => i.id === d.itemId)?.name || "غير محدد";
-        updates.push({
+        // 🌟 نبعت الكمية المسحوبة (الخصم) للسيرفر وهو يتصرف
+        payloadItems.push({
           itemId: d.itemId,
-          itemName: itemName,
-          department: dept,
-          qty: newQty,
+          baseQty: d.baseQty,
         });
       }
 
       save(cur);
-      setDb(cur); // 🌟🌟 السطر ده اللي بيعمل Refresh للشاشة فوراً وتشوف الرقم الجديد!
+      setDb(cur); // تحديث الشاشة
 
-      // 🌟🌟 رفع الخصم على الداتابيز (pgAdmin)
-      for (const u of updates) {
+      // 🌟 رفع الخصم على الداتابيز دفعة واحدة بمسار الخصم الدقيق
+      if (payloadItems.length > 0) {
         try {
-          await fetch("http://192.168.100.195:5000/api/dept-stock", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(u),
-          });
+          await fetch(
+            "http://192.168.100.195:5000/api/inventory/deduct-substock",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                department: dept,
+                items: payloadItems,
+              }),
+            },
+          );
         } catch (err) {
-          console.error(`❌ فشل خصم رصيد ${u.department} من الداتابيز:`, err);
+          console.error(`❌ فشل خصم رصيد ${dept} من الداتابيز:`, err);
         }
       }
     },

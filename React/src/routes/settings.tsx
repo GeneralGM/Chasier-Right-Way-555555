@@ -567,13 +567,12 @@ function ShiftsTab() {
   const [serverInvoices, setServerInvoices] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // 🔄 جلب البيانات من السيرفر أوتوماتيكياً في حالة مسح الذاكرة المحلية
+  // 🌟 تعديل دالة جلب الشيفتات والفواتير التاريخية بالكامل من السيرفر
   useEffect(() => {
     async function fetchShiftsAndInvoices() {
-      if (pos.shifts.length > 0) return; // لو الداتا موجودة محلياً مفيش داعي نكلم السيرفر
-
       try {
         setIsLoading(true);
+        // بنكلم المسارات للحصول على الأرشيف الكامل
         const [shiftsRes, invoicesRes] = await Promise.all([
           fetch("http://192.168.1.44:5000/api/shifts"),
           fetch("http://192.168.1.44:5000/api/invoices"),
@@ -582,23 +581,36 @@ function ShiftsTab() {
         if (shiftsRes.ok && invoicesRes.ok) {
           const shiftsData = await shiftsRes.json();
           const invoicesData = await invoicesRes.json();
-          setServerShifts(shiftsData);
-          setServerInvoices(invoicesData);
+
+          // تأكيد ترتيب الشيفتات من الأحدث للأقدم
+          if (Array.isArray(shiftsData)) {
+            setServerShifts(shiftsData);
+          }
+          if (Array.isArray(invoicesData)) {
+            setServerInvoices(invoicesData);
+          }
         }
       } catch (err) {
-        console.error("❌ خطأ أثناء جلب الشيفتات الاحتياطية من pgAdmin:", err);
+        console.error("❌ خطأ أثناء جلب الشيفتات من قاعدة البيانات:", err);
       } finally {
         setIsLoading(false);
       }
     }
 
     fetchShiftsAndInvoices();
-  }, [pos.shifts.length]);
+  }, []); // 👈 خليناها تشتغل أول ما تنقل بين التابات عشان الداتا تتحدث فوراً
 
   const shiftsWithData: ShiftReport[] = useMemo(() => {
-    const sourceShifts = pos.shifts.length > 0 ? pos.shifts : serverShifts;
-    const sourceInvoices =
-      pos.invoices.length > 0 ? pos.invoices : serverInvoices;
+    // 🌟 التعديل السحري هنا: دمج الأرشيف القادم من السيرفر مع المحلي لمنع فقدان أي شيفت
+    const shiftsMap = new Map();
+    serverShifts.forEach((s) => shiftsMap.set(s.id, s));
+    pos.shifts.forEach((s) => shiftsMap.set(s.id, s));
+    const sourceShifts = Array.from(shiftsMap.values());
+
+    const invoicesMap = new Map();
+    serverInvoices.forEach((i) => invoicesMap.set(i.id, i));
+    pos.invoices.forEach((i) => invoicesMap.set(i.id, i));
+    const sourceInvoices = Array.from(invoicesMap.values());
 
     const sortedShifts = [...sourceShifts].sort(
       (a, b) => (b.closedAt || 0) - (a.closedAt || 0),
@@ -611,7 +623,6 @@ function ShiftsTab() {
         return true;
       });
 
-      // 🌟 التعديل السحري: نضع القيم المخزنة في السيرفر كقيمة مبدئية بدلاً من الصفر الصريح!
       let kitchen = Number(shift.kitchenSales) || 0;
       let bar = Number(shift.barSales) || 0;
       let shisha = Number(shift.shishaSales) || 0;
@@ -621,12 +632,9 @@ function ShiftsTab() {
       let discount =
         Number(shift.discountValue || (shift as any).discount_value) || 0;
 
-      // حساب الإجمالي الأصلي (الفرعي) إذا لم تتوفر فواتير تفصيلية
       let subtotal = kitchen + bar + shisha;
 
-      // إذا كانت هناك فواتير متوفرة فعلياً، نقوم بالحساب الديناميكي الدقيق منها
       if (shiftInvoices.length > 0 && db.meals && db.meals.length > 0) {
-        // إعادة تصفير للحساب التفصيلي فقط لو الفواتير موجودة
         kitchen = 0;
         bar = 0;
         shisha = 0;
@@ -661,7 +669,7 @@ function ShiftsTab() {
             const meal = db.meals.find((m) => m.id === line.mealId);
             if (!meal) continue;
 
-            const extras = line.extras?.reduce((s, e) => s + e.price, 0) || 0;
+            const extras = line.extras?.reduce((s: any, e: { price: any; }) => s + e.price, 0) || 0;
             const v = (line.unitPrice + extras) * line.qty;
 
             const isShisha =
@@ -675,7 +683,6 @@ function ShiftsTab() {
         }
       }
 
-      // الاعتماد على التوتال المحسوب في السيرفر أو إعادة حسابه مع الضريبة والخصم
       const finalNetCash = shift.totalRevenue
         ? Number(shift.totalRevenue)
         : kitchen + bar + shisha + tax - discount;
@@ -979,7 +986,9 @@ function ShiftsTab() {
                     </div>
                   </td>
                   <td className="p-3 font-medium">
-                    {report.shift.cashierName || report.shift.cashier_name || "Unkonwn يا يوسف"}
+                    {report.shift.cashierName ||
+                      report.shift.cashier_name ||
+                      "Unkonwn يا يوسف"}
                   </td>
                   <td className="p-3">{report.invoiceCount}</td>
                   <td className="p-3 font-bold text-emerald-600">

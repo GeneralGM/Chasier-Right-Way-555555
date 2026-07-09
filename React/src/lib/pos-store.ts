@@ -281,7 +281,7 @@ export function usePosDB() {
         if (hasChanges) save(cur);
         setDb(cur);
       } catch (err) {
-        toast("Wrong!!!!!!");
+        /* empty */
       }
     };
 
@@ -739,6 +739,7 @@ export function usePosDB() {
     return () => clearInterval(interval);
   }, []);
 
+  // 🌟 تعديل الـ transferItems لحل مشكلة التيك أواي مع الحفاظ على بقية الصفحات
   // 🌟 تعديل الـ transferItems عشان يرمي التعديل في السيرفر
   const transferItems = useCallback(
     async (

@@ -1276,6 +1276,31 @@ app.patch("/api/customers/:id/increment", async (req, res) => {
     res.status(500).json({ success: false, error: "فشل تحديث العداد" });
   }
 });
+// 🌟 مسار جلب أرشيف الشيفتات بالكامل لصفحة الإعدادات
+app.get("/api/pos/shifts-archive", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, cashier_id, cashier_name, opened_at, closed_at, initial_cash, actual_cash, state FROM shifts ORDER BY opened_at DESC",
+    );
+
+    // تحويل الأسماء لـ camelCase عشان الفرونت إند يفهمها علطول
+    const formattedShifts = result.rows.map((row) => ({
+      id: row.id,
+      cashierId: row.cashier_id,
+      cashierName: row.cashier_name,
+      openedAt: row.opened_at ? Number(row.opened_at) : null,
+      closedAt: row.closed_at ? Number(row.closed_at) : null,
+      initialCash: Number(row.initial_cash) || 0,
+      actualCash: Number(row.actual_cash) || 0,
+      state: row.state,
+    }));
+
+    res.json(formattedShifts);
+  } catch (err) {
+    console.error("❌ خطأ أثناء جلب أرشيف الشيفتات:", err.message);
+    res.status(500).json({ error: "فشل جلب أرشيف الشيفتات" });
+  }
+});
 //////////////////////////////////////////////////////////////////////////////////////
 const PORT = 5000;
 app.listen(PORT, "0.0.0.0", () => {

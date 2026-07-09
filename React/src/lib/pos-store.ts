@@ -281,7 +281,7 @@ export function usePosDB() {
         if (hasChanges) save(cur);
         setDb(cur);
       } catch (err) {
-        /* empty */
+        toast("Wrong!!!!!!")
       }
     };
 

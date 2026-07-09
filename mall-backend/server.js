@@ -1105,23 +1105,28 @@ app.post("/api/pos/orders/clear", async (req, res) => {
 ///////////////////////////////////////////////// Vertify Captian /////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 app.post("/api/pos/verify-captain", async (req, res) => {
-  const { password, expectedCaptainName } = req.body; // 🌟 استقبلنا الاسم المتوقع لو الطاولة مفتوحة
+  const { password, expectedCaptainName } = req.body;
 
   if (!password) {
     return res.status(400).json({ success: false, error: "الرمز السري مطلوب" });
   }
 
   try {
-    // 1. نبحث عن الموظف بالباسوورد وتكون رتبته كابتن صالة
+    // 🌟 توليد الهاش عشان ندعم الكباتن القدام (الهاش) والجداد (الصافي) مع بعض
+    const hashedInput = crypto
+      .createHash("sha256")
+      .update(String(password))
+      .digest("hex");
+
+    // 1. نبحث بالباسوورد الصافي أو الهاش وتكون رتبته كابتن صالة
     const result = await pool.query(
-      "SELECT name, role FROM employees WHERE pin_hash = $1 AND role = 'كابتن صالة' LIMIT 1",
-      [String(password)],
+      "SELECT name, role FROM employees WHERE (pin_hash = $1 OR pin_hash = $2) AND role = 'كابتن صالة' LIMIT 1",
+      [String(password), hashedInput],
     );
 
     if (result.rows.length > 0) {
       const foundCaptainName = result.rows[0].name;
 
-      // 🌟 القفل هنا: لو الطاولة مفتوحة بكابتن معين، لازم الباسوورد يرجع نفس الاسم ده بالظبط!
       if (expectedCaptainName && expectedCaptainName !== foundCaptainName) {
         return res.status(403).json({
           success: false,
@@ -1129,7 +1134,6 @@ app.post("/api/pos/verify-captain", async (req, res) => {
         });
       }
 
-      // لو كله تمام أو طاولة جديدة
       return res.json({ success: true, captainName: foundCaptainName });
     } else {
       return res

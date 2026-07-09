@@ -119,8 +119,12 @@ function SecCashierLogin({
     fetchEmployeesFallback();
   }, [pos.employees, pos.employees.length]);
 
-  const activeEmployeesList =
-    pos.employees && pos.employees.length > 0 ? pos.employees : serverEmployees;
+  const activeEmployeesList = useMemo(() => {
+    const map = new Map();
+    if (pos.employees) pos.employees.forEach((e) => map.set(e.name, e));
+    if (serverEmployees) serverEmployees.forEach((e) => map.set(e.name, e));
+    return Array.from(map.values());
+  }, [pos.employees, serverEmployees]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -263,8 +267,12 @@ function ShiftLogin() {
     fetchEmployeesFallback();
   }, [pos.employees, pos.employees.length]);
 
-  const activeEmployeesList =
-    pos.employees && pos.employees.length > 0 ? pos.employees : serverEmployees;
+  const activeEmployeesList = useMemo(() => {
+    const map = new Map();
+    if (pos.employees) pos.employees.forEach((e) => map.set(e.name, e));
+    if (serverEmployees) serverEmployees.forEach((e) => map.set(e.name, e));
+    return Array.from(map.values());
+  }, [pos.employees, serverEmployees]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

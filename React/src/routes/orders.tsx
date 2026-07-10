@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
@@ -118,7 +119,7 @@ function SecCashierLogin({
       }
     }
     fetchEmployeesFallback();
-  }, [pos.employees, pos.employees.length]);
+  }, [pos.employees.length]);
 
   const activeEmployeesList = useMemo(() => {
     const map = new Map();
@@ -266,7 +267,7 @@ function ShiftLogin() {
       }
     }
     fetchEmployeesFallback();
-  }, [pos.employees, pos.employees.length]);
+  }, [pos.employees.length]);
 
   const activeEmployeesList = useMemo(() => {
     const map = new Map();

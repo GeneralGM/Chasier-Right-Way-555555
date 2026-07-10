@@ -256,9 +256,14 @@ export function usePosDB() {
         }
 
         const cur = load();
-        cur.shift = serverShift; // تحديث شيفت الجهاز الحالي فقط محلياً بالبيانات المترجمة
-
         let hasChanges = false;
+
+        // 🔥 التعديل السحري الأول: مش هنحدث الشيفت إلا لو اتغير فعلاً
+        if (JSON.stringify(cur.shift) !== JSON.stringify(serverShift)) {
+          cur.shift = serverShift;
+          hasChanges = true;
+        }
+
         for (const code in serverOrders) {
           if (code === syncLocks.editingTable) continue;
           if (
@@ -278,8 +283,11 @@ export function usePosDB() {
           }
         }
 
-        if (hasChanges) save(cur);
-        setDb(cur);
+        // 🔥 التعديل السحري التاني: السيرفر مش هيعمل ريندر للشاشة إلا لو فيه تغيير حقيقي!
+        if (hasChanges) {
+          save(cur);
+          setDb(cur);
+        }
       } catch (err) {
         /* empty */
       }

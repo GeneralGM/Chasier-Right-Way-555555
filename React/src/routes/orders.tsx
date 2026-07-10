@@ -106,9 +106,7 @@ function SecCashierLogin({
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch(
-          "http://192.168.100.195:5000/api/employees",
-        );
+        const response = await fetch("http://192.168.1.51:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -256,9 +254,7 @@ function ShiftLogin() {
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch(
-          "http://192.168.100.195:5000/api/employees",
-        );
+        const response = await fetch("http://192.168.1.51:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -572,7 +568,7 @@ function PosScreen() {
 
     try {
       const res = await fetch(
-        "http://192.168.100.195:5000/api/pos/verify-captain",
+        "http://192.168.1.51:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2530,7 +2526,7 @@ function CheckoutDialog({
           };
 
           // 🌟 إرسال المبيعات للسيرفر مباشرة عشان تظهر في صفحة النتائج والجرد
-          fetch("http://192.168.100.195:5000/api/sales", {
+          fetch("http://192.168.1.51:5000/api/sales", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(newSale),

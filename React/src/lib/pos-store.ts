@@ -220,10 +220,10 @@ export function usePosDB() {
         const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
 
         const [ordersRes, shiftRes] = await Promise.all([
-          fetch("http://192.168.100.195:5000/api/pos/orders").catch(() => null),
+          fetch("http://192.168.1.51:5000/api/pos/orders").catch(() => null),
           // 👈 بنبعت رقم الجهاز الحالي (Sub-1 للتابلت) عشان السيرفر يرد بالشيفت بتاعه
           fetch(
-            `http://192.168.100.195:5000/api/pos/shift?terminalId=${currentTerminalId}`,
+            `http://192.168.1.51:5000/api/pos/shift?terminalId=${currentTerminalId}`,
           ).catch(() => null),
         ]);
 
@@ -308,14 +308,11 @@ export function usePosDB() {
       };
 
       try {
-        const res = await fetch(
-          "http://192.168.100.195:5000/api/pos/shift/open",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(newShiftData),
-          },
-        );
+        const res = await fetch("http://192.168.1.51:5000/api/pos/shift/open", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newShiftData),
+        });
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -403,7 +400,7 @@ export function usePosDB() {
       };
 
       try {
-        const res = await fetch("http://192.168.100.195:5000/api/shifts", {
+        const res = await fetch("http://192.168.1.51:5000/api/shifts", {
           method: "POST",
           mode: "cors",
           headers: { "Content-Type": "application/json" },
@@ -536,7 +533,7 @@ export function usePosDB() {
 
       // 🌟 إرسال للباك إند (pgAdmin)
       try {
-        await fetch("http://192.168.100.195:5000/api/customers", {
+        await fetch("http://192.168.1.51:5000/api/customers", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(newCustomer),
@@ -567,7 +564,7 @@ export function usePosDB() {
 
       // 🌟 تحديث في الباك إند (pgAdmin)
       try {
-        await fetch(`http://192.168.100.195:5000/api/customers/${id}`, {
+        await fetch(`http://192.168.1.51:5000/api/customers/${id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(updatedCustomer),
@@ -588,7 +585,7 @@ export function usePosDB() {
     // 2️⃣ إرسال التحديث للسيرفر (قاعدة البيانات الحقيقية)
     try {
       const response = await fetch(
-        "http://192.168.100.195:5000/api/pos/orders/upsert",
+        "http://192.168.1.51:5000/api/pos/orders/upsert",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -617,7 +614,7 @@ export function usePosDB() {
 
     // 2️⃣ إبلاغ السيرفر بمسح الطاولة عشان تتشال من عند الميكروس برضه
     try {
-      await fetch("http://192.168.100.195:5000/api/pos/orders/clear", {
+      await fetch("http://192.168.1.51:5000/api/pos/orders/clear", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableCode }),
@@ -668,15 +665,12 @@ export function usePosDB() {
 
       // 3️⃣ إرسال الفاتورة
       try {
-        const response = await fetch(
-          "http://192.168.100.195:5000/api/invoices",
-          {
-            method: "POST",
-            mode: "cors",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(fullInvoice),
-          },
-        );
+        const response = await fetch("http://192.168.1.51:5000/api/invoices", {
+          method: "POST",
+          mode: "cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fullInvoice),
+        });
         if (response.ok) {
           console.log("✅ تم حفظ الفاتورة بنجاح في قاعدة البيانات!");
         } else {
@@ -710,7 +704,7 @@ export function usePosDB() {
 
     // إرسال التحديث لـ PostgreSQL
     try {
-      await fetch(`http://192.168.100.195:5000/api/customers/${id}/increment`, {
+      await fetch(`http://192.168.1.51:5000/api/customers/${id}/increment`, {
         method: "PATCH",
       });
     } catch (err) {
@@ -724,7 +718,7 @@ export function usePosDB() {
 
     const fetchCustomers = async () => {
       try {
-        const res = await fetch("http://192.168.100.195:5000/api/customers");
+        const res = await fetch("http://192.168.1.51:5000/api/customers");
         if (!res.ok) return;
         const serverCustomers = await res.json();
 
@@ -742,6 +736,51 @@ export function usePosDB() {
 
     fetchCustomers();
     const interval = setInterval(fetchCustomers, 10000);
+    return () => clearInterval(interval);
+  }, []);
+  // 🌟 مزامنة الفواتير في الخلفية (عشان الكاشير الفرعي يشوف الفواتير الجديدة فوراً)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const fetchTodayInvoices = async () => {
+      try {
+        // بنحسب تاريخ النهاردة عشان نسحب فواتير اليوم بس وماتقلش الشبكة
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const end = new Date();
+        end.setHours(23, 59, 59, 999);
+
+        // ⚠️ تأكد إن الـ IP ده هو الصح اللي شغال عليه باقي السيستم
+        const res = await fetch(
+          `http://192.168.1.51:5000/api/invoices?startDate=${start.toISOString()}&endDate=${end.toISOString()}`,
+        );
+        if (!res.ok) return;
+
+        const serverInvoices = await res.json();
+        const cur = load();
+
+        // دمج الفواتير اللي من السيرفر مع اللي في الجهاز بدون تكرار
+        const map = new Map();
+        cur.invoices.forEach((inv) => map.set(inv.id, inv));
+        serverInvoices.forEach((inv: Invoice) => map.set(inv.id, inv));
+
+        const merged = Array.from(map.values()).sort(
+          (a, b) => b.createdAt - a.createdAt,
+        );
+
+        // لو في فواتير جديدة انضافت، حدث الشاشة
+        if (cur.invoices.length !== merged.length) {
+          cur.invoices = merged;
+          save(cur);
+          setDb(cur);
+        }
+      } catch (err) {
+        /* صمت عشان مايزعجش الكاشير لو الشبكة فصلت لحظة */
+      }
+    };
+
+    fetchTodayInvoices();
+    const interval = setInterval(fetchTodayInvoices, 10000); // بتلف كل 10 ثواني
     return () => clearInterval(interval);
   }, []);
 
@@ -813,7 +852,7 @@ export function usePosDB() {
 
       // 🌟 4. إرسال التحويل للسيرفر (قاعدة البيانات active_orders)
       try {
-        await fetch("http://192.168.100.195:5000/api/pos/orders/transfer", {
+        await fetch("http://192.168.1.51:5000/api/pos/orders/transfer", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

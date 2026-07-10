@@ -211,66 +211,61 @@ function SettingsPage() {
 function InvoicesTab() {
   const { db: pos } = usePosDB();
   const [sub, setSub] = useState<InvTab>("takeaway");
-  const [range, setRange] = useState<Range>("today");
   const [q, setQ] = useState("");
+
+  // 🌟 فلاتر التاريخ الجديدة (الافتراضي: اليوم الحالي)
+  const [fromDate, setFromDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [toDate, setToDate] = useState(new Date().toISOString().slice(0, 10));
 
   const [serverInvoices, setServerInvoices] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // 🔄 جلب كل الفواتير من السيرفر دائماً لضمان عرض الأرشيف
+  // 🔄 جلب الفواتير بناءً على التاريخ المختار
   useEffect(() => {
     async function fetchInvoicesFromPostgres() {
       try {
         setIsLoading(true);
-        const response = await fetch("http://192.168.1.44:5000/api/invoices");
+        // تظبيط الساعات عشان يجيب اليوم من أوله لآخره
+        const start = new Date(fromDate);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(toDate);
+        end.setHours(23, 59, 59, 999);
+
+        const response = await fetch(
+          `http://192.168.1.51:5000/api/invoices?startDate=${start.toISOString()}&endDate=${end.toISOString()}`,
+        );
         if (response.ok) {
           const data = await response.json();
           setServerInvoices(data);
         }
       } catch (error) {
-        console.error(
-          "❌ خطأ أثناء جلب الفواتير الاحتياطية من pgAdmin:",
-          error,
-        );
+        console.error("❌ خطأ أثناء جلب الفواتير من الأرشيف:", error);
       } finally {
         setIsLoading(false);
       }
     }
-
     fetchInvoicesFromPostgres();
-  }, []);
+  }, [fromDate, toDate]); // 👈 هتتحدث تلقائي لما تغير التاريخ
 
-  const fromTs = useMemo(() => {
-    if (range === "all") return 0;
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    if (range === "week") d.setDate(d.getDate() - 6);
-    return d.getTime();
-  }, [range]);
-
-  // 🌟 هنا السحر: دمج الفواتير وترتيبها وتطبيق الفلاتر
+  // 🌟 دمج الفواتير وتطبيق فلاتر النص والنوع
   const rows: Invoice[] = useMemo(() => {
-    // 1. دمج الفواتير من المصدرين بدون تكرار (باستخدام رقم الفاتورة ID)
     const map = new Map<string, Invoice>();
     serverInvoices.forEach((inv) => map.set(inv.id, inv));
     pos.invoices.forEach((inv) => map.set(inv.id, inv));
 
-    // 2. تحويلهم لمصفوفة وترتيبهم من الأحدث للأقدم
     const mergedInvoices = Array.from(map.values()).sort(
       (a, b) => b.createdAt - a.createdAt,
     );
 
-    // 3. تطبيق فلاتر (النوع، الوقت، البحث)
     return mergedInvoices.filter((i) => {
-      // فلتر النوع (تيك أواي/دليفري أو صالة)
       if (sub === "takeaway" && i.type !== "takeaway" && i.type !== "delivery")
         return false;
       if (sub === "dinein" && i.type !== "dinein") return false;
 
-      // فلتر الوقت (اليوم، الأسبوع، الكل)
-      if (i.createdAt < fromTs) return false;
+      // شلنا فلتر الوقت من هنا لأن السيرفر بقى يجيب المتفلتر جاهز!
 
-      // فلتر البحث بالنص
       if (q) {
         const hay =
           `${i.tableCode || ""} ${i.customerName || ""} ${i.customerAddress || ""}`.toLowerCase();
@@ -278,7 +273,7 @@ function InvoicesTab() {
       }
       return true;
     });
-  }, [pos.invoices, serverInvoices, sub, fromTs, q]);
+  }, [pos.invoices, serverInvoices, sub, q]);
 
   function exportToExcel() {
     const data = rows.map((inv) => {
@@ -321,16 +316,22 @@ function InvoicesTab() {
             </button>
           ))}
         </div>
-        <div className="flex bg-secondary rounded-lg p-1">
-          {(["today", "week", "all"] as Range[]).map((r) => (
-            <button
-              key={r}
-              onClick={() => setRange(r)}
-              className={`px-3 h-8 rounded-md text-sm ${range === r ? "bg-card shadow-sm" : "text-muted-foreground"}`}
-            >
-              {r === "today" ? "اليوم" : r === "week" ? "هذا الأسبوع" : "الكل"}
-            </button>
-          ))}
+        {/* 🌟 فلاتر التاريخ (من - إلى) للفواتير */}
+        <div className="flex items-center gap-2 bg-secondary rounded-lg p-1 px-2 border border-border">
+          <span className="text-xs font-bold text-muted-foreground">من:</span>
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="h-7 text-xs rounded bg-background border-none px-1 text-primary font-bold cursor-pointer"
+          />
+          <span className="text-xs font-bold text-muted-foreground">إلى:</span>
+          <input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="h-7 text-xs rounded bg-background border-none px-1 text-primary font-bold cursor-pointer"
+          />
         </div>
         <div className="relative flex-1 min-w-48">
           <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -351,7 +352,6 @@ function InvoicesTab() {
           <Download className="w-4 h-4" /> تصدير Excel
         </Button>
       </div>
-
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-secondary/50 text-xs">
@@ -562,33 +562,47 @@ function ShiftsTab() {
   const { db } = useDB();
   const [detailShift, setDetailShift] = useState<ShiftReport | null>(null);
 
-  // 🌟 ولايات جديدة لجلب الشفتات والفواتير من pgAdmin لو الـ LocalStorage اتمسح
+  // 🌟 فلاتر التاريخ الجديدة (الافتراضي: من أمس لليوم = آخر 24 ساعة تقريباً)
+  const [fromDate, setFromDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1); // من إمبارح
+    return d.toISOString().slice(0, 10);
+  });
+  const [toDate, setToDate] = useState(new Date().toISOString().slice(0, 10));
+
   const [serverShifts, setServerShifts] = useState<any[]>([]);
   const [serverInvoices, setServerInvoices] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // 🌟 تعديل دالة جلب الشيفتات والفواتير التاريخية بالكامل من السيرفر
   useEffect(() => {
     async function fetchShiftsAndInvoices() {
       try {
         setIsLoading(true);
-        // بنكلم المسارات للحصول على الأرشيف الكامل
+        // تجهيز التواريخ للباك إند
+        const start = new Date(fromDate);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(toDate);
+        end.setHours(23, 59, 59, 999);
+        const startIso = start.toISOString();
+        const endIso = end.toISOString();
+
+        // التعديل هنا: بنضمن إننا بنجيب الشيفتات الشاملة للمحل كله من السيرفر المركزي
         const [shiftsRes, invoicesRes] = await Promise.all([
-          fetch("http://192.168.1.44:5000/api/shifts"),
-          fetch("http://192.168.1.44:5000/api/invoices"),
+          fetch(
+            `http://192.168.1.51:5000/api/shifts?startDate=${startIso}&endDate=${endIso}`,
+          ),
+          fetch(
+            `http://192.168.1.51:5000/api/invoices?startDate=${startIso}&endDate=${endIso}`,
+          ),
         ]);
 
         if (shiftsRes.ok && invoicesRes.ok) {
           const shiftsData = await shiftsRes.json();
           const invoicesData = await invoicesRes.json();
 
-          // تأكيد ترتيب الشيفتات من الأحدث للأقدم
-          if (Array.isArray(shiftsData)) {
-            setServerShifts(shiftsData);
-          }
-          if (Array.isArray(invoicesData)) {
-            setServerInvoices(invoicesData);
-          }
+          // حفظ الداتا القادمة من السيرفر مباشرة في الـ States المخصصة لها بدون تغيير أسامي
+          if (Array.isArray(shiftsData)) setServerShifts(shiftsData);
+          if (Array.isArray(invoicesData)) setServerInvoices(invoicesData);
         }
       } catch (err) {
         console.error("❌ خطأ أثناء جلب الشيفتات من قاعدة البيانات:", err);
@@ -598,7 +612,7 @@ function ShiftsTab() {
     }
 
     fetchShiftsAndInvoices();
-  }, []); // 👈 خليناها تشتغل أول ما تنقل بين التابات عشان الداتا تتحدث فوراً
+  }, [fromDate, toDate]); // 👈 تتحدث فوراً لو اخترت تاريخ مختلف
 
   const shiftsWithData: ShiftReport[] = useMemo(() => {
     // 🌟 التعديل السحري هنا: دمج الأرشيف القادم من السيرفر مع المحلي لمنع فقدان أي شيفت
@@ -669,7 +683,11 @@ function ShiftsTab() {
             const meal = db.meals.find((m) => m.id === line.mealId);
             if (!meal) continue;
 
-            const extras = line.extras?.reduce((s: any, e: { price: any; }) => s + e.price, 0) || 0;
+            const extras =
+              line.extras?.reduce(
+                (s: any, e: { price: any }) => s + e.price,
+                0,
+              ) || 0;
             const v = (line.unitPrice + extras) * line.qty;
 
             const isShisha =
@@ -936,6 +954,27 @@ function ShiftsTab() {
 
   return (
     <div className="space-y-3">
+      {/* 🌟 فلاتر التاريخ (من - إلى) للشيفتات */}
+      <div className="flex flex-wrap items-center gap-3 bg-secondary/30 p-2 rounded-xl border border-border w-fit">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold text-primary">من تاريخ:</span>
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="h-9 text-sm font-bold rounded-md bg-background border border-input px-2 cursor-pointer text-emerald-700"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold text-primary">إلى تاريخ:</span>
+          <input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="h-9 text-sm font-bold rounded-md bg-background border border-input px-2 cursor-pointer text-emerald-700"
+          />
+        </div>
+      </div>
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-secondary/50 text-xs">

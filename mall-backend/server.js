@@ -343,19 +343,28 @@ app.post("/api/invoices", async (req, res) => {
 // 2️⃣ حماية وتعديل مسار جلب الفواتير (GET) للأرشيف والتقارير
 app.get("/api/invoices", async (req, res) => {
   try {
-    const result = await pool.query(
-      "SELECT * FROM invoices ORDER BY created_at DESC",
-    );
+    const { startDate, endDate } = req.query;
+    let query = "SELECT * FROM invoices";
+    let params = [];
 
-    // تحويل كل الفواتير المجلوبة لـ camelCase عشان الأرشيف والتقارير يشتغلوا صح
+    if (startDate && endDate) {
+      // 🌟 التعديل الصحيح: بنقارن التاريخ كـ timestamp صريح ومباشر بدون كاست الـ bigint اللي بيضرب
+      query += ` WHERE created_at BETWEEN $1::timestamp AND $2::timestamp`;
+      params.push(startDate, endDate);
+    }
+
+    query += " ORDER BY created_at DESC";
+    const result = await pool.query(query, params);
+
     const formattedInvoices = result.rows.map((row) =>
       formatInvoiceToFrontend(row),
     );
-
     res.json(formattedInvoices);
   } catch (err) {
-    console.error("❌ خطأ أثناء جلب الفواتير:", err.message);
-    res.status(500).json({ error: "حدث خطأ أثناء جلب الفواتير" });
+    console.error("❌ خطأ أثناء جلب الفواتير والأرشيف:", err.message);
+    res
+      .status(500)
+      .json({ error: "حدث خطأ أثناء جلب الفواتير", details: err.message });
   }
 });
 
@@ -572,9 +581,21 @@ app.post("/api/shifts", async (req, res) => {
 // 🌟 4. جلب أرشيف كل الورديات (لشاشة التقارير)
 app.get("/api/shifts", async (req, res) => {
   try {
-    const result = await pool.query(
-      "SELECT * FROM shifts ORDER BY opened_at DESC",
-    );
+    const { startDate, endDate } = req.query;
+    let query = "SELECT * FROM shifts";
+    let params = [];
+
+    // 🌟 السر هنا: opened_at متخزن كـ BIGINT مش تاريخ عادي!
+    if (startDate && endDate) {
+      // بنحول التواريخ لأرقام ملي ثانية عشان نقارنها صح بالداتابيز
+      const startMs = new Date(startDate).getTime();
+      const endMs = new Date(endDate).getTime();
+      query += " WHERE opened_at >= $1 AND opened_at <= $2";
+      params.push(startMs, endMs);
+    }
+
+    query += " ORDER BY opened_at DESC";
+    const result = await pool.query(query, params);
 
     const formattedShifts = result.rows.map((row) => ({
       id: row.id,
@@ -591,6 +612,11 @@ app.get("/api/shifts", async (req, res) => {
       dineinSales: Number(row.dinein_sales) || 0,
       takeawaySales: Number(row.takeaway_sales) || 0,
       deliverySales: Number(row.delivery_sales) || 0,
+      // 👇 التعديل السحري: ضفنا المتغيرات الناقصة اللي كانت بتخلي الفرونت يرفض الداتا!
+      initialCash: Number(row.initial_cash) || 0,
+      actualCash: Number(row.actual_cash) || 0,
+      state: row.state || (row.closed_at ? "closed" : "open"),
+      terminalId: row.terminal_id || "Main",
     }));
 
     res.json(formattedShifts);
@@ -1334,7 +1360,7 @@ app.post("/api/inventory/deduct-substock", async (req, res) => {
   } finally {
     client.release();
   }
-  });
+});
 //////////////////////////////////////////////////////////////////////////////////////
 const PORT = 5000;
 app.listen(PORT, "0.0.0.0", () => {

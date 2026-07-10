@@ -77,9 +77,7 @@ function HistoryPage() {
   useEffect(() => {
     async function fetchVouchersFromDB() {
       try {
-        const response = await fetch(
-          "http://192.168.100.195:5000/api/vouchers",
-        );
+        const response = await fetch("http://192.168.1.51:5000/api/vouchers");
         if (response.ok) {
           const data = await response.json();
           setServerVouchers(data);

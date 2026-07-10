@@ -6,7 +6,6 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   History,
-  LogOut,
   Calculator,
   Warehouse,
   ChevronDown,

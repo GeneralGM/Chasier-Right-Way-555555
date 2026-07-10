@@ -1190,7 +1190,13 @@ function aggregateDailySales(
     { name: string; qty: number; price: number; total: number }
   >();
   for (const s of sales) {
-    if (s.date !== date || s.department !== dept) continue;
+    // 🌟 السحر هنا: تحويل تاريخ الفاتورة الأصلي لصيغة YYYY-MM-DD الصافية عشان تتطابق مع نتيجة مربع التاريخ
+    const cleanSaleDate = new Date(s.createdAt || s.date).toLocaleDateString(
+      "en-CA",
+    );
+
+    if (cleanSaleDate !== date || s.department !== dept) continue;
+
     for (const ln of s.lines) {
       const m = meals.find((x) => x.id === ln.mealId);
       if (!m) continue;
@@ -1235,14 +1241,20 @@ function ResultsTab() {
             ? 30
             : 90;
 
-  // 2. فلترة المبيعات حسب التاريخ والقسم (الشيشة هتظهر جوة "الكل" تلقائياً)
+  // 2. فلترة المبيعات حسب التاريخ والقسم بشكل دقيق (بالملي ثانية لتجنب أخطاء النصوص)
   const filteredSales = useMemo(() => {
     const cutoff = new Date();
     cutoff.setHours(0, 0, 0, 0);
     cutoff.setDate(cutoff.getDate() - rangeDays + 1);
-    const cs = cutoff.toISOString().slice(0, 10);
+    const cutoffTime = cutoff.getTime(); // 🌟 نحولها لرقم عشان المقارنة تبقى حديد
+
     return db.sales.filter((s) => {
-      if (s.date < cs) return false;
+      // 🌟 تحويل تاريخ الفاتورة لرقم مقارنة
+      const saleDate = new Date(s.date);
+      saleDate.setHours(0, 0, 0, 0);
+
+      if (saleDate.getTime() < cutoffTime) return false;
+
       if (view === "kitchen" && s.department !== "مطبخ") return false;
       if (view === "bar" && s.department !== "بار") return false;
       // ملحوظة: لو view === "all"، الشيشة والمطبخ والبار كلهم هيظهروا
@@ -2088,14 +2100,25 @@ function AuditReceiptPrint({
 }
 
 /* --- End of Day PDF (Kitchen | Bar split) --- */
-/* --- End of Day PDF (Kitchen | Bar split) --- */
 function EndOfDayPrint({ date }: { date: string }) {
   const { db } = useDB();
-  const todaySales = db.sales.filter((s) => s.date === date);
+  
+  // 🌟 فلترة ذكية تعتمد على تحويل التاريخ لصيغة موحدة 
+  const todaySales = db.sales.filter((s) => {
+    const cleanDate = new Date(s.createdAt || s.date).toLocaleDateString("en-CA");
+    return cleanDate === date;
+  });
+  
   const sumS = clamp0(todaySales.reduce((s, x) => s + x.totalSales, 0));
   const sumC = clamp0(todaySales.reduce((s, x) => s + x.totalCost, 0));
   const net = sumS - sumC;
-  const todayAudits = db.audits.filter((a) => a.date === date);
+  
+  const todayAudits = db.audits.filter((a) => {
+    // بالمرة نأمن فلتر الجرد
+    const cleanAuditDate = new Date(a.createdAt || a.date).toLocaleDateString("en-CA");
+    return cleanAuditDate === date || a.date === date;
+  });
+
   const kRows = aggregateDailySales(db.sales, date, "مطبخ", db.meals);
   const bRows = aggregateDailySales(db.sales, date, "بار", db.meals);
   const sRows = aggregateDailySales(db.sales, date, "شيشه", db.meals);

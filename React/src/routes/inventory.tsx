@@ -340,7 +340,8 @@ function ItemDialog({
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="تلقائي ING-XXX"
-                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm pointer-events-none"
+                readOnly
               />
             </Field>
             <Field label="اسم الصنف">

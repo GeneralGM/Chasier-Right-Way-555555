@@ -137,6 +137,8 @@ export interface Invoice {
   // لو الباك إند بيبعتهم أحياناً بـ snake_case ممكن تضيفهم برضه كأمان:
   terminal_id?: string;
   created_by?: string;
+  orderCategory: "normal" | "talabat" | "fast"; // الخانة الجديدة للباك إند
+  commissionValue: number; // قيمة الـ 5% المحسوبة
 }
 
 export interface ShiftState {

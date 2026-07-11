@@ -446,6 +446,7 @@ function PosScreen() {
     return localStorage.getItem("isMicrosDevice") === "true";
   });
   const isSecCashier = localStorage.getItem("isSecCashierDevice") === "true";
+  const [transferCaptainOpen, setTransferCaptainOpen] = useState(false);
 
   // 🌟 دالة فتح الطاولة وإرسال قفل الحماية للستور بالترتيب الصحيح
   function handleOpenOrder(code: string | null) {
@@ -781,7 +782,19 @@ function PosScreen() {
                 variant="secondary"
                 className="h-16 text-base gap-2"
               >
-                <ArrowLeftRight className="w-5 h-5" /> تحويل
+                <ArrowLeftRight className="w-5 h-5" /> تحويل الطالة
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!selectedTable || !pos.orders[selectedTable]) {
+                    return toast.error("اختر طاولة نشطة أولاً");
+                  }
+                  setTransferCaptainOpen(true);
+                }}
+                variant="secondary"
+                className="h-16 text-base gap-2"
+              >
+                <UserPlus className="w-5 h-5" /> تحويل الكابتن
               </Button>
               <Button
                 onClick={actionCheckout}
@@ -868,6 +881,13 @@ function PosScreen() {
         <TransferDialog
           sourceTable={selectedTable}
           onClose={() => setTransferOpen(false)}
+        />
+      )}
+      {transferCaptainOpen && selectedTable && pos.orders[selectedTable] && (
+        <TransferCaptainDialog
+          tableCode={selectedTable}
+          currentCaptain={pos.orders[selectedTable].captainName || "غير محدد"}
+          onClose={() => setTransferCaptainOpen(false)}
         />
       )}
       {printOrder && pos.orders[printOrder] && (
@@ -2703,3 +2723,289 @@ export const triggerPrint = (data: any, isFinal: boolean = false) => {
   printWindow.document.write(html);
   printWindow.document.close();
 };
+// 🌟 نافذة تحويل الكابتن الذكية (بالبصمة للميكروس وبضغطة واحدة للكاشير)
+function TransferCaptainDialog({
+  tableCode,
+  currentCaptain,
+  onClose,
+}: {
+  tableCode: string;
+  currentCaptain: string;
+  onClose: () => void;
+}) {
+  const { db: pos, transferCaptain } = usePosDB();
+  const [pin, setPin] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [serverEmployees, setServerEmployees] = useState<any[]>([]);
+  const [isMicros] = useState(
+    () => localStorage.getItem("isMicrosDevice") === "true",
+  );
+
+  // جلب الموظفين لضمان ظهور كل الكباتن في قائمة الكاشير
+  useEffect(() => {
+    if (isMicros) return;
+    async function fetchEmps() {
+      try {
+        const res = await fetch("http://192.168.1.51:5000/api/employees");
+        if (res.ok) setServerEmployees(await res.json());
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    fetchEmps();
+  }, [isMicros]);
+
+  const captainsList = useMemo(() => {
+    const map = new Map();
+    if (pos.employees) {
+      pos.employees.forEach((e) => {
+        if (e.role === "كابتن صالة" || (e as any).role === "captain")
+          map.set(e.name, e);
+      });
+    }
+    if (serverEmployees) {
+      serverEmployees.forEach((e) => {
+        if (e.role === "كابتن صالة" || e.role === "captain") map.set(e.name, e);
+      });
+    }
+    return Array.from(map.values()).filter((c) => c.name !== currentCaptain);
+  }, [pos.employees, serverEmployees, currentCaptain]);
+
+  // التحويل عن طريق إدخال بصمة الكابتن المستلم (لأجهزة الميكروس)
+  async function handlePinSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pin || isSubmitting) return;
+    setIsSubmitting(true);
+
+    try {
+      const res = await fetch(
+        "http://192.168.1.51:5000/api/pos/verify-captain",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: pin }),
+        },
+      );
+      const data = await res.json();
+
+      if (data.success) {
+        if (data.captainName === currentCaptain) {
+          toast.error("هذا هو نفس الكابتن المسؤول عن الطاولة حالياً!");
+          setIsSubmitting(false);
+          return;
+        }
+        const r = await transferCaptain(tableCode, data.captainName);
+        if (r.ok) {
+          toast.success(
+            `🎉 تم نقل عهدة الطاولة بنجاح إلى الكابتن: ${data.captainName}`,
+          );
+          onClose();
+        }
+      } else {
+        toast.error(data.error || "رمز الكابتن غير صحيح");
+      }
+    } catch (err) {
+      toast.error("خطأ في الاتصال بالسيرفر");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  // التحويل المباشر بالضغط (لأجهزة الكاشير)
+  async function handleDirectTransfer(newCapName: string) {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    const r = await transferCaptain(tableCode, newCapName);
+    setIsSubmitting(false);
+    if (r.ok) {
+      toast.success(`🎉 تم نقل عهدة الطاولة بنجاح إلى الكابتن: ${newCapName}`);
+      onClose();
+    }
+  }
+
+  return (
+    // <Dialog open onOpenChange={(o) => !o && onClose()}>
+    //   <DialogContent dir="rtl" className="max-w-md">
+    //     <DialogHeader>
+    //       <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+    //         <UserPlus className="w-5 h-5 text-primary" /> تحويل الطاولة (
+    //         {tableCode}) لكابتن آخر
+    //       </DialogTitle>
+    //     </DialogHeader>
+
+    //     <div className="bg-secondary/40 p-3 rounded-xl border border-border flex items-center justify-between text-sm">
+    //       <span className="text-muted-foreground font-medium">
+    //         الكابتن المسؤول حالياً:
+    //       </span>
+    //       <span className="font-bold bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 px-2.5 py-1 rounded-md">
+    //         {currentCaptain}
+    //       </span>
+    //     </div>
+
+    //     {isMicros ? (
+    //       <form onSubmit={handlePinSubmit} className="space-y-4 pt-2">
+    //         <p className="text-xs text-muted-foreground text-center font-medium">
+    //           يرجى من الكابتن الجديد المستلم للطاولة إدخال الرمز السري (PIN)
+    //           للتأكيد والاستلام:
+    //         </p>
+    //         <Input
+    //           type="password"
+    //           inputMode="numeric"
+    //           autoFocus
+    //           placeholder="••••"
+    //           value={pin}
+    //           onChange={(e) => setPin(e.target.value)}
+    //           className="text-center text-2xl tracking-widest h-14 font-bold"
+    //         />
+    //         <DialogFooter className="gap-2 pt-2">
+    //           <Button
+    //             type="button"
+    //             variant="outline"
+    //             onClick={onClose}
+    //             disabled={isSubmitting}
+    //           >
+    //             إلغاء
+    //           </Button>
+    //           <Button
+    //             type="submit"
+    //             className="flex-1 font-bold"
+    //             disabled={!pin || isSubmitting}
+    //           >
+    //             {isSubmitting
+    //               ? "جاري التحقق والنقل..."
+    //               : "تأكيد الاستلام والتحويل"}
+    //           </Button>
+    //         </DialogFooter>
+    //       </form>
+    //     ) : (
+    //       <div className="space-y-3 pt-2">
+    //         <p className="text-xs text-muted-foreground font-medium">
+    //           اختر اسم الكابتن الجديد الذي سيتم نقل الطاولة إلى عهدته:
+    //         </p>
+    //         {captainsList.length === 0 ? (
+    //           <div className="text-center p-6 border rounded-xl bg-muted/30 text-xs text-muted-foreground">
+    //             لا يوجد كباتن آخرون متاحون للتحويل حالياً.
+    //           </div>
+    //         ) : (
+    //           <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto p-1">
+    //             {captainsList.map((cap) => (
+    //               <button
+    //                 key={cap.id || cap.name}
+    //                 type="button"
+    //                 disabled={isSubmitting}
+    //                 onClick={() => handleDirectTransfer(cap.name)}
+    //                 className="p-3 rounded-xl border-2 border-border bg-card hover:border-primary hover:bg-primary/5 transition flex items-center justify-center font-bold text-sm shadow-sm active:scale-95"
+    //               >
+    //                 {cap.name}
+    //               </button>
+    //             ))}
+    //           </div>
+    //         )}
+    //         <DialogFooter className="pt-2">
+    //           <Button variant="outline" onClick={onClose} className="w-full">
+    //             إغلاق
+    //           </Button>
+    //         </DialogFooter>
+    //       </div>
+    //     )}
+    //   </DialogContent>
+    // </Dialog>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      {/* 1. هنا خفت الـ max-w-md وخليت الأبعاد المباشرة 75vw و 75vh مع جعلها flex لتوزيع العناصر رأساً */}
+      <DialogContent
+        dir="rtl"
+        className="w-[75vw] h-[75vh] max-w-none flex flex-col p-6"
+      >
+        <DialogHeader className="shrink-0">
+          <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+            <UserPlus className="w-5 h-5 text-primary" /> تحويل الطاولة (
+            {tableCode}) لكابتن آخر
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="bg-secondary/40 p-3 rounded-xl border border-border flex items-center justify-between text-sm shrink-0">
+          <span className="text-muted-foreground font-medium">
+            الكابتن المسؤول حالياً:
+          </span>
+          <span className="font-bold bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 px-2.5 py-1 rounded-md">
+            {currentCaptain}
+          </span>
+        </div>
+
+        {isMicros ? (
+          <form
+            onSubmit={handlePinSubmit}
+            className="space-y-4 pt-2 flex-1 flex flex-col justify-center max-w-md mx-auto w-full"
+          >
+            <p className="text-xs text-muted-foreground text-center font-medium">
+              يرجى من الكابتن الجديد المستلم للطاولة إدخال الرمز السري (PIN)
+              للتأكيد والاستلام:
+            </p>
+            <Input
+              type="password"
+              inputMode="numeric"
+              autoFocus
+              placeholder="••••"
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+              className="text-center text-2xl tracking-widest h-14 font-bold"
+            />
+            <DialogFooter className="gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onClose}
+                disabled={isSubmitting}
+              >
+                إلغاء
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1 font-bold"
+                disabled={!pin || isSubmitting}
+              >
+                {isSubmitting
+                  ? "جاري التحقق والنقل..."
+                  : "تأكيد الاستلام والتحويل"}
+              </Button>
+            </DialogFooter>
+          </form>
+        ) : (
+          /* 2. الـ container الرئيسي للكاشير بياخد باقي مساحة الارتفاع المتاحة بديناميكية */
+          <div className="flex-1 flex flex-col space-y-3 pt-2 min-h-0">
+            <p className="text-xs text-muted-foreground font-medium shrink-0">
+              اختر اسم الكابتن الجديد الذي سيتم نقل الطاولة إلى عهدته:
+            </p>
+
+            {captainsList.length === 0 ? (
+              <div className="text-center p-6 border rounded-xl bg-muted/30 text-xs text-muted-foreground flex-1 flex items-center justify-center">
+                لا يوجد كباتن آخرون متاحون للتحويل حالياً.
+              </div>
+            ) : (
+              /* 3. قمنا بإلغاء الارتفاع الثابت max-h-60 وجعلناه flex-1 ومطاطي مع إضافة Scroll ذكي وتوزيع الأزرار في شبكة متجاوبة */
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 overflow-y-auto p-1 flex-1 content-start custom-scrollbar">
+                {captainsList.map((cap) => (
+                  <button
+                    key={cap.id || cap.name}
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => handleDirectTransfer(cap.name)}
+                    className="p-4 rounded-xl border-2 border-border bg-card hover:border-primary hover:bg-primary/5 transition flex items-center justify-center font-bold text-sm shadow-sm active:scale-95 h-16"
+                  >
+                    {cap.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <DialogFooter className="pt-2 shrink-0">
+              <Button variant="outline" onClick={onClose} className="w-full">
+                إغلاق
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}

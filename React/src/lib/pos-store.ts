@@ -881,6 +881,49 @@ export function usePosDB() {
     },
     [],
   );
+
+  // 🌟 دالة تحويل الكابتن (تحدث محلياً فوراً وترمي التعديل على السيرفر)
+  const transferCaptain = useCallback(
+    async (tableCode: string, newCaptainName: string) => {
+      const cur = load();
+      const order = cur.orders[tableCode];
+      if (!order) return { ok: false, error: "الطاولة غير موجودة أو غير نشطة" };
+
+      // 1. التحديث المحلي اللحظي
+      order.captainName = newCaptainName;
+      save(cur);
+      setDb(cur);
+
+      // 2. المزامنة مع السيرفر (PostgreSQL)
+      try {
+        const res = await fetch(
+          "http://192.168.1.51:5000/api/pos/orders/transfer-captain",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              tableCode,
+              newCaptainName,
+            }),
+          },
+        );
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || "فشل الحفظ على السيرفر");
+        }
+      } catch (err: any) {
+        console.error("🚨 خطأ أثناء مزامنة تحويل الكابتن مع السيرفر:", err);
+        toast.error(
+          "⚠️ تنبيه: حدث خطأ في الاتصال بالسيرفر أثناء تحويل الكابتن!",
+        );
+        return { ok: false, error: err.message || "فشل الاتصال بالسيرفر" };
+      }
+
+      return { ok: true };
+    },
+    [],
+  );
   return {
     db,
     isLoadingEmployees,
@@ -894,6 +937,7 @@ export function usePosDB() {
     upsertOrder,
     clearOrder,
     transferItems,
+    transferCaptain,
     addInvoice,
     openShift,
     closeShift,

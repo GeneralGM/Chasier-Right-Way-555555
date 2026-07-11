@@ -1182,6 +1182,53 @@ app.post("/api/pos/orders/transfer", async (req, res) => {
     client.release(); // قفل الاتصال
   }
 });
+
+// 🌟 مسار تحويل الكابتن المسؤول عن الطاولة النشطة في قاعدة البيانات
+app.post("/api/pos/orders/transfer-captain", async (req, res) => {
+  const { tableCode, newCaptainName } = req.body;
+  if (!tableCode || !newCaptainName) {
+    return res
+      .status(400)
+      .json({ success: false, error: "كود الطاولة واسم الكابتن مطلوبان" });
+  }
+
+  try {
+    const resOrder = await pool.query(
+      "SELECT order_data FROM active_orders WHERE table_code = $1",
+      [tableCode],
+    );
+
+    if (resOrder.rows.length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, error: "الطاولة غير نشطة في السيرفر حالياً" });
+    }
+
+    // قراءة الأوردر سواء كان متخزن JSONB أو TEXT
+    let orderData =
+      typeof resOrder.rows[0].order_data === "string"
+        ? JSON.parse(resOrder.rows[0].order_data)
+        : resOrder.rows[0].order_data;
+
+    // تغيير اسم الكابتن
+    orderData.captainName = newCaptainName;
+
+    await pool.query(
+      "UPDATE active_orders SET order_data = $1, updated_at = $2 WHERE table_code = $3",
+      [JSON.stringify(orderData), Date.now(), tableCode],
+    );
+
+    res.json({
+      success: true,
+      message: `تم نقل الطاولة ${tableCode} إلى الكابتن ${newCaptainName} بنجاح`,
+    });
+  } catch (err) {
+    console.error("🚨 خطأ أثناء تحويل الكابتن في الداتابيز:", err);
+    res
+      .status(500)
+      .json({ success: false, error: "فشل تحويل الكابتن في قاعدة البيانات" });
+  }
+});
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////// Vertify Captian /////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////

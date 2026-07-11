@@ -1269,14 +1269,14 @@ function OrderEntryDialog({
     if (!meal.ingredients || meal.ingredients.length === 0) return 0;
 
     const dbRaw = db as unknown as Record<string, unknown>;
-
-    // 🌟 التعديل السحري هنا: ربطناها بالـ pos.orders الجديدة بدل القديمة
     const allOrders = Object.values(pos.orders || {});
 
+    // 🌟 التعديل: استخدام دالة الفك الشجري عشان نحسب المواد المصنعة ومكوناتها
+    const baseIngredients = expandMealToBase(meal, db.meals, db.items);
     let min = Infinity;
-    for (const ing of meal.ingredients) {
-      if (ing.refKind === "meal") continue;
-      const it = items.find((x) => x.id === ing.itemId);
+
+    for (const [itemId, info] of baseIngredients) {
+      const it = items.find((x) => x.id === itemId);
       if (!it) return 0;
 
       const reservedQty = allOrders.reduce((sum: number, order: any) => {
@@ -1286,7 +1286,7 @@ function OrderEntryDialog({
           (s: number, i: any) => s + (i.qty || 0),
           0,
         );
-        return sum + count * (ing.qty as number);
+        return sum + count * info.qty;
       }, 0);
 
       const targetDept = (meal.department || it.department) as "بار" | "مطبخ";
@@ -1296,20 +1296,9 @@ function OrderEntryDialog({
         ] || 0;
 
       const have = clamp0(totalHave - reservedQty);
-      const conversion =
-        it.conversionFactor && it.conversionFactor > 0
-          ? it.conversionFactor
-          : 1;
-      const needBase = convertToBase(
-        ing.qty,
-        ing.unit as Parameters<typeof convertToBase>[1],
-        it.unit as Parameters<typeof convertToBase>[2],
-        conversion,
-        it.subUnitType as Parameters<typeof convertToBase>[4],
-      );
 
-      if (needBase <= 0) continue;
-      min = Math.min(min, Math.floor(have / needBase));
+      if (info.qty <= 0) continue;
+      min = Math.min(min, Math.floor(have / info.qty));
     }
     return min === Infinity ? 99 : Math.max(0, min);
   }
@@ -1415,7 +1404,7 @@ function OrderEntryDialog({
         }
         finalDeliveryPrice = Number(inputPrice) || 0;
         const computedType = finalDeliveryPrice > 0 ? "delivery" : "takeaway";
-        // 🌟 تعريفات الكاشير والجهاز المظبوطة 100%
+
         const isSecDevice =
           localStorage.getItem("isSecCashierDevice") === "true";
         const secName = localStorage.getItem("secCashierName") || "كاشير فرعي";
@@ -1446,15 +1435,10 @@ function OrderEntryDialog({
           taxValue: 0,
           deliveryPrice: finalDeliveryPrice,
           createdAt: Date.now(),
-
-          // 🌟 تأمين الأجهزة والتقارير
           terminalId: currentTerminalId,
           createdBy: currentCashierName,
-          // 🌟 تمرير حقول المنصة والنسبة:
           orderCategory: order.orderCategory || "normal",
           commissionValue: totals.commissionValue,
-
-          // 🌟 الإجمالي الكلي بياخد المجموع + الدليفري + عمولة المنصة
           total:
             totals.subtotal -
             totals.discountValue +
@@ -1464,6 +1448,52 @@ function OrderEntryDialog({
 
         await addInvoice(inv);
         deductInventoryForTakeaway();
+
+        // 🌟 التعديل السحري: تسجيل مبيعات التيك أواي في قسمها الأصلي (بار/مطبخ) عشان الكوست كنترول يقراها
+        const salesByDept: Record<string, any[]> = {};
+        draftItems.forEach((item: any) => {
+          const meal = db.meals.find((m) => m.id === item.mealId);
+          const dept = meal?.department || "عام";
+          if (!salesByDept[dept]) salesByDept[dept] = [];
+          salesByDept[dept].push(item);
+        });
+
+        for (const [deptName, deptLines] of Object.entries(salesByDept)) {
+          const lines = deptLines as any[];
+          if (lines.length > 0) {
+            const totalSales = lines.reduce(
+              (sum: number, l: any) =>
+                sum + (l.unitPrice || l.price || 0) * l.qty,
+              0,
+            );
+            let totalCost = 0;
+            for (const l of lines) {
+              const m = db.meals.find((x) => x.id === l.mealId);
+              if (m) {
+                const baseDeds = expandMealToBase(m, db.meals, db.items);
+                for (const [, info] of baseDeds) totalCost += info.cost * l.qty;
+              }
+            }
+
+            const newSale = {
+              id:
+                "sale_" + crypto.randomUUID().split("-")[0] + "_" + Date.now(),
+              date: new Date().toISOString().split("T")[0],
+              department: deptName, // 🌟 أهم تعديل: بنبعت اسم القسم الصح!
+              lines: lines,
+              totalSales: totalSales,
+              totalCost: totalCost,
+              createdAt: Date.now(),
+            };
+
+            fetch("http://192.168.1.51:5000/api/sales", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(newSale),
+            }).catch((err) => console.error("❌ فشل تسجيل المبيعات:", err));
+          }
+        }
+
         if (order.customerName) {
           const c = pos.customers.find((c) => c.name === order.customerName);
           if (c) incCustomerOrders(c.id);
@@ -1476,7 +1506,6 @@ function OrderEntryDialog({
         else toast.success("تم حفظ فاتورة تيك أواي بنجاح! 🛍️");
         onClose();
       } else {
-        // 🌟 إرسال المسودة بالكامل للسيرفر عند الحفظ
         upsertOrder({ ...order, items: draftItems, state: "active" });
         toast.success("تم حفظ طلب الصالة على الطاولة! 🍽️");
         onClose();
@@ -2481,7 +2510,7 @@ function CheckoutDialog({
   }
   const [isSubmitting, setIsSubmitting] = useState(false);
   async function finalize() {
-    if (isSubmitting) return; // منع الضغط المزدوج
+    if (isSubmitting) return;
     setIsSubmitting(true);
 
     try {
@@ -2495,7 +2524,6 @@ function CheckoutDialog({
         String(currentOrder.tableCode || "")
           .toUpperCase()
           .startsWith("T");
-
       const todayStr = new Date().toISOString().split("T")[0];
       const deliveryPrice = Number((currentOrder as any).deliveryPrice) || 0;
       const computedType = isTakeaway
@@ -2504,7 +2532,6 @@ function CheckoutDialog({
           : "takeaway"
         : "dinein";
 
-      // 🌟 الاعتماد الكلي على الدالة الأصلية لمنع التضارب وازدواجية الضريبة
       const totals = computeTotals(
         currentOrder.items,
         currentOrder.discountPct || 0,
@@ -2532,8 +2559,6 @@ function CheckoutDialog({
         cashierId: currentCashierId || null,
         cashierName: currentCashierName || null,
         items: currentOrder.items,
-
-        // 🌟 إرسال الحسابات السليمة المظبوطة
         subtotal: totals.subtotal,
         discountPct: currentOrder.discountPct || 0,
         discountValue: totals.discountValue,
@@ -2541,27 +2566,20 @@ function CheckoutDialog({
         taxValue: totals.taxValue,
         deliveryPrice: deliveryPrice,
         total: totals.total + deliveryPrice,
-
         createdAt: Date.now(),
         terminalId: isSecCashier ? "Sub-1" : "Main",
         createdBy: currentCashierName || "كاشير رئيسي",
       };
 
-      // 3️⃣ حفظ الفاتورة وتحديث المخزون
       await addInvoice(inv);
       deductInventory();
-      // 🌟 استدعاء الطباعة كـ "فاتورة نهائية" (true)
       triggerPrint(inv, true);
 
-      // 4️⃣ توزيع المبيعات على الأقسام والتقرير اليومي
       const salesByDept: Record<string, any[]> = {};
       currentOrder.items.forEach((item: any) => {
-        // 🌟 نجيب القسم المظبوط من الداتابيز
         const meal = db.meals.find((m) => m.id === item.mealId);
         const dept = meal?.department || "عام";
-        if (!salesByDept[dept]) {
-          salesByDept[dept] = [];
-        }
+        if (!salesByDept[dept]) salesByDept[dept] = [];
         salesByDept[dept].push(item);
       });
 
@@ -2569,7 +2587,8 @@ function CheckoutDialog({
         const lines = deptLines as any[];
 
         if (lines.length > 0) {
-          const reportCategory = isTakeaway ? "التيك اوي" : deptName;
+          // 🌟 أهم تعديل: تسجيل المبيعات باسم القسم الحقيقي دائماً (مطبخ/بار) مش "التيك اوي"
+          const reportCategory = deptName;
 
           const totalSales = lines.reduce(
             (sum: number, l: any) =>
@@ -2577,7 +2596,6 @@ function CheckoutDialog({
             0,
           );
 
-          // 🌟 حساب التكلفة بدقة للمواد المصنعة
           let totalCost = 0;
           for (const l of lines) {
             const m = db.meals.find((x) => x.id === l.mealId);
@@ -2597,7 +2615,6 @@ function CheckoutDialog({
             createdAt: Date.now(),
           };
 
-          // 🌟 إرسال المبيعات للسيرفر مباشرة عشان تظهر في صفحة النتائج والجرد
           fetch("http://192.168.1.51:5000/api/sales", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2605,8 +2622,6 @@ function CheckoutDialog({
           }).catch((err) => console.error("❌ فشل تسجيل المبيعات:", err));
         }
       }
-
-      onDone();
 
       onDone();
     } catch (e) {

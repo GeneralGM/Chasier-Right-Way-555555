@@ -109,6 +109,8 @@ export interface ActiveOrder {
   openedByPassword?: string; // البصمة (الباسوورد) اللي اتفتحت بيها لمنع دخول كابتن آخر
   captainName?: string; // اسم الكابتن (لو مفتوحة من ميكروس)
   cashierName?: string; // اسم الكاشير (لو مفتوحة من الرئيسي)
+  orderCategory?: "normal" | "talabat" | "fast"; // 🌟 تصنيف المنصة
+  commissionValue?: number; // 🌟 قيمة النسبة المضافة بالجنيه
 }
 
 export interface Invoice {
@@ -138,7 +140,7 @@ export interface Invoice {
   terminal_id?: string;
   created_by?: string;
   orderCategory: "normal" | "talabat" | "fast"; // الخانة الجديدة للباك إند
-  commissionValue: number; // قيمة الـ 5% المحسوبة
+  commissionValue: number;
 }
 
 export interface ShiftState {
@@ -645,7 +647,8 @@ export function usePosDB() {
       const totals = computeTotals(
         inv.items,
         inv.discountPct || 0,
-        currentTaxPct,
+        inv.type === "dinein" ? 14 : 0,
+        inv.orderCategory || "normal",
       );
 
       const deliveryPrice = Number(inv.deliveryPrice || 0); // 🌟 تأمين قيمة الدليفري
@@ -655,22 +658,16 @@ export function usePosDB() {
         id: crypto.randomUUID(),
         invoiceNumber,
         createdAt,
-        subtotal: totals.subtotal,
+        subtotal: totals.subtotal, // الـ subtotal المدمج فيه الـ 5% جاهز
         discountValue: totals.discountValue,
-        deliveryPrice: deliveryPrice,
-
-        // 2️⃣ تأمين الأسماء للداتابيز والباك إند بالصيغتين
+        deliveryPrice: Number(inv.deliveryPrice || 0),
         taxPct: totals.taxPct,
-        tax_pct: totals.tax_pct,
-
         taxValue: totals.taxValue,
-        tax_value: totals.tax_value,
-
-        // 🌟🌟 إصلاح المشكلة القاتلة: إضافة الدليفري للإجمالي النهائي
-        total: totals.total + deliveryPrice,
-
-        terminalId: inv.terminal_id || inv.terminalId || "Main",
-        createdBy: inv.createdBy || inv.cashierName || "Main Cashier",
+        orderCategory: inv.orderCategory || "normal", // 🌟 إرسال الفئة للسيرفر
+        commissionValue: totals.commissionValue, // 🌟 إرسال العمولة للسيرفر
+        total: totals.total + Number(inv.deliveryPrice || 0),
+        terminalId: inv.terminalId || "Main",
+        createdBy: inv.cashierName || "Main Cashier",
       };
 
       // 3️⃣ إرسال الفاتورة
@@ -948,8 +945,10 @@ export function computeTotals(
   items: OrderItem[],
   discountPct: number,
   taxPct: number, // الـ 14%
+  orderCategory: "normal" | "talabat" | "fast" = "normal",
 ) {
-  const subtotal = round2(
+  // 1. حساب المجموع الأساسي من أسعار الأصناف والإضافات
+  const baseSubtotal = round2(
     items.reduce(
       (s, l) =>
         s +
@@ -960,23 +959,34 @@ export function computeTotals(
     ),
   );
 
+  // 2. حساب قيمة عمولة المنصة (5% مثلاً) بناءً على المجموع الأساسي
+  let commissionValue = 0;
+  if (orderCategory === "talabat") {
+    commissionValue = round2((baseSubtotal * 5) / 100);
+  }else if (orderCategory === "fast") {
+        commissionValue = round2((baseSubtotal * 2) / 100);
+  }
+
+  // 3. 🌟 دمج العمولة مباشرة داخل الـ subtotal الكلي عشان يسمع في السيستم كله تلقائياً!
+  const subtotal = round2(baseSubtotal + commissionValue);
+
+  // 4. حساب الخصم والضريبة بناءً على الـ subtotal الجديد المدمج فيه النسبة
   const discountValue = round2((subtotal * clamp0(discountPct)) / 100);
   const afterDiscount = round2(subtotal - discountValue);
-
-  // 🌟 حساب قيمة الضريبة/الخدمة الحقيقية بالجنيه
   const taxValue = round2((afterDiscount * clamp0(taxPct)) / 100);
 
-  // 🌟 الإجمالي النهائي = الصافي بعد الخصم + قيمة الضريبة بالجنيه
+  // 5. الإجمالي النهائي الكلي
   const total = round2(afterDiscount + taxValue);
 
-  // بنرجع الأسماء بالطريقتين عشان نضمن إن مفيش سطر كود قديم يضرب
   return {
-    subtotal,
+    subtotal, // 🌟 مدمج جواه الـ 5% لطلبات أو فاست وجاهز لكل الصفحات
+    baseSubtotal, // المجموع الأصلي الصافي للأصناف فقط بدون النسبة
     discountValue,
     taxValue,
     tax_value: taxValue,
     taxPct,
     tax_pct: taxPct,
+    commissionValue, // قيمة النسبة بالجنيه لعرضها لو أحببت
     total,
   };
 }

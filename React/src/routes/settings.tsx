@@ -81,6 +81,11 @@ const printInvoice = (invoice: Invoice) => {
     typeof invoice.items === "string"
       ? JSON.parse(invoice.items)
       : invoice.items || [];
+  // 🌟 إضافة قراءة قيمة المنصة
+  const commVal =
+    Number(invoice.commissionValue) ||
+    Number((invoice as any).commission_value) ||
+    0;
 
   const html = `
     <html>
@@ -100,13 +105,24 @@ const printInvoice = (invoice: Invoice) => {
         </style>
       </head>
       <body>
-        <div class="header">مجمع الـمـول</div>
-        <div class="type-title">ORDER</div>
-        
+        <div class="header">Zayed Mall</div>
+        <div>النوع: ${invoice.type === "delivery" ? "توصيل" : invoice.type === "takeaway" ? "تيك أواي" : "صالة"}</div>
+
         <div class="meta">
-          <div>رقم الفاتورة: ${String(invoice.id).slice(0, 8)}</div>
-          <div>التاريخ: ${new Date(invoice.createdAt).toLocaleString("ar-EG")}</div>
-          <div>النوع: ${invoice.type === "delivery" ? "توصيل" : invoice.type === "takeaway" ? "تيك أواي" : "صالة"}</div>
+          <div>الوقت: ${new Date(invoice.createdAt).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", hour12: true })}</div>          
+          ${
+            (invoice.type === "takeaway" || invoice.type === "delivery") &&
+            invoice.orderCategory &&
+            invoice.orderCategory !== "normal"
+              ? `<div>منصة التحويل: <strong>${
+                  invoice.orderCategory === "talabat"
+                    ? "طلبات (Talabat)"
+                    : invoice.orderCategory === "fast"
+                      ? "فاست (Fast)"
+                      : invoice.orderCategory
+                }</strong></div>`
+              : ""
+          }
         </div>
 
         <table>
@@ -149,10 +165,22 @@ const printInvoice = (invoice: Invoice) => {
           </tbody>
         </table>
 
-        <div class="totals">
+       <div class="totals">
           <div><span>المجموع الأصلي:</span> <span>${Number(invoice.subtotal).toFixed(2)} ج</span></div>
           ${finalDiscVal > 0 ? `<div><span>الخصم (${invoice.discountPct || 0}%):</span> <span>${finalDiscVal.toFixed(2)} ج</span></div>` : ""}
           ${finalTaxVal > 0 ? `<div><span>الضريبة (${invoice.taxPct || 0}%):</span> <span>${finalTaxVal.toFixed(2)} ج</span></div>` : ""}          
+          
+          ${
+            commVal > 0
+              ? `
+            <div style="color: #d97706; font-weight: bold;">
+              <span>منصة (${invoice.orderCategory === "talabat" ? "طلبات" : invoice.orderCategory === "fast" ? "فاست" : "توصيل"}):</span> 
+              <span>+${commVal.toFixed(2)} ج</span>
+            </div>
+          `
+              : ""
+          }
+
           <div><span>التوصيل:</span> <span class="bold">${dPrice.toFixed(2)} ج</span></div>
           
           <div class="bold" style="border-top:1px solid #000; padding-top:4px; margin-top:4px;">
@@ -364,7 +392,14 @@ function InvoicesTab() {
               <th className="text-right p-3">الأصناف</th>
               <th className="text-right p-3">المجموع</th>
               <th className="text-right p-3">الخصم</th>
-              <th className="text-right p-3">الضريبة</th>
+              {/* 🌟 الشرط الجديد: لو صالة يظهر الضريبة، لو تيك أواي أو دليفري تظهر قيمة المنصة */}
+              {sub === "dinein" ? (
+                <th className="text-right p-3 w-16 text-purple-600">الضريبة</th>
+              ) : (
+                <th className="text-right p-3 w-20 text-amber-600 font-bold">
+                  منصة توصيل
+                </th>
+              )}
               {/* 🌟 تعديل ديناميكي لعمود الكابتن والتوصيل */}
               {sub === "dinein" ? (
                 <th className="text-right p-3 text-blue-600 font-bold">
@@ -402,8 +437,13 @@ function InvoicesTab() {
                   <td className="p-3 font-mono text-xs">
                     {inv.invoiceNumber || "-"}
                   </td>
-                  <td className="p-3 text-xs">
-                    {new Date(inv.createdAt).toLocaleString("ar-EG")}
+                  {/* 🌟 عرض الوقت فقط بدون ثواني بناءً على طلبك السابق */}
+                  <td className="p-3 font-mono">
+                    {new Date(inv.createdAt).toLocaleTimeString("ar-EG", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: true,
+                    })}
                   </td>
                   <td className="p-3 text-xs">
                     {inv.type === "delivery" ? (
@@ -450,7 +490,6 @@ function InvoicesTab() {
                       0,
                     )}
                   </td>
-
                   <td className="p-3">{fmt2(inv.subtotal)}</td>
                   <td className="p-3">
                     {Math.floor(
@@ -461,22 +500,39 @@ function InvoicesTab() {
                       inv.discountValue || (inv as any).discount_value || 0,
                     )}
                   </td>
-                  <td className="p-3">
-                    {fmt2(
-                      inv.taxValue ||
-                        (inv as any).tax_value ||
-                        ((Number(inv.subtotal) -
-                          Number(
-                            inv.discountValue ||
-                              (inv as any).discount_value ||
-                              0,
-                          )) *
-                          Number(inv.taxPct || (inv as any).tax_pct || 0)) /
-                          100 ||
-                        0,
-                    )}
-                  </td>
-
+                  {sub === "dinein" ? (
+                    <td className="p-3">
+                      {fmt2(
+                        inv.taxValue ||
+                          (inv as any).tax_value ||
+                          ((Number(inv.subtotal) -
+                            Number(
+                              inv.discountValue ||
+                                (inv as any).discount_value ||
+                                0,
+                            )) *
+                            Number(inv.taxPct || (inv as any).tax_pct || 0)) /
+                            100 ||
+                          0,
+                      )}
+                    </td>
+                  ) : (
+                    <td className="p-3 font-bold">
+                      {inv.orderCategory === "talabat" ? (
+                        <span className="px-2 py-0.5 rounded bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200">
+                          طلبات
+                        </span>
+                      ) : inv.orderCategory === "fast" ? (
+                        <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200">
+                          فاست
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground font-normal">
+                          عادي
+                        </span>
+                      )}
+                    </td>
+                  )}
                   {/* 🌟 خلية الكابتن أو التوصيل حسب حالة الصالة */}
                   {sub === "dinein" ? (
                     <td className="p-3 font-bold text-blue-600">
@@ -489,7 +545,6 @@ function InvoicesTab() {
                         : "—"}
                     </td>
                   )}
-
                   <td className="p-3 font-bold text-emerald-600">
                     {fmt2(
                       inv.total ||

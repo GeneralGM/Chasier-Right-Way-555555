@@ -236,6 +236,8 @@ function formatInvoiceToFrontend(inv) {
       : Number(inv.createdAt) || Date.now(),
     terminalId: inv.terminal_id || inv.terminalId || "Main",
     createdBy: inv.created_by || inv.createdBy || "",
+    orderCategory: inv.order_category || inv.orderCategory || "normal",
+    commissionValue: Number(inv.commission_value || inv.commissionValue || 0),
   };
 }
 
@@ -263,80 +265,59 @@ app.post("/api/invoices", async (req, res) => {
     createdAt,
     terminalId,
     createdBy,
+    orderCategory,
+    commissionValue,
   } = req.body;
 
   try {
-    let finalSubtotal = Number(subtotal);
-    if (!finalSubtotal && Array.isArray(items)) {
-      finalSubtotal = items.reduce((sum, item) => {
-        const itemPrice = Number(item.unitPrice) || 0;
-        const extrasTotal = (item.extras || []).reduce(
-          (exSum, ex) => exSum + (Number(ex.price) || 0),
-          0,
-        );
-        return sum + item.qty * (itemPrice + extrasTotal);
-      }, 0);
-    }
-
-    const finalTaxPct = Number(taxPct) || Number(req.body.tax_pct) || 0;
-    const finalTaxValue = Number(taxValue) || Number(req.body.tax_value) || 0;
-    const finalDiscountPct =
-      Number(discountPct) || Number(req.body.discount_pct) || 0;
-    const finalDiscountValue =
-      Number(discountValue) || Number(req.body.discount_value) || 0;
-    const finalDeliveryPrice =
-      Number(deliveryPrice) || Number(req.body.delivery_price) || 0;
-    const finalTotal = Number(total) || Number(req.body.total) || 0;
-
-    // 🌟 السحر هنا: تأمين قراءة الـ terminalId و createdBy من أي صيغة فرونت إند لمنع التصفير
-    const finalTerminalId =
-      terminalId || req.body.terminal_id || req.body.terminalId || "Main";
-    const finalCreatedBy =
-      createdBy ||
-      req.body.created_by ||
-      req.body.createdBy ||
-      cashierName ||
-      null;
+    // تأمين القيم الافتراضية لمنع أي undefined
+    const finalOrderCategory =
+      orderCategory || req.body.order_category || "normal";
+    const finalCommissionValue =
+      Number(commissionValue) || Number(req.body.commission_value) || 0;
 
     const query = `
       INSERT INTO invoices (
         id, type, invoice_number, table_code, zone, customer_name, customer_address, 
         cashier_id, cashier_name, captain_name, items, subtotal, discount_pct, discount_value, 
-        tax_pct, tax_value, delivery_price, total, created_at, terminal_id, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        tax_pct, tax_value, delivery_price, total, created_at, terminal_id, created_by,
+        order_category, commission_value
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
       RETURNING *
     `;
 
     const result = await pool.query(query, [
       id,
       type,
-      invoiceNumber || req.body.invoice_number,
-      tableCode || req.body.table_code,
-      zone || null,
-      customerName || null,
-      customerAddress || null,
-      cashierId || null,
-      cashierName || null,
-      captainName || null,
+      invoiceNumber,
+      tableCode,
+      zone,
+      customerName,
+      customerAddress,
+      cashierId,
+      cashierName,
+      captainName,
       JSON.stringify(items),
-      finalSubtotal,
-      finalDiscountPct,
-      finalDiscountValue,
-      finalTaxPct,
-      finalTaxValue,
-      finalDeliveryPrice,
-      finalTotal,
-      new Date(createdAt || req.body.created_at || Date.now()),
-      finalTerminalId, // 🌟 مررنا المتغير المؤمن
-      finalCreatedBy, // 🌟 مررنا المتغير المؤمن
+      Number(subtotal),
+      Number(discountPct || 0),
+      Number(discountValue || 0),
+      Number(taxPct || 0),
+      Number(taxValue || 0),
+      Number(deliveryPrice || 0),
+      Number(total),
+      createdAt ? new Date(Number(createdAt)) : new Date(),
+      terminalId || "Main",
+      createdBy || "Cashier",
+      finalOrderCategory,
+      finalCommissionValue,
     ]);
 
     res.status(201).json(formatInvoiceToFrontend(result.rows[0]));
   } catch (err) {
-    console.error("❌ خطأ أثناء حفظ الفاتورة:", err.message);
+    console.error("❌ خطأ أثناء حفظ الفاتورة في السيرفر:", err.message);
     res
       .status(500)
-      .json({ error: "حدث خطأ أثناء حفظ الفاتورة", details: err.message });
+      .json({ error: "فشل حفظ الفاتورة في قاعدة البيانات: " + err.message });
   }
 });
 
@@ -367,7 +348,6 @@ app.get("/api/invoices", async (req, res) => {
       .json({ error: "حدث خطأ أثناء جلب الفواتير", details: err.message });
   }
 });
-
 // ==========================================
 // 🕒 مسارات الورديات (Shifts) بالمنطق الجديد
 // ==========================================

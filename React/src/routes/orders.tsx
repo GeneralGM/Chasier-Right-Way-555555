@@ -1156,18 +1156,11 @@ function TakeawayView({
                     </Button>
                     <Button
                       size="sm"
-                      variant="outline"
-                      onClick={() => openFor(c, false)}
-                    >
-                      🛍️ تيك أواي
-                    </Button>
-                    <Button
-                      size="sm"
                       variant="default"
                       className="bg-amber-600 hover:bg-amber-700 text-white"
                       onClick={() => openFor(c, true)}
                     >
-                      🛵 توصيل
+                      🛵 أوردر
                     </Button>
                   </td>
                 </tr>
@@ -1320,40 +1313,6 @@ function OrderEntryDialog({
     }
     return min === Infinity ? 99 : Math.max(0, min);
   }
-  // 🌟 استرجاع دالة السحب الخاصة بالتيك أواي
-  // function deductInventoryForTakeaway() {
-  //   const perDept: Record<string, { itemId: string; baseQty: number }[]> = {};
-  //   for (const line of draftItems) {
-  //     // بتسحب من مسودة الطلب
-  //     const meal = db.meals.find((m) => m.id === line.mealId);
-  //     if (!meal) continue;
-  //     if (meal.category === SHISHA_CATEGORY) continue;
-  //     const dept = meal.department || "عام";
-  //     for (const ing of meal.ingredients) {
-  //       if (ing.refKind === "meal") continue;
-  //       const it = db.items.find((x) => x.id === ing.itemId);
-  //       if (!it) continue;
-  //       const baseQty = round2(
-  //         clamp0(
-  //           convertToBase(
-  //             ing.qty,
-  //             ing.unit,
-  //             it.unit,
-  //             it.conversionFactor,
-  //             it.subUnitType,
-  //           ) * line.qty,
-  //         ),
-  //       );
-  //       if (baseQty <= 0) continue;
-  //       (perDept[dept] = perDept[dept] || []).push({ itemId: it.id, baseQty });
-  //     }
-  //   }
-  //   for (const [d, arr] of Object.entries(perDept)) {
-  //     deductSubStock(d as SubDept, arr);
-  //   }
-  // }
-  // 🌟 استرجاع دالة السحب الخاصة بالتيك أواي والدليفري
-  // 🌟 استرجاع دالة السحب الخاصة بالتيك أواي والدليفري مجمعة
   function deductInventoryForTakeaway() {
     const perDept: Record<string, Record<string, number>> = {};
     for (const line of draftItems) {
@@ -1430,7 +1389,12 @@ function OrderEntryDialog({
   }
 
   // 🌟 الحسابات تعتمد على المسودة المحلية
-  const totals = computeTotals(draftItems, order.discountPct, order.taxPct);
+  const totals = computeTotals(
+    draftItems,
+    order.discountPct,
+    order.taxPct,
+    order.orderCategory || "normal",
+  );
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -1481,12 +1445,21 @@ function OrderEntryDialog({
           taxPct: 0,
           taxValue: 0,
           deliveryPrice: finalDeliveryPrice,
-          total: totals.subtotal - totals.discountValue + finalDeliveryPrice,
           createdAt: Date.now(),
 
           // 🌟 تأمين الأجهزة والتقارير
           terminalId: currentTerminalId,
           createdBy: currentCashierName,
+          // 🌟 تمرير حقول المنصة والنسبة:
+          orderCategory: order.orderCategory || "normal",
+          commissionValue: totals.commissionValue,
+
+          // 🌟 الإجمالي الكلي بياخد المجموع + الدليفري + عمولة المنصة
+          total:
+            totals.subtotal -
+            totals.discountValue +
+            finalDeliveryPrice +
+            totals.commissionValue,
         };
 
         await addInvoice(inv);
@@ -1733,8 +1706,87 @@ function OrderEntryDialog({
                 label={`الضريبة (${order.taxPct}%)`}
                 value={fmt2(totals.taxValue)}
               />
+              {totals.commissionValue > 0 && (
+                <Row
+                  label="نسبة المنصة (+5%)"
+                  value={fmt2(totals.commissionValue)}
+                />
+              )}
               <Row label="الإجمالي" value={fmt2(totals.total)} bold />
             </div>
+            {/* 🌟 أزرار منصات التوصيل (تظهر للتيك أواي فقط) */}
+            {order.zone === "takeaway" && (
+              <div className="p-2 border-t border-border bg-background/40 space-y-2 shrink-0">
+                <div className="text-[11px] font-bold text-muted-foreground flex justify-between items-center">
+                  {totals.commissionValue > 0 && (
+                    <span className="text-amber-600 font-extrabold">
+                      +{fmt2(totals.commissionValue)} ج.م
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={
+                      order.orderCategory === "talabat" ? "default" : "outline"
+                    }
+                    className={`h-8 text-xs font-bold transition-all ${
+                      order.orderCategory === "talabat"
+                        ? "bg-orange-600 hover:bg-orange-700 text-white shadow"
+                        : "text-orange-600 border-orange-300 hover:bg-orange-50"
+                    }`}
+                    onClick={() => {
+                      const nextCat =
+                        order.orderCategory === "talabat"
+                          ? "normal"
+                          : "talabat";
+                      upsertOrder({
+                        ...order,
+                        items: draftItems,
+                        orderCategory: nextCat,
+                      });
+                      toast.success(
+                        nextCat === "talabat"
+                          ? "🚀 تم تطبيق نسبة منصة طلبات"
+                          : "🗑️ تم إلغاء عمولة طلبات",
+                      );
+                    }}
+                  >
+                    طلبات (Talabat)
+                  </Button>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={
+                      order.orderCategory === "fast" ? "default" : "outline"
+                    }
+                    className={`h-8 text-xs font-bold transition-all ${
+                      order.orderCategory === "fast"
+                        ? "bg-blue-600 hover:bg-blue-700 text-white shadow"
+                        : "text-blue-600 border-blue-300 hover:bg-blue-50"
+                    }`}
+                    onClick={() => {
+                      const nextCat =
+                        order.orderCategory === "fast" ? "normal" : "fast";
+                      upsertOrder({
+                        ...order,
+                        items: draftItems,
+                        orderCategory: nextCat,
+                      });
+                      toast.success(
+                        nextCat === "fast"
+                          ? "⚡ تم تطبيق نسبة منصة فاست"
+                          : "🗑️ تم إلغاء عمولة فاست",
+                      );
+                    }}
+                  >
+                    فاست (Fast)
+                  </Button>
+                </div>
+              </div>
+            )}
             <DialogFooter className="p-3 border-t border-border shrink-0">
               <Button
                 onClick={() => handleSaveAndDeduct(order.tableCode)}
@@ -2371,7 +2423,6 @@ function CheckoutDialog({
     currentOrder.taxPct,
   );
 
-  // function deductInventory() {
   //   const perDept: Record<string, { itemId: string; baseQty: number }[]> = {};
   //   for (const line of currentOrder.items) {
   //     const meal = db.meals.find((m) => m.id === line.mealId);
@@ -2584,6 +2635,12 @@ function CheckoutDialog({
             <Row label="المجموع" value={fmt2(totals.subtotal)} />
             <Row label="الخصم" value={fmt2(totals.discountValue)} />
             <Row label="الضريبة" value={fmt2(totals.taxValue)} />
+            {totals.commissionValue > 0 && (
+              <Row
+                label="نسبة المنصة (+5%)"
+                value={fmt2(totals.commissionValue)}
+              />
+            )}
             <Row label="الإجمالي" value={fmt2(totals.total)} bold />
           </div>
         </div>
@@ -2632,7 +2689,9 @@ function CheckoutDialog({
 export const triggerPrint = (data: any, isFinal: boolean = false) => {
   const printWindow = window.open("", "_blank", "width=400,height=600");
   if (!printWindow) return;
-
+  // 🌟 1. قراءة قيمة عمولة المنصة بالجنيه
+  const commVal =
+    Number(data.commissionValue) || Number((data as any).commission_value) || 0;
   const dPrice = Number(data.deliveryPrice) || 0;
   const invoiceNumber = data.invoiceNumber || "000000";
   const createdAt = data.createdAt || Date.now();
@@ -2662,15 +2721,27 @@ export const triggerPrint = (data: any, isFinal: boolean = false) => {
     </head>
     <body>
       <div class="header">مجمع الـمـول</div>
-      
+      <div>النوع: ${typeLabel}</div>
       <div class="type-title">
         ${isFinal ? "فاتورة نهائية (مدفوعة)" : "بون حساب مبدئي (غير مدفوع)"}
       </div>
 
-      <div class="meta">
-        ${isFinal ? `<div>رقم الفاتورة: ${invoiceNumber}</div>` : ""}
-        <div>التاريخ: ${new Date(createdAt).toLocaleString("ar-EG")}</div>
-        <div>النوع: ${typeLabel}</div>
+     <div class="meta">
+        <div>الوقت: ${new Date(createdAt).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", hour12: true })}</div>        
+        ${
+          (data.type === "takeaway" || data.type === "delivery") &&
+          data.orderCategory &&
+          data.orderCategory !== "normal"
+            ? `<div>منصة التحويل: <strong style="font-size:14px; color:#000;">${
+                data.orderCategory === "talabat"
+                  ? "(Talabat)"
+                  : data.orderCategory === "fast"
+                    ? "(Fast)"
+                    : data.orderCategory
+              }</strong></div>`
+            : ""
+        }
+
         ${data.tableCode ? `<div>رقم الطاولة: ${data.tableCode}</div>` : ""}
         ${data.cashierName ? `<div>الكاشير: ${data.cashierName}</div>` : ""}
       </div>
@@ -2709,7 +2780,20 @@ export const triggerPrint = (data: any, isFinal: boolean = false) => {
         <div><span>المجموع الأصلي:</span> <span>${Number(data.subtotal || 0).toFixed(2)} ج</span></div>
         ${data.discountValue > 0 ? `<div><span>الخصم:</span> <span>${Number(data.discountValue).toFixed(2)} ج</span></div>` : ""}
         ${data.taxValue > 0 ? `<div><span>الضريبة:</span> <span>${Number(data.taxValue).toFixed(2)} ج</span></div>` : ""}
+        
+        ${
+          commVal > 0
+            ? `
+          <div style="color: #d97706; font-weight: bold;">
+            <span>منصة (${data.orderCategory === "talabat" ? "طلبات" : data.orderCategory === "fast" ? "فاست" : "توصيل"}):</span> 
+            <span>+${commVal.toFixed(2)} ج</span>
+          </div>
+        `
+            : ""
+        }
+
         ${dPrice > 0 ? `<div><span>التوصيل:</span> <span class="bold">${dPrice.toFixed(2)} ج</span></div>` : ""}
+        
         <div class="bold" style="border-top:1px solid #000; padding-top:4px; margin-top:4px;">
           <span>الإجمالي النهائي:</span> <span>${Number(data.total || 0).toFixed(2)} ج</span>
         </div>
@@ -2824,92 +2908,6 @@ function TransferCaptainDialog({
   }
 
   return (
-    // <Dialog open onOpenChange={(o) => !o && onClose()}>
-    //   <DialogContent dir="rtl" className="max-w-md">
-    //     <DialogHeader>
-    //       <DialogTitle className="flex items-center gap-2 text-lg font-bold">
-    //         <UserPlus className="w-5 h-5 text-primary" /> تحويل الطاولة (
-    //         {tableCode}) لكابتن آخر
-    //       </DialogTitle>
-    //     </DialogHeader>
-
-    //     <div className="bg-secondary/40 p-3 rounded-xl border border-border flex items-center justify-between text-sm">
-    //       <span className="text-muted-foreground font-medium">
-    //         الكابتن المسؤول حالياً:
-    //       </span>
-    //       <span className="font-bold bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 px-2.5 py-1 rounded-md">
-    //         {currentCaptain}
-    //       </span>
-    //     </div>
-
-    //     {isMicros ? (
-    //       <form onSubmit={handlePinSubmit} className="space-y-4 pt-2">
-    //         <p className="text-xs text-muted-foreground text-center font-medium">
-    //           يرجى من الكابتن الجديد المستلم للطاولة إدخال الرمز السري (PIN)
-    //           للتأكيد والاستلام:
-    //         </p>
-    //         <Input
-    //           type="password"
-    //           inputMode="numeric"
-    //           autoFocus
-    //           placeholder="••••"
-    //           value={pin}
-    //           onChange={(e) => setPin(e.target.value)}
-    //           className="text-center text-2xl tracking-widest h-14 font-bold"
-    //         />
-    //         <DialogFooter className="gap-2 pt-2">
-    //           <Button
-    //             type="button"
-    //             variant="outline"
-    //             onClick={onClose}
-    //             disabled={isSubmitting}
-    //           >
-    //             إلغاء
-    //           </Button>
-    //           <Button
-    //             type="submit"
-    //             className="flex-1 font-bold"
-    //             disabled={!pin || isSubmitting}
-    //           >
-    //             {isSubmitting
-    //               ? "جاري التحقق والنقل..."
-    //               : "تأكيد الاستلام والتحويل"}
-    //           </Button>
-    //         </DialogFooter>
-    //       </form>
-    //     ) : (
-    //       <div className="space-y-3 pt-2">
-    //         <p className="text-xs text-muted-foreground font-medium">
-    //           اختر اسم الكابتن الجديد الذي سيتم نقل الطاولة إلى عهدته:
-    //         </p>
-    //         {captainsList.length === 0 ? (
-    //           <div className="text-center p-6 border rounded-xl bg-muted/30 text-xs text-muted-foreground">
-    //             لا يوجد كباتن آخرون متاحون للتحويل حالياً.
-    //           </div>
-    //         ) : (
-    //           <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto p-1">
-    //             {captainsList.map((cap) => (
-    //               <button
-    //                 key={cap.id || cap.name}
-    //                 type="button"
-    //                 disabled={isSubmitting}
-    //                 onClick={() => handleDirectTransfer(cap.name)}
-    //                 className="p-3 rounded-xl border-2 border-border bg-card hover:border-primary hover:bg-primary/5 transition flex items-center justify-center font-bold text-sm shadow-sm active:scale-95"
-    //               >
-    //                 {cap.name}
-    //               </button>
-    //             ))}
-    //           </div>
-    //         )}
-    //         <DialogFooter className="pt-2">
-    //           <Button variant="outline" onClick={onClose} className="w-full">
-    //             إغلاق
-    //           </Button>
-    //         </DialogFooter>
-    //       </div>
-    //     )}
-    //   </DialogContent>
-    // </Dialog>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       {/* 1. هنا خفت الـ max-w-md وخليت الأبعاد المباشرة 75vw و 75vh مع جعلها flex لتوزيع العناصر رأساً */}
       <DialogContent

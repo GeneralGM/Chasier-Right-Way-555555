@@ -84,7 +84,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const syncDeviceTypeWithServer = async () => {
       try {
-        const res = await fetch("http://192.168.1.51:5000/api/device-check");
+        const res = await fetch("http://10.55.86.251:5000/api/device-check");
         const data = await res.json();
         const fetchedType = data.deviceType; // "main" أو "micros" أو "sec_cashier"
 

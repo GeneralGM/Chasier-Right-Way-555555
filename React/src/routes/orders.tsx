@@ -107,7 +107,7 @@ function SecCashierLogin({
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch("http://192.168.1.51:5000/api/employees");
+        const response = await fetch("http://10.55.86.251:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -255,7 +255,7 @@ function ShiftLogin() {
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch("http://192.168.1.51:5000/api/employees");
+        const response = await fetch("http://10.55.86.251:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -448,6 +448,12 @@ function PosScreen() {
   const isSecCashier = localStorage.getItem("isSecCashierDevice") === "true";
   const [transferCaptainOpen, setTransferCaptainOpen] = useState(false);
 
+  const [othersPromptOpen, setOthersPromptOpen] = useState<string | null>(null);
+  const [othersName, setOthersName] = useState("");
+  const [othersType, setOthersType] = useState<"staff" | "hospitality">(
+    "staff",
+  );
+
   // 🌟 دالة فتح الطاولة وإرسال قفل الحماية للستور بالترتيب الصحيح
   function handleOpenOrder(code: string | null) {
     setOpenOrder(code); // 1. فتح الـ Dialog في الـ UI أولاً
@@ -511,10 +517,22 @@ function PosScreen() {
   // 🌟 المنطق السحري لفتح الطاولة
   function actionOpen() {
     if (!selectedTable) return toast.error("اختر طاولة أولاً");
+
     const order = pos.orders[selectedTable] as any;
 
+    // 🌟 التعديل السحري: لو إحنا في زون others والطاولة فاضية، نفتح المودال فوراً
+    if (zone === "others") {
+      if (!order) {
+        setOthersPromptOpen(selectedTable);
+        return;
+      }
+      // لو الطاولة مفتوحة، نفتح الأوردر علطول
+      handleOpenOrder(selectedTable);
+      return;
+    }
+
+    // المنطق القديم لباقي الزونات (الصالة، التيك أواي...)
     if (!isMicros) {
-      // الكاشير: يدخل فوراً ويفتح الطاولة بدون باسوورد
       if (!order) {
         upsertOrder({
           tableCode: selectedTable,
@@ -525,32 +543,22 @@ function PosScreen() {
           taxPct: 14,
           openedAt: Date.now(),
           openedBy: "cashier",
-          cashierName: pos.shift?.cashierName || "كاشير غير معروف",
+          cashierName: pos.shift?.cashierName || "كاشير",
         } as any);
       }
       handleOpenOrder(selectedTable);
-      return;
-    }
-
-    // الميكروس: هنا الحماية
-    if (!order) {
-      // 1. طاولة فاضية: نطلب باسوورد كابتن جديد
-      setTargetTable(selectedTable);
-      setCaptainPromptMode("new");
-      setCaptainPin("");
-      setCaptainPromptOpen(true);
     } else {
-      // 2. طاولة مفتوحة بالفعل
-      if (order.openedBy === "captain") {
-        // اتفتحت بكابتن: لازم نفس الباسوورد اللي فتحها
+      // منطق الـ Micros (لو شغال)
+      if (!order) {
         setTargetTable(selectedTable);
-        setCaptainPromptMode("verify_existing");
+        setCaptainPromptMode("new");
         setCaptainPin("");
         setCaptainPromptOpen(true);
       } else {
-        // اتفتحت بكاشير: نطلب باسوورد عشان نسجل اسم الكابتن اللي بيضيف بس
         setTargetTable(selectedTable);
-        setCaptainPromptMode("verify_any");
+        setCaptainPromptMode(
+          order.openedBy === "captain" ? "verify_existing" : "verify_any",
+        );
         setCaptainPin("");
         setCaptainPromptOpen(true);
       }
@@ -570,7 +578,7 @@ function PosScreen() {
 
     try {
       const res = await fetch(
-        "http://192.168.1.51:5000/api/pos/verify-captain",
+        "http://10.55.86.251:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -672,6 +680,71 @@ function PosScreen() {
       </PosFrame>
     );
   }
+  {
+    /* 🌟 نافذة إدخال بيانات الطلبات الداخلية (موظفين / ضيافة) */
+  }
+  <Dialog
+    open={!!othersPromptOpen}
+    onOpenChange={(o) => !o && setOthersPromptOpen(null)}
+  >
+    <DialogContent dir="rtl" className="max-w-sm">
+      <DialogHeader>
+        <DialogTitle>بيانات الطلب الداخلي</DialogTitle>
+      </DialogHeader>
+      <div className="space-y-4 pt-4">
+        <div>
+          <label className="text-xs font-bold mb-1 block">
+            اسم الشخص (موظف / إدارة)
+          </label>
+          <Input
+            autoFocus
+            placeholder="مثال: يوسف، أحمد المحاسب..."
+            value={othersName}
+            onChange={(e) => setOthersName(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="text-xs font-bold mb-1 block">نوع الطلب</label>
+          <select
+            value={othersType}
+            onChange={(e) => setOthersType(e.target.value as any)}
+            className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm font-bold"
+          >
+            <option value="staff">مسحوبات موظفين (Staff)</option>
+            <option value="hospitality">ضيافة (Hospitality)</option>
+          </select>
+        </div>
+        <Button
+          className="w-full h-11 font-bold"
+          onClick={() => {
+            if (!othersName.trim()) return toast.error("يجب إدخال الاسم");
+
+            // 🌟 التعديل الاحترافي لـ دالة فتح الطاولة جوه الـ Dialog
+            upsertOrder({
+              tableCode: othersPromptOpen!, // بيفضل محتفظ بـ O1 أو X1 عشان السيرفر والـ Database
+              zone: "others",
+              items: [],
+              state: "active",
+              discountPct: 0,
+              taxPct: 0,
+              customerName: othersName.trim(), // 👈 هنا اسم الموظف الساحر اللي هيظهر على الشاشة!
+              orderCategory: othersType, // 'staff' أو 'hospitality'
+              openedAt: Date.now(),
+              openedBy: "cashier",
+              cashierName: pos.shift?.cashierName || "كاشير",
+            } as any);
+
+            handleOpenOrder(othersPromptOpen);
+            setOthersPromptOpen(null);
+            setOthersName("");
+            setOthersType("staff");
+          }}
+        >
+          فتح الطاولة
+        </Button>
+      </div>
+    </DialogContent>
+  </Dialog>;
 
   return (
     <PosFrame
@@ -727,8 +800,9 @@ function PosScreen() {
         ${matchSearch ? "ring-2 ring-emerald-500" : ""}`}
               >
                 <TableChairsSvg />
-                <span className="font-bold text-lg">{code}</span>
-
+                <span className="font-bold text-lg text-center break-words px-1 leading-tight">
+                  {order?.customerName || code}
+                </span>
                 {/* 🌟 المربع الصغير لعرض أسماء الكباتن والكاشيرات بذكاء */}
                 {hasItems && (
                   <div className="flex flex-col items-center gap-0.5 mt-0.5 w-full px-1">
@@ -1486,7 +1560,7 @@ function OrderEntryDialog({
               createdAt: Date.now(),
             };
 
-            fetch("http://192.168.1.51:5000/api/sales", {
+            fetch("http://10.55.86.251:5000/api/sales", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(newSale),
@@ -2526,11 +2600,17 @@ function CheckoutDialog({
           .startsWith("T");
       const todayStr = new Date().toISOString().split("T")[0];
       const deliveryPrice = Number((currentOrder as any).deliveryPrice) || 0;
-      const computedType = isTakeaway
+      const isOthers = currentOrder.zone === "others";
+      let computedType = isTakeaway
         ? deliveryPrice > 0
           ? "delivery"
           : "takeaway"
         : "dinein";
+
+      // 🌟 التوجيه الذكي: لو الطلب داخلي، نوع الفاتورة هيكون موظفين أو ضيافة عشان تقرير الشفت
+      if (isOthers) {
+        computedType = currentOrder.orderCategory || "staff";
+      }
 
       const totals = computeTotals(
         currentOrder.items,
@@ -2615,7 +2695,7 @@ function CheckoutDialog({
             createdAt: Date.now(),
           };
 
-          fetch("http://192.168.1.51:5000/api/sales", {
+          fetch("http://10.55.86.251:5000/api/sales", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(newSale),
@@ -2845,7 +2925,7 @@ function TransferCaptainDialog({
     if (isMicros) return;
     async function fetchEmps() {
       try {
-        const res = await fetch("http://192.168.1.51:5000/api/employees");
+        const res = await fetch("http://10.55.86.251:5000/api/employees");
         if (res.ok) setServerEmployees(await res.json());
       } catch (e) {
         console.error(e);
@@ -2878,7 +2958,7 @@ function TransferCaptainDialog({
 
     try {
       const res = await fetch(
-        "http://192.168.1.51:5000/api/pos/verify-captain",
+        "http://10.55.86.251:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

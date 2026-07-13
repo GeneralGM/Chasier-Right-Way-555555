@@ -15,6 +15,8 @@ import {
   Settings,
   Store,
   UserPen,
+  type LucideIcon,
+  ShieldAlert,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import ActionGate from "@/components/ui/ActionGate";
@@ -28,7 +30,16 @@ const warehouseNav = [
   { to: "/cost-control", label: "مراقبة التكاليف", icon: Calculator },
 ] as const;
 
-const primaryNav = [
+// 🌟 تعريف نوع البيانات لضمان عدم حدوث أخطاء TypeScript مع إضافة حقل الصلاحية
+interface NavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  showFor: string[];
+  requiredRole?: string; // 🌟 حقل اختياري لتحديد الرتبة المطلوبة (مثل: مالك)
+}
+
+const primaryNav: NavItem[] = [
   {
     to: "/reports",
     label: "التقرير",
@@ -52,6 +63,14 @@ const primaryNav = [
     label: "الإعدادات",
     icon: Settings,
     showFor: ["main", "sec_cashier"],
+  },
+  // 🌟 2. إضافة تابة الـ IPs والطابعات (للكاشير الرئيسي فقط + حماية المالك)
+  {
+    to: "/printers-settings", // مسار شاشة إعدادات الـ IPs بالطابعات (تقدر تغيره لو مسميه اسم تاني عندك)
+    label: "IPs",
+    icon: ShieldAlert,
+    showFor: ["main"], // تظهر عند الكاشير الرئيسي فقط
+    requiredRole: "مالك", // تتطلب بصمة مالك (Owner) لفتحها
   },
 ];
 
@@ -211,12 +230,39 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             )}
 
-            {/* 🟢 القائمة الرئيسية بفلتر الصلاحيات الذكي */}
+            {/* 🟢 القائمة الرئيسية بفلتر الصلاحيات الذكي + حماية ActionGate */}
             {primaryNav
               .filter((n) => n.showFor.includes(deviceType))
               .map((n) => {
                 const active = pathname === n.to;
                 const Icon = n.icon;
+
+                // 🌟 3. لو التابة محتاجة رتبة معينة (زي بصمة المالك)، بنغلفها بـ ActionGate
+                if (n.requiredRole) {
+                  return (
+                    <ActionGate
+                      key={n.to}
+                      requiredRole="مالك"
+                      actionName={`الدخول إلى شاشة ${n.label}`}
+                      onSuccess={() => navigate({ to: n.to })}
+                    >
+                      <button
+                        className={`shrink-0 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all duration-300 ${
+                          active
+                            ? "bg-rose-600 text-white shadow-lg shadow-rose-600/30 scale-105 ring-2 ring-rose-300"
+                            : "bg-gray-100 text-gray-700 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200"
+                        }`}
+                      >
+                        <Icon
+                          className={`w-4 h-4 ${active ? "animate-pulse" : ""}`}
+                        />
+                        {n.label}
+                      </button>
+                    </ActionGate>
+                  );
+                }
+
+                // التابات العادية بدون حماية إضافية
                 return (
                   <Link
                     key={n.to}
@@ -243,7 +289,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
 
-        {/* 📱 قائمة الشاشات الصغيرة / التابلت */}
+        {/* 📱 قائمة الشاشات الصغيرة / التابلت (مجهزة بنفس الحماية) */}
         <nav className="md:hidden flex overflow-x-auto gap-2 px-4 pb-3 pt-2 hide-scrollbar">
           {[
             ...(isSecCashier || isMain ? warehouseNav : []),
@@ -251,6 +297,30 @@ export function AppShell({ children }: { children: ReactNode }) {
           ].map((n) => {
             const active = pathname === n.to;
             const Icon = n.icon;
+
+            // 🌟 4. تطبيق نفس الحماية في الشاشات الصغيرة للمالك
+            if ("requiredRole" in n && n.requiredRole) {
+              return (
+                <ActionGate
+                  key={n.to}
+                  requiredRole="مالك"
+                  actionName={`الدخول إلى شاشة ${n.label}`}
+                  onSuccess={() => navigate({ to: n.to })}
+                >
+                  <button
+                    className={`shrink-0 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all duration-300 ${
+                      active
+                        ? "bg-rose-600 text-white shadow-lg shadow-rose-600/30 scale-105 ring-2 ring-rose-300"
+                        : "bg-gray-100 text-gray-700 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {n.label}
+                  </button>
+                </ActionGate>
+              );
+            }
+
             return (
               <Link
                 key={n.to}

@@ -722,7 +722,7 @@ function PosScreen() {
               className="w-full h-11 font-bold"
               onClick={() => {
                 if (!othersName.trim()) return toast.error("يجب إدخال الاسم");
-    
+
                 upsertOrder({
                   tableCode: othersPromptOpen!,
                   zone: "others",
@@ -736,7 +736,7 @@ function PosScreen() {
                   openedBy: "cashier",
                   cashierName: pos.shift?.cashierName || "كاشير",
                 } as any);
-    
+
                 handleOpenOrder(othersPromptOpen);
                 setOthersPromptOpen(null);
                 setOthersName("");
@@ -747,7 +747,8 @@ function PosScreen() {
             </Button>
           </div>
         </DialogContent>
-      </Dialog>;
+      </Dialog>
+      ;
       <div className="px-4 pt-3 flex gap-2 items-center shrink-0">
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -766,7 +767,6 @@ function PosScreen() {
           اذهب
         </Button>
       </div>
-
       <div className="flex-1 flex gap-3 px-4 pt-3 min-h-0 overflow-hidden">
         <div className="flex-1 grid grid-cols-5 grid-rows-4 gap-3 min-h-0">
           {filteredTables.map((code) => {
@@ -877,7 +877,6 @@ function PosScreen() {
           )}
         </aside>
       </div>
-
       <div className="px-4 py-2 flex items-center justify-between gap-3 shrink-0 border-t border-border">
         <div className="flex items-center gap-1">
           <Button
@@ -901,7 +900,6 @@ function PosScreen() {
           </Button>
         </div>
       </div>
-
       {/* 🌟 نافذة الكابتن */}
       <Dialog open={captainPromptOpen} onOpenChange={setCaptainPromptOpen}>
         <DialogContent dir="rtl" className="max-w-xs">
@@ -936,7 +934,6 @@ function PosScreen() {
           </form>
         </DialogContent>
       </Dialog>
-
       {/* Modals */}
       {openOrder && pos.orders[openOrder] && (
         <OrderEntryDialog
@@ -1404,18 +1401,15 @@ function OrderEntryDialog({
     extras: { label: string; price: number }[] = [],
     summary?: string,
   ) {
-    // 1. ندور هل الصنف ده موجود بنفس الإضافات بالظبط في السلة؟
     const existingLineIndex = draftItems.findIndex(
       (item) => item.mealId === meal.id && item.modifiersSummary === summary,
     );
 
     if (existingLineIndex >= 0) {
-      // 2. لو موجود: ننسخ المسودة، نزود العدد بواحد، ونحدث السلة من غير سطور جديدة
       const newDraftItems = [...draftItems];
       newDraftItems[existingLineIndex].qty += 1;
       setDraftItems(newDraftItems);
     } else {
-      // 3. لو صنف جديد تماماً (أو نفس الصنف بس بإضافات مختلفة): ننزله كسطر جديد
       const line: OrderItem = {
         id: crypto.randomUUID(),
         mealId: meal.id,
@@ -1425,7 +1419,8 @@ function OrderEntryDialog({
         extras,
         modifiersSummary: summary,
         mealName: undefined,
-        department: "",
+        // 🌟 التصحيح السحري: بناخد القسم الحقيقي من الريسبي بدل ما نسيبه فاضي
+        department: meal.department || "مطبخ",
       };
       setDraftItems([...draftItems, line]);
     }
@@ -1455,8 +1450,177 @@ function OrderEntryDialog({
     order.orderCategory || "normal",
   );
 
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  // 🌟 دالة حساب الفروقات (الـ Delta) وإرسال البونات ديناميكياً لجميع الطابعات المضافة في الإعدادات
+  async function handleSendToKitchenPrinters(currentOrder: any) {
+    if (!currentOrder) return;
 
+    const oldOrder = pos.orders[currentOrder.tableCode];
+    const oldItems: OrderItem[] = oldOrder ? oldOrder.items || [] : [];
+    const currentItems: OrderItem[] = currentOrder.items || [];
+
+    const diffItems: any[] = [];
+
+    // مفتاح فريد يدمج الـ mealId مع الملاحظات
+    const getUniqueKey = (item: OrderItem) =>
+      `${item.mealId}___${item.modifiersSummary || ""}`;
+
+    const oldQtyMap: Record<string, number> = {};
+    const oldDetailsMap: Record<string, OrderItem> = {};
+    oldItems.forEach((item) => {
+      const key = getUniqueKey(item);
+      oldQtyMap[key] = (oldQtyMap[key] || 0) + item.qty;
+      oldDetailsMap[key] = item;
+    });
+
+    const currentQtyMap: Record<string, number> = {};
+    const currentDetailsMap: Record<string, OrderItem> = {};
+    currentItems.forEach((item) => {
+      const key = getUniqueKey(item);
+      currentQtyMap[key] = (currentQtyMap[key] || 0) + item.qty;
+      currentDetailsMap[key] = item;
+    });
+
+    // أ. حساب الزيادات والتعديلات
+    Object.keys(currentQtyMap).forEach((key) => {
+      const curQty = currentQtyMap[key];
+      const oldQty = oldQtyMap[key] || 0;
+      const diff = curQty - oldQty;
+
+      if (diff !== 0) {
+        const item = currentDetailsMap[key];
+        const originalMeal = db.meals.find((m) => m.id === item.mealId);
+        const dept = item.department || originalMeal?.department || "مطبخ";
+
+        const fullName = item.modifiersSummary
+          ? `${item.name} (${item.modifiersSummary})`
+          : item.name;
+
+        diffItems.push({
+          itemId: item.mealId,
+          name: fullName,
+          diffQty: diff,
+          department: dept,
+        });
+      }
+    });
+
+    // ب. حساب المحذوفات بالكامل
+    Object.keys(oldQtyMap).forEach((key) => {
+      if (!currentQtyMap[key]) {
+        const oldQty = oldQtyMap[key];
+        const item = oldDetailsMap[key];
+        const originalMeal = db.meals.find((m) => m.id === item.mealId);
+        const dept = item.department || originalMeal?.department || "مطبخ";
+
+        const fullName = item.modifiersSummary
+          ? `${item.name} (${item.modifiersSummary})`
+          : item.name;
+
+        diffItems.push({
+          itemId: item.mealId,
+          name: fullName,
+          diffQty: -oldQty,
+          department: dept,
+        });
+      }
+    });
+
+    if (diffItems.length === 0) return;
+
+    // 🌟 جلب قائمة الطابعات الديناميكية المخزنة في الـ localStorage
+    const savedPrinters = JSON.parse(
+      localStorage.getItem("pos_dynamic_printers") || "[]",
+    );
+
+    // لو العميل لسه مضافش طابعات (أول مرة تشغيل للتست الأوفلاين)، هنشغل الطابعات الافتراضية الذكية
+    const printersToUse =
+      savedPrinters.length > 0
+        ? savedPrinters
+        : [
+            {
+              id: "1",
+              name: "طابعة المطبخ الافتراضية",
+              ip: "127.0.0.1",
+              port: 9100,
+              targetDept: "مطبخ",
+            },
+            {
+              id: "2",
+              name: "طابعة البار الافتراضية",
+              ip: "127.0.0.1",
+              port: 9101,
+              targetDept: "بار",
+            },
+            {
+              id: "3",
+              name: "طابعة الشيشة الافتراضية",
+              ip: "127.0.0.1",
+              port: 9102,
+              targetDept: "شيشة",
+            },
+          ];
+
+    // دالة مساعدة لمطابقة اسم القسم المخزن مع قسم الصنف الفعلي
+    const matchDept = (itemDept: string, targetDept: string) => {
+      const cleanItem = itemDept.trim().toLowerCase();
+      const cleanTarget = targetDept.trim().toLowerCase();
+      if (cleanTarget === "مطبخ" || cleanTarget === "kitchen") {
+        return (
+          cleanItem === "مطبخ" ||
+          cleanItem === "kitchen" ||
+          cleanItem === "صالة"
+        );
+      }
+      if (cleanTarget === "بار" || cleanTarget === "bar") {
+        return cleanItem === "بار" || cleanItem === "bar";
+      }
+      if (
+        cleanTarget === "شيشة" ||
+        cleanTarget === "شيشه" ||
+        cleanTarget === "shisha" ||
+        cleanTarget === "shish"
+      ) {
+        return (
+          cleanItem === "شيشة" ||
+          cleanItem === "شيشه" ||
+          cleanItem === "shisha" ||
+          cleanItem === "shish"
+        );
+      }
+      return cleanItem === cleanTarget;
+    };
+
+    // 🚀 الإرسال لكل طابعة بشكل مستقل بناءً على القسم المربوطة بيه
+    for (const printer of printersToUse) {
+      // فلترة الأصناف التي تخص هذه الطابعة بالذات
+      const printerItems = diffItems.filter((i) =>
+        matchDept(i.department, printer.targetDept),
+      );
+
+      if (printerItems.length > 0) {
+        try {
+          await fetch("http://localhost:5000/api/print-kitchen", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              printerIP: printer.ip,
+              printerPort: Number(printer.port) || 9100,
+              deptName: printer.name, // طباعة الاسم المخصص للطابعة في رأس البون
+              tableName: currentOrder.tableCode,
+              zoneName: currentOrder.zone,
+              items: printerItems,
+              orderCategory: currentOrder.orderCategory || "dinein",
+              customerName: currentOrder.customerName || "",
+            }),
+          });
+        } catch (err) {
+          console.error(`❌ فشل الاتصال بالطابعة: ${printer.name}`);
+        }
+      }
+    }
+  }
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
   async function handleSaveAndDeduct(code: string) {
     if (isSubmitting) return;
     setIsSubmitting(true);
@@ -1516,6 +1680,14 @@ function OrderEntryDialog({
             totals.commissionValue,
         };
 
+        // 🌟 1. طباعة الأقسام للتيك أواي قبل مسح الأوردر وإغلاقه
+        // بنمرر الأوبجكت الجديد بالتعديلات الحالية عشان يقارنه بالقديم اللي في الـ store
+        await handleSendToKitchenPrinters({
+          ...order,
+          items: draftItems,
+          tableCode: code,
+        });
+
         await addInvoice(inv);
         deductInventoryForTakeaway();
 
@@ -1549,7 +1721,7 @@ function OrderEntryDialog({
               id:
                 "sale_" + crypto.randomUUID().split("-")[0] + "_" + Date.now(),
               date: new Date().toISOString().split("T")[0],
-              department: deptName, // 🌟 أهم تعديل: بنبعت اسم القسم الصح!
+              department: deptName,
               lines: lines,
               totalSales: totalSales,
               totalCost: totalCost,
@@ -1576,6 +1748,14 @@ function OrderEntryDialog({
         else toast.success("تم حفظ فاتورة تيك أواي بنجاح! 🛍️");
         onClose();
       } else {
+        // 🌟 2. طباعة الأقسام للصالة / الأقسام الداخلية (Dine-in / Others)
+        // بنستدعيها هنا فوراً قبل الـ upsertOrder عشان نلحق نحسب الفروقات بين الداتا الحالية والقديمة
+        await handleSendToKitchenPrinters({
+          ...order,
+          items: draftItems,
+          tableCode: code,
+        });
+
         upsertOrder({ ...order, items: draftItems, state: "active" });
         toast.success("تم حفظ طلب الصالة على الطاولة! 🍽️");
         onClose();

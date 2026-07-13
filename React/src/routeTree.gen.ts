@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RolesRouteImport } from './routes/roles'
 import { Route as ReportsRouteImport } from './routes/reports'
+import { Route as PrintersSettingsRouteImport } from './routes/printers-settings'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as IssueRouteImport } from './routes/issue'
 import { Route as InventoryRouteImport } from './routes/inventory'
@@ -33,6 +34,11 @@ const RolesRoute = RolesRouteImport.update({
 const ReportsRoute = ReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrintersSettingsRoute = PrintersSettingsRouteImport.update({
+  id: '/printers-settings',
+  path: '/printers-settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrdersRoute = OrdersRouteImport.update({
@@ -79,6 +85,7 @@ export interface FileRoutesByFullPath {
   '/inventory': typeof InventoryRoute
   '/issue': typeof IssueRoute
   '/orders': typeof OrdersRoute
+  '/printers-settings': typeof PrintersSettingsRoute
   '/reports': typeof ReportsRoute
   '/roles': typeof RolesRoute
   '/settings': typeof SettingsRoute
@@ -91,6 +98,7 @@ export interface FileRoutesByTo {
   '/inventory': typeof InventoryRoute
   '/issue': typeof IssueRoute
   '/orders': typeof OrdersRoute
+  '/printers-settings': typeof PrintersSettingsRoute
   '/reports': typeof ReportsRoute
   '/roles': typeof RolesRoute
   '/settings': typeof SettingsRoute
@@ -104,6 +112,7 @@ export interface FileRoutesById {
   '/inventory': typeof InventoryRoute
   '/issue': typeof IssueRoute
   '/orders': typeof OrdersRoute
+  '/printers-settings': typeof PrintersSettingsRoute
   '/reports': typeof ReportsRoute
   '/roles': typeof RolesRoute
   '/settings': typeof SettingsRoute
@@ -118,6 +127,7 @@ export interface FileRouteTypes {
     | '/inventory'
     | '/issue'
     | '/orders'
+    | '/printers-settings'
     | '/reports'
     | '/roles'
     | '/settings'
@@ -130,6 +140,7 @@ export interface FileRouteTypes {
     | '/inventory'
     | '/issue'
     | '/orders'
+    | '/printers-settings'
     | '/reports'
     | '/roles'
     | '/settings'
@@ -142,6 +153,7 @@ export interface FileRouteTypes {
     | '/inventory'
     | '/issue'
     | '/orders'
+    | '/printers-settings'
     | '/reports'
     | '/roles'
     | '/settings'
@@ -155,6 +167,7 @@ export interface RootRouteChildren {
   InventoryRoute: typeof InventoryRoute
   IssueRoute: typeof IssueRoute
   OrdersRoute: typeof OrdersRoute
+  PrintersSettingsRoute: typeof PrintersSettingsRoute
   ReportsRoute: typeof ReportsRoute
   RolesRoute: typeof RolesRoute
   SettingsRoute: typeof SettingsRoute
@@ -181,6 +194,13 @@ declare module '@tanstack/react-router' {
       path: '/reports'
       fullPath: '/reports'
       preLoaderRoute: typeof ReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/printers-settings': {
+      id: '/printers-settings'
+      path: '/printers-settings'
+      fullPath: '/printers-settings'
+      preLoaderRoute: typeof PrintersSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/orders': {
@@ -243,6 +263,7 @@ const rootRouteChildren: RootRouteChildren = {
   InventoryRoute: InventoryRoute,
   IssueRoute: IssueRoute,
   OrdersRoute: OrdersRoute,
+  PrintersSettingsRoute: PrintersSettingsRoute,
   ReportsRoute: ReportsRoute,
   RolesRoute: RolesRoute,
   SettingsRoute: SettingsRoute,

@@ -5,7 +5,7 @@ import pg from "pg";
 const { Pool } = pg;
 import dotenv from "dotenv";
 import crypto from "crypto";
-// require("dotenv").config();
+import net from "net";
 
 dotenv.config();
 
@@ -1391,6 +1391,94 @@ app.post("/api/inventory/deduct-substock", async (req, res) => {
     client.release();
   }
 });
+
+// 🌟 مسار طباعة البونات للأقسام الداخلية (مطبخ / بار / شيشة) عبر الـ IP
+app.post("/api/print-kitchen", (req, res) => {
+  const {
+    printerIP,
+    printerPort,
+    deptName,
+    tableName,
+    zoneName,
+    items,
+    orderCategory,
+    customerName,
+  } = req.body;
+
+  if (!printerIP || !items || items.length === 0) {
+    return res
+      .status(400)
+      .json({ error: "بيانات الطباعة غير مكتملة أو لا توجد أصناف معدلة" });
+  }
+
+  const port = printerPort || 9100; // البورت الافتراضي لطابعات الشبكة
+
+  try {
+    // 1. بناء نص البون بتنسيق ESC/POS مبسط ومقروء (بدون أسعار)
+    let bounText = "";
+    bounText += "================================\n";
+    bounText += `        بون تشغيل: ${deptName}\n`;
+    bounText += "================================\n";
+    bounText += `المنطقة: ${zoneName || "غير محدد"}\n`;
+    bounText += `الطاولة: ${tableName}\n`;
+    if (customerName) bounText += `الاسم/الموظف: ${customerName}\n`;
+    if (orderCategory && orderCategory !== "dinein")
+      bounText += `نوع الطلب: ${orderCategory.toUpperCase()}\n`;
+    bounText += `التاريخ: ${new Date().toLocaleString("ar-EG")}\n`;
+    bounText += "--------------------------------\n";
+    bounText += "الكمية        الصنف\n";
+    bounText += "--------------------------------\n";
+
+    items.forEach((item) => {
+      const qtyPrefix =
+        item.diffQty > 0 ? ` ${item.diffQty} ` : `${item.diffQty}`;
+      const statusLabel = item.diffQty < 0 ? " **(ملغي)**" : "";
+      bounText += `${qtyPrefix.padEnd(13)}${item.name}${statusLabel}\n`;
+    });
+
+    bounText += "================================\n";
+    bounText += "\n\n\n\n\n"; // مساحة فارغة للقطع الحراري
+
+    // 2. فتح السوكيت والإرسال الفوري للطابعة عبر الشبكة المحلية
+    const client = new net.Socket();
+
+    // ضبط وقت مستقطع للاتصال (Timeout) عشان السيرفر ما يعلقش لو الطابعة مقفولة
+    client.setTimeout(3000);
+
+    client.connect(port, printerIP, () => {
+      // إرسال النص مفروم بترميز utf8 أو تحويله لـ Buffer (طابعات الشبكة بتقبل العربي لو مدعوم)
+      client.write(Buffer.from(bounText, "utf-8"));
+      client.end(); // إنهاء الاتصال بعد الإرسال
+    });
+
+    client.on("data", () => {
+      client.destroy();
+    });
+
+    client.on("error", (err) => {
+      console.error(
+        `❌ فشل الاتصال بالطابعة ذات الـ IP: ${printerIP} ->`,
+        err.message,
+      );
+      client.destroy();
+    });
+
+    client.on("timeout", () => {
+      console.error(`⏳ انتهت مهلة الاتصال بالطابعة: ${printerIP}`);
+      client.destroy();
+    });
+
+    return res.json({
+      success: true,
+      message: `تم إرسال البون بنجاح إلى قسم ${deptName}`,
+    });
+  } catch (error) {
+    console.error("❌ خطأ في لوجيك الطباعة الداخلي:", error);
+    return res
+      .status(500)
+      .json({ error: "حدث خطأ داخلي أثناء إرسال أمر الطباعة" });
+  }
+}); 
 //////////////////////////////////////////////////////////////////////////////////////
 const PORT = 5000;
 app.listen(PORT, "0.0.0.0", () => {

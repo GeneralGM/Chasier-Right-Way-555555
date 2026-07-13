@@ -33,7 +33,7 @@ export const Route = createFileRoute("/roles")({
   head: () => ({ meta: [{ title: "بصمات الموظفين - الصلاحيات" }] }),
   component: RolesPage,
 });
-const API_BASE_URL = "http://10.55.86.251:5000";
+const API_BASE_URL = "http://192.168.1.67:5000";
 
 // 🌟 جدول أوزان الصلاحيات للمقارنة الذكية
 const ROLE_WEIGHTS: Record<string, number> = {
@@ -68,7 +68,7 @@ function RolesPage() {
     async function fetchEmployeesFromPostgres() {
       try {
         setIsLoading(true);
-        const response = await fetch("http://10.55.86.251:5000/api/employees");
+        const response = await fetch("http://192.168.1.67:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);

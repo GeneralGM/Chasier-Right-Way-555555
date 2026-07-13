@@ -107,7 +107,7 @@ function SecCashierLogin({
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch("http://10.55.86.251:5000/api/employees");
+        const response = await fetch("http://192.168.1.67:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -255,7 +255,7 @@ function ShiftLogin() {
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch("http://10.55.86.251:5000/api/employees");
+        const response = await fetch("http://192.168.1.67:5000/api/employees");
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -578,7 +578,7 @@ function PosScreen() {
 
     try {
       const res = await fetch(
-        "http://10.55.86.251:5000/api/pos/verify-captain",
+        "http://192.168.1.67:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -680,71 +680,6 @@ function PosScreen() {
       </PosFrame>
     );
   }
-  {
-    /* 🌟 نافذة إدخال بيانات الطلبات الداخلية (موظفين / ضيافة) */
-  }
-  <Dialog
-    open={!!othersPromptOpen}
-    onOpenChange={(o) => !o && setOthersPromptOpen(null)}
-  >
-    <DialogContent dir="rtl" className="max-w-sm">
-      <DialogHeader>
-        <DialogTitle>بيانات الطلب الداخلي</DialogTitle>
-      </DialogHeader>
-      <div className="space-y-4 pt-4">
-        <div>
-          <label className="text-xs font-bold mb-1 block">
-            اسم الشخص (موظف / إدارة)
-          </label>
-          <Input
-            autoFocus
-            placeholder="مثال: يوسف، أحمد المحاسب..."
-            value={othersName}
-            onChange={(e) => setOthersName(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="text-xs font-bold mb-1 block">نوع الطلب</label>
-          <select
-            value={othersType}
-            onChange={(e) => setOthersType(e.target.value as any)}
-            className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm font-bold"
-          >
-            <option value="staff">مسحوبات موظفين (Staff)</option>
-            <option value="hospitality">ضيافة (Hospitality)</option>
-          </select>
-        </div>
-        <Button
-          className="w-full h-11 font-bold"
-          onClick={() => {
-            if (!othersName.trim()) return toast.error("يجب إدخال الاسم");
-
-            // 🌟 التعديل الاحترافي لـ دالة فتح الطاولة جوه الـ Dialog
-            upsertOrder({
-              tableCode: othersPromptOpen!, // بيفضل محتفظ بـ O1 أو X1 عشان السيرفر والـ Database
-              zone: "others",
-              items: [],
-              state: "active",
-              discountPct: 0,
-              taxPct: 0,
-              customerName: othersName.trim(), // 👈 هنا اسم الموظف الساحر اللي هيظهر على الشاشة!
-              orderCategory: othersType, // 'staff' أو 'hospitality'
-              openedAt: Date.now(),
-              openedBy: "cashier",
-              cashierName: pos.shift?.cashierName || "كاشير",
-            } as any);
-
-            handleOpenOrder(othersPromptOpen);
-            setOthersPromptOpen(null);
-            setOthersName("");
-            setOthersType("staff");
-          }}
-        >
-          فتح الطاولة
-        </Button>
-      </div>
-    </DialogContent>
-  </Dialog>;
 
   return (
     <PosFrame
@@ -752,6 +687,67 @@ function PosScreen() {
       cashierName={currentCashierName} // 👈 التعديل هنا
       zoneTabs={<ZoneTabs zone={zone} setZone={setZone} />}
     >
+      <Dialog
+        open={!!othersPromptOpen}
+        onOpenChange={(o) => !o && setOthersPromptOpen(null)}
+      >
+        <DialogContent dir="rtl" className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>بيانات الطلب الداخلي</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div>
+              <label className="text-xs font-bold mb-1 block">
+                اسم الشخص (موظف / إدارة)
+              </label>
+              <Input
+                autoFocus
+                placeholder="مثال: يوسف، أحمد المحاسب..."
+                value={othersName}
+                onChange={(e) => setOthersName(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold mb-1 block">نوع الطلب</label>
+              <select
+                value={othersType}
+                onChange={(e) => setOthersType(e.target.value as any)}
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm font-bold"
+              >
+                <option value="staff">مسحوبات موظفين (Staff)</option>
+                <option value="hospitality">ضيافة (Hospitality)</option>
+              </select>
+            </div>
+            <Button
+              className="w-full h-11 font-bold"
+              onClick={() => {
+                if (!othersName.trim()) return toast.error("يجب إدخال الاسم");
+    
+                upsertOrder({
+                  tableCode: othersPromptOpen!,
+                  zone: "others",
+                  items: [],
+                  state: "active",
+                  discountPct: 0,
+                  taxPct: 0,
+                  customerName: othersName.trim(),
+                  orderCategory: othersType,
+                  openedAt: Date.now(),
+                  openedBy: "cashier",
+                  cashierName: pos.shift?.cashierName || "كاشير",
+                } as any);
+    
+                handleOpenOrder(othersPromptOpen);
+                setOthersPromptOpen(null);
+                setOthersName("");
+                setOthersType("staff");
+              }}
+            >
+              فتح الطاولة
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>;
       <div className="px-4 pt-3 flex gap-2 items-center shrink-0">
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -1560,7 +1556,7 @@ function OrderEntryDialog({
               createdAt: Date.now(),
             };
 
-            fetch("http://10.55.86.251:5000/api/sales", {
+            fetch("http://192.168.1.67:5000/api/sales", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(newSale),
@@ -2695,7 +2691,7 @@ function CheckoutDialog({
             createdAt: Date.now(),
           };
 
-          fetch("http://10.55.86.251:5000/api/sales", {
+          fetch("http://192.168.1.67:5000/api/sales", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(newSale),
@@ -2925,7 +2921,7 @@ function TransferCaptainDialog({
     if (isMicros) return;
     async function fetchEmps() {
       try {
-        const res = await fetch("http://10.55.86.251:5000/api/employees");
+        const res = await fetch("http://192.168.1.67:5000/api/employees");
         if (res.ok) setServerEmployees(await res.json());
       } catch (e) {
         console.error(e);
@@ -2958,7 +2954,7 @@ function TransferCaptainDialog({
 
     try {
       const res = await fetch(
-        "http://10.55.86.251:5000/api/pos/verify-captain",
+        "http://192.168.1.67:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

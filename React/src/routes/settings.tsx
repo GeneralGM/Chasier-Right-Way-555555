@@ -262,7 +262,7 @@ function InvoicesTab() {
         end.setHours(23, 59, 59, 999);
 
         const response = await fetch(
-          `http://10.55.86.251:5000/api/invoices?startDate=${start.toISOString()}&endDate=${end.toISOString()}`,
+          `http://192.168.1.67:5000/api/invoices?startDate=${start.toISOString()}&endDate=${end.toISOString()}`,
         );
         if (response.ok) {
           const data = await response.json();
@@ -644,10 +644,10 @@ function ShiftsTab() {
         // التعديل هنا: بنضمن إننا بنجيب الشيفتات الشاملة للمحل كله من السيرفر المركزي
         const [shiftsRes, invoicesRes] = await Promise.all([
           fetch(
-            `http://10.55.86.251:5000/api/shifts?startDate=${startIso}&endDate=${endIso}`,
+            `http://192.168.1.67:5000/api/shifts?startDate=${startIso}&endDate=${endIso}`,
           ),
           fetch(
-            `http://10.55.86.251:5000/api/invoices?startDate=${startIso}&endDate=${endIso}`,
+            `http://192.168.1.67:5000/api/invoices?startDate=${startIso}&endDate=${endIso}`,
           ),
         ]);
 

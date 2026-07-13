@@ -1,7 +1,10 @@
 import type { SubDept, Item, Meal } from "@/lib/store";
 
 export function PrintAuditSheet({
-  date, department, items, mealsCount,
+  date,
+  department,
+  items,
+  mealsCount,
 }: {
   date: string;
   department: SubDept;
@@ -11,8 +14,13 @@ export function PrintAuditSheet({
   return (
     <div className="print-voucher">
       <div className="text-center border-b border-black pb-2 mb-2">
-        <h1 className="text-base font-bold">ورقة الجرد اليدوي — قسم {department}</h1>
-        <div className="text-xs">التاريخ: {date} • عدد الأصناف: {items.length} • عدد الوجبات بالقسم: {mealsCount}</div>
+        <h1 className="text-base font-bold">
+          ورقة الجرد اليدوي — قسم {department}
+        </h1>
+        <div className="text-xs">
+          التاريخ: {date} • عدد الأصناف: {items.length} • عدد الوجبات بالقسم:{" "}
+          {mealsCount}
+        </div>
       </div>
       <table className="print-table w-full">
         <thead>

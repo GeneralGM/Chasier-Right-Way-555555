@@ -6,6 +6,8 @@ const { Pool } = pg;
 import dotenv from "dotenv";
 import crypto from "crypto";
 import net from "net";
+import iconv from "iconv-lite";
+import ArabicReshaper from "arabic-persian-reshaper";
 
 dotenv.config();
 
@@ -1414,7 +1416,11 @@ app.post("/api/print-kitchen", (req, res) => {
   const port = printerPort || 9100; // البورت الافتراضي لطابعات الشبكة
 
   try {
-    // 1. بناء نص البون بتنسيق ESC/POS مبسط ومقروء (بدون أسعار)
+    // 1. أمر قص الورق الميكانيكي للطابعات الحرارية
+    const cutCommand = "\x1d\x56\x41\x03";
+    // أمر تهيئة الطابعة لدعم العربي (أحياناً بيفيد مع الطابعات الصيني)
+    const initCommand = "\x1b\x40\x1b\x74\x10";
+
     let bounText = "";
     bounText += "================================\n";
     bounText += `        بون تشغيل: ${deptName}\n`;
@@ -1437,23 +1443,33 @@ app.post("/api/print-kitchen", (req, res) => {
     });
 
     bounText += "================================\n";
-    bounText += "\n\n\n\n\n"; // مساحة فارغة للقطع الحراري
+    bounText += "\n\n\n\n"; // مساحة فارغة
 
-    // 2. فتح السوكيت والإرسال الفوري للطابعة عبر الشبكة المحلية
+    // 2. سحر العربي: تشبيك الحروف وعكس الجمل عشان تطلع معدولة على الورق!
+    // الأوبشنز دي بتظبط الحروف عشان لو فيها أرقام إنجليزي تطلع مظبوطة
+    const reshapedText = ArabicReshaper.convertArabic(bounText)
+      .split("\n")
+      .map((line) => {
+        return line.split("").reverse().join("");
+      })
+      .join("\n");
+
+    // 3. تجميع الأوامر: التهيئة + النص المتظبط + المقص
+    const finalString = initCommand + reshapedText + cutCommand;
+
+    // 4. التشفير الحقيقي اللي بتفهمه الطابعات (Windows-1256 بدلاً من UTF-8)
+    const bufferToSend = iconv.encode(finalString, "win1256");
+
     const client = new net.Socket();
-
-    // ضبط وقت مستقطع للاتصال (Timeout) عشان السيرفر ما يعلقش لو الطابعة مقفولة
     client.setTimeout(3000);
 
     client.connect(port, printerIP, () => {
-      // إرسال النص مفروم بترميز utf8 أو تحويله لـ Buffer (طابعات الشبكة بتقبل العربي لو مدعوم)
-      client.write(Buffer.from(bounText, "utf-8"));
-      client.end(); // إنهاء الاتصال بعد الإرسال
+      // إرسال الـ Buffer النهائي المجهز
+      client.write(bufferToSend);
+      client.end();
     });
 
-    client.on("data", () => {
-      client.destroy();
-    });
+    client.on("data", () => client.destroy());
 
     client.on("error", (err) => {
       console.error(
@@ -1472,13 +1488,78 @@ app.post("/api/print-kitchen", (req, res) => {
       success: true,
       message: `تم إرسال البون بنجاح إلى قسم ${deptName}`,
     });
-  } catch (error) {
-    console.error("❌ خطأ في لوجيك الطباعة الداخلي:", error);
-    return res
-      .status(500)
-      .json({ error: "حدث خطأ داخلي أثناء إرسال أمر الطباعة" });
+  } catch {
+    console.err("خطأ في جلب وتقسيم المبيعات علي الطابعات ")
   }
-}); 
+});
+
+// ============================================================================
+// 🖨️ مسارات إدارة الطابعات والشبكة (Printers Settings)
+// ============================================================================
+
+// 1. جلب كل الطابعات المسجلة في قاعدة البيانات
+app.get("/api/printers", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM printers ORDER BY id ASC");
+    // تحويل صيغة أسم الأعمدة (snake_case) לצيغة الرياكت (camelCase)
+    const formattedPrinters = result.rows.map((row) => ({
+      id: String(row.id),
+      name: row.name,
+      ip: row.ip,
+      port: String(row.port),
+      targetDept: row.target_dept,
+    }));
+    res.json(formattedPrinters);
+  } catch (err) {
+    console.error("❌ خطأ في جلب الطابعات من الداتابيز:", err.message);
+    res.status(500).json({ error: "فشل جلب إعدادات الطابعات" });
+  }
+});
+
+// 2. مزامنة وحفظ الطابعات دفعة واحدة (Bulk Sync)
+app.post("/api/printers/bulk", async (req, res) => {
+  const printers = req.body; // استلام مصفوفة الطابعات بالكامل
+
+  if (!Array.isArray(printers)) {
+    return res
+      .status(400)
+      .json({ error: "البيانات المرسلة يجب أن تكون مصفوفة" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN"); // بداية عملية المزامنة المحكمة
+
+    // مسح القائمة القديمة لإعادة تشكيلها بما يطابق الفرونت إند تماماً
+    await client.query("DELETE FROM printers");
+
+    // إدخال الطابعات الجديدة
+    for (const p of printers) {
+      const query = `
+        INSERT INTO printers (id, name, ip, port, target_dept)
+        VALUES ($1, $2, $3, $4, $5)
+      `;
+      await client.query(query, [
+        String(p.id || Date.now()),
+        p.name || "طابعة بدون اسم",
+        p.ip || "127.0.0.1",
+        Number(p.port) || 9100,
+        p.targetDept || "مطبخ",
+      ]);
+    }
+
+    await client.query("COMMIT"); // اعتماد الحفظ بنجاح
+    console.log("🖨️ تم تحديث جدول الطابعات في الداتابيز بنجاح!");
+    res.json({ success: true, message: "تم حفظ الطابعات في قاعدة البيانات" });
+  } catch (err) {
+    await client.query("ROLLBACK"); // التراجع في حالة حدوث خطأ
+    console.error("🚨 خطأ أثناء حفظ الطابعات بالداتابيز:", err.message);
+    res.status(500).json({ error: "فشل حفظ الطابعات في قاعدة البيانات" });
+  } finally {
+    client.release();
+  }
+});
+
 //////////////////////////////////////////////////////////////////////////////////////
 const PORT = 5000;
 app.listen(PORT, "0.0.0.0", () => {

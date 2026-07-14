@@ -1532,80 +1532,54 @@ function OrderEntryDialog({
       localStorage.getItem("pos_dynamic_printers") || "[]",
     );
 
-    // لو العميل لسه مضافش طابعات (أول مرة تشغيل للتست الأوفلاين)، هنشغل الطابعات الافتراضية الذكية
+    // لو العميل لسه مضافش طابعات، هنشغل الطابعات الافتراضية الـ 5 للتست
     const printersToUse =
       savedPrinters.length > 0
         ? savedPrinters
         : [
-            {
-              id: "1",
-              name: "طابعة المطبخ الافتراضية",
-              ip: "127.0.0.1",
-              port: 9100,
-              targetDept: "مطبخ",
-            },
-            {
-              id: "2",
-              name: "طابعة البار الافتراضية",
-              ip: "127.0.0.1",
-              port: 9101,
-              targetDept: "بار",
-            },
-            {
-              id: "3",
-              name: "طابعة الشيشة الافتراضية",
-              ip: "127.0.0.1",
-              port: 9102,
-              targetDept: "شيشة",
-            },
+            { id: "1", name: "طابعة المطبخ الرئيسي", ip: "127.0.0.1", port: 9100, targetDept: "مطبخ" },
+            { id: "2", name: "طابعة البار والمشروبات", ip: "127.0.0.1", port: 9101, targetDept: "بار" },
+            { id: "3", name: "طابعة الشيشة الخارجية", ip: "127.0.0.1", port: 9102, targetDept: "شيشة" },
+            { id: "4", name: "طابعة الكاشير الفرعي", ip: "127.0.0.1", port: 9103, targetDept: "كاشير فرعي" },
+            { id: "5", name: "طابعة التجربة (Test 5)", ip: "127.0.0.1", port: 9104, targetDept: "عام" },
           ];
 
-    // دالة مساعدة لمطابقة اسم القسم المخزن مع قسم الصنف الفعلي
+    // 🌟 دالة مطابقة ذكية تدعم كل الأقسام العربية والإنجليزية
     const matchDept = (itemDept: string, targetDept: string) => {
       const cleanItem = itemDept.trim().toLowerCase();
       const cleanTarget = targetDept.trim().toLowerCase();
+      
       if (cleanTarget === "مطبخ" || cleanTarget === "kitchen") {
-        return (
-          cleanItem === "مطبخ" ||
-          cleanItem === "kitchen" ||
-          cleanItem === "صالة"
-        );
+        return cleanItem === "مطبخ" || cleanItem === "kitchen" || cleanItem === "صالة";
       }
       if (cleanTarget === "بار" || cleanTarget === "bar") {
         return cleanItem === "بار" || cleanItem === "bar";
       }
-      if (
-        cleanTarget === "شيشة" ||
-        cleanTarget === "شيشه" ||
-        cleanTarget === "shisha" ||
-        cleanTarget === "shish"
-      ) {
-        return (
-          cleanItem === "شيشة" ||
-          cleanItem === "شيشه" ||
-          cleanItem === "shisha" ||
-          cleanItem === "shish"
-        );
+      if (cleanTarget === "شيشة" || cleanTarget === "شيشه" || cleanTarget === "shisha" || cleanTarget === "shish") {
+        return cleanItem === "شيشة" || cleanItem === "شيشه" || cleanItem === "shisha" || cleanItem === "shish";
+      }
+      if (cleanTarget === "كاشير فرعي" || cleanTarget === "عام") {
+        return cleanItem === "كاشير فرعي" || cleanItem === "عام" || cleanItem === "other";
       }
       return cleanItem === cleanTarget;
     };
 
     // 🚀 الإرسال لكل طابعة بشكل مستقل بناءً على القسم المربوطة بيه
     for (const printer of printersToUse) {
-      // فلترة الأصناف التي تخص هذه الطابعة بالذات
       const printerItems = diffItems.filter((i) =>
         matchDept(i.department, printer.targetDept),
       );
 
       if (printerItems.length > 0) {
         try {
-          await fetch("http://localhost:5000/api/print-kitchen", {
+          // 🌟 تصحيح قاتل: استخدام IP السيرفر الشبكي بدل localhost عشان يشتغل من التابلت والكاشير الفرعي
+          await fetch("http://192.168.1.67:5000/api/print-kitchen", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               printerIP: printer.ip,
               printerPort: Number(printer.port) || 9100,
-              deptName: printer.name, // طباعة الاسم المخصص للطابعة في رأس البون
+              deptName: printer.name,
               tableName: currentOrder.tableCode,
               zoneName: currentOrder.zone,
               items: printerItems,

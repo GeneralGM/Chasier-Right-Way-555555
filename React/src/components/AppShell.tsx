@@ -128,6 +128,34 @@ export function AppShell({ children }: { children: ReactNode }) {
           localStorage.setItem("isMicrosDevice", "false");
           localStorage.setItem("isSecCashierDevice", "false");
         }
+        // 🌟 🚀 الإضافة السحرية هنا: مزامنة الطابعات بالخلفية 🚀 🌟
+        try {
+          const printersRes = await fetch(
+            "http://192.168.1.67:5000/api/printers",
+          );
+          if (printersRes.ok) {
+            const dbPrinters = await printersRes.json();
+            const localPrinters = JSON.parse(
+              localStorage.getItem("pos_dynamic_printers") || "[]",
+            );
+
+            // لو في اختلاف بين الداتابيز والـ LocalStorage، الداتابيز تكسب وتحدث المحلي فوراً
+            if (JSON.stringify(dbPrinters) !== JSON.stringify(localPrinters)) {
+              console.log(
+                "🔄 تم مزامنة الطابعات محلياً من قاعدة البيانات بنجاح!",
+              );
+              localStorage.setItem(
+                "pos_dynamic_printers",
+                JSON.stringify(dbPrinters),
+              );
+            }
+          }
+        } catch (printErr) {
+          console.warn(
+            "⚠️ السيرفر غير متاح حالياً للمزامنة: العمل أوفلاين بطابعات الـ LocalStorage",
+          );
+        }
+        // 🌟 --------------------------------------------------- 🌟
       } catch (err) {
         console.error("❌ فشل التعرف على الجهاز من السيرفر", err);
       }

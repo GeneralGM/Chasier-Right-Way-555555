@@ -21,14 +21,14 @@ interface PrinterConfig {
 export function PrintersSettingsTab() {
   const [printers, setPrinters] = useState<PrinterConfig[]>([]);
 
-  // تحميل الإعدادات الحالية من الـ localStorage
+  // 1. تحميل الإعدادات من الـ localStorage فوراً لسرعة العرض، ثم جلب أحدث داتا من السيرفر
   useEffect(() => {
     const saved = localStorage.getItem("pos_dynamic_printers");
     if (saved) {
       setPrinters(JSON.parse(saved));
     } else {
-      // طابعات افتراضية أولية للمحاكي والتست
-      setPrinters([
+      // طابعات افتراضية أولية للمحاكي والتست لو مفيش أي بيانات
+      const defaultPrinters: PrinterConfig[] = [
         {
           id: "1",
           name: "طابعة المطبخ الرئيسي",
@@ -50,17 +50,63 @@ export function PrintersSettingsTab() {
           port: "9102",
           targetDept: "شيشة",
         },
-      ]);
+      ];
+      setPrinters(defaultPrinters);
+      localStorage.setItem(
+        "pos_dynamic_printers",
+        JSON.stringify(defaultPrinters),
+      );
     }
+
+    // جلب أحدث نسخة من الداتابيز في الخلفية لضمان التطابق
+    fetch("http://192.168.1.67:5000/api/printers")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((dbData) => {
+        if (dbData && Array.isArray(dbData)) {
+          setPrinters(dbData);
+          localStorage.setItem("pos_dynamic_printers", JSON.stringify(dbData));
+        }
+      })
+      .catch(() => console.log(" يعمل أوفلاين بالاعتماد على الكاش المحلي"));
   }, []);
 
-  // ... (باقي كود الدالة بتاعك زي ما هو بالظبط بدون أي تغيير) ...
+  // 2. حفظ الإعدادات في قاعدة البيانات أولاً ثم في الـ LocalStorage
+  const handleSaveAll = async () => {
+    try {
+      toast.loading("جاري حفظ إعدادات الطابعات في السيرفر...", {
+        id: "save-printers",
+      });
 
-  const handleSaveAll = () => {
-    localStorage.setItem("pos_dynamic_printers", JSON.stringify(printers));
-    toast.success("تم حفظ إعدادات الطابعات بنجاح!");
+      // إرسال المصفوفة للباك إند
+      const response = await fetch(
+        "http://192.168.1.67:5000/api/printers/bulk",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(printers),
+        },
+      );
+
+      if (response.ok) {
+        // تحديث الـ LocalStorage فوراً بعد نجاح السيرفر
+        localStorage.setItem("pos_dynamic_printers", JSON.stringify(printers));
+        toast.success(
+          "✅ تم حفظ إعدادات الطابعات بنجاح في قاعدة البيانات والذاكرة المحلية!",
+          { id: "save-printers" },
+        );
+      } else {
+        throw new Error("السيرفر رفض حفظ البيانات");
+      }
+    } catch (error) {
+      console.error("❌ فشل الحفظ في السيرفر:", error);
+      // حماية العمل الأوفلاين: حتى لو السيرفر واقع، بنحفظ في الـ LocalStorage عشان الشغل ما يقفش!
+      localStorage.setItem("pos_dynamic_printers", JSON.stringify(printers));
+      toast.warning(
+        "⚠️ تعذر الاتصال بالسيرفر! تم حفظ الإعدادات محلياً في الـ LocalStorage فقط.",
+        { id: "save-printers" },
+      );
+    }
   };
-
   const addPrinter = () => {
     const newP: PrinterConfig = {
       id: Date.now().toString(),
@@ -182,7 +228,6 @@ export function PrintersSettingsTab() {
                   <option value="مطبخ">🍽️ قسم المطبخ (أكل)</option>
                   <option value="بار">🍹 قسم البار (مشروبات)</option>
                   <option value="شيشة">💨 قسم الشيشة والمعسل</option>
-                  <option value="كاشير فرعي">💻 كاشير فرعي / جهاز مساعد</option>
                 </select>
               </div>
 

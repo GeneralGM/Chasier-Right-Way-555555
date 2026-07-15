@@ -1,4 +1,5 @@
 /* eslint-disable prettier/prettier */
+/* eslint-disable react-refresh/only-export-components */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createFileRoute } from "@tanstack/react-router";
@@ -27,6 +28,7 @@ import {
   type Invoice,
 } from "@/lib/pos-store.ts";
 import { fmt2, round2, clamp0, cleanNumInput } from "@/lib/format";
+import ActionGate from "@/components/ui/ActionGate"; // أو مسار الملف الصحيح عندك
 import { PinPrompt } from "@/components/PinPrompt";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1305,14 +1307,21 @@ function OrderEntryDialog({
     incCustomerOrders,
   } = usePosDB();
 
-  // 🌟 السر هنا: المسودة المعزولة تماماً عن المزامنة
   const [draftItems, setDraftItems] = useState<OrderItem[]>(order.items || []);
 
-  const [deliveryModalOpen, setDeliveryModalOpen] = useState(false);
-  const [deliveryInputPrice, setDeliveryInputPrice] = useState("");
   const [q, setQ] = useState("");
   const [modifierMeal, setModifierMeal] = useState<Meal | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+
+  // 🌟 States الخاصة ببوكس طباعة وإنهاء التيك أواي
+  const [takeawayConfirmOpen, setTakeawayConfirmOpen] = useState(false);
+  const [takeawayDiscount, setTakeawayDiscount] = useState(
+    order.discountPct || 0,
+  );
+  const [pendingTakeawayDiscount, setPendingTakeawayDiscount] = useState<
+    number | null
+  >(null);
+  const [takeawayDeliveryFee, setTakeawayDeliveryFee] = useState<number>(0);
 
   const sellable = meals.filter((m) => m.kind === "menu");
   const [isMicros, setIsMicros] = useState(
@@ -1338,7 +1347,6 @@ function OrderEntryDialog({
     const dbRaw = db as unknown as Record<string, unknown>;
     const allOrders = Object.values(pos.orders || {});
 
-    // 🌟 التعديل: استخدام دالة الفك الشجري عشان نحسب المواد المصنعة ومكوناتها
     const baseIngredients = expandMealToBase(meal, db.meals, db.items);
     let min = Infinity;
 
@@ -1369,6 +1377,7 @@ function OrderEntryDialog({
     }
     return min === Infinity ? 99 : Math.max(0, min);
   }
+
   function deductInventoryForTakeaway() {
     const perDept: Record<string, Record<string, number>> = {};
     for (const line of draftItems) {
@@ -1381,7 +1390,6 @@ function OrderEntryDialog({
       const baseIngredients = expandMealToBase(meal, db.meals, db.items);
 
       for (const [itemId, info] of baseIngredients) {
-        // 🌟 الضرب في العدد المطلوب وتجميع الأصناف المتشابهة
         const baseQty = round2(clamp0(info.qty * line.qty));
         if (baseQty <= 0) continue;
         perDept[dept][itemId] = (perDept[dept][itemId] || 0) + baseQty;
@@ -1395,7 +1403,7 @@ function OrderEntryDialog({
       deductSubStock(deptName as SubDept, arr);
     }
   }
-  // 🌟 التعديلات على المسودة (لا تُرسل للسيرفر فوراً)
+
   function addLine(
     meal: Meal,
     extras: { label: string; price: number }[] = [],
@@ -1419,7 +1427,6 @@ function OrderEntryDialog({
         extras,
         modifiersSummary: summary,
         mealName: undefined,
-        // 🌟 التصحيح السحري: بناخد القسم الحقيقي من الريسبي بدل ما نسيبه فاضي
         department: meal.department || "مطبخ",
       };
       setDraftItems([...draftItems, line]);
@@ -1435,14 +1442,13 @@ function OrderEntryDialog({
   function removeLine(lineId: string) {
     setDraftItems(draftItems.filter((l) => l.id !== lineId));
   }
-  // 🌟 دالة اختيار الصنف (لو ليه إضافات يفتحها، لو لأ ينزله في المسودة علطول)
+
   function onPickMeal(meal: Meal) {
     if (meal.hasModifiers && (meal.modifierGroups?.length || 0) > 0)
       setModifierMeal(meal);
     else addLine(meal);
   }
 
-  // 🌟 الحسابات تعتمد على المسودة المحلية
   const totals = computeTotals(
     draftItems,
     order.discountPct,
@@ -1450,17 +1456,12 @@ function OrderEntryDialog({
     order.orderCategory || "normal",
   );
 
-  // 🌟 دالة حساب الفروقات (الـ Delta) وإرسال البونات ديناميكياً لجميع الطابعات المضافة في الإعدادات
   async function handleSendToKitchenPrinters(currentOrder: any) {
     if (!currentOrder) return;
-
     const oldOrder = pos.orders[currentOrder.tableCode];
     const oldItems: OrderItem[] = oldOrder ? oldOrder.items || [] : [];
     const currentItems: OrderItem[] = currentOrder.items || [];
-
     const diffItems: any[] = [];
-
-    // مفتاح فريد يدمج الـ mealId مع الملاحظات
     const getUniqueKey = (item: OrderItem) =>
       `${item.mealId}___${item.modifiersSummary || ""}`;
 
@@ -1480,21 +1481,17 @@ function OrderEntryDialog({
       currentDetailsMap[key] = item;
     });
 
-    // أ. حساب الزيادات والتعديلات
     Object.keys(currentQtyMap).forEach((key) => {
       const curQty = currentQtyMap[key];
       const oldQty = oldQtyMap[key] || 0;
       const diff = curQty - oldQty;
-
       if (diff !== 0) {
         const item = currentDetailsMap[key];
         const originalMeal = db.meals.find((m) => m.id === item.mealId);
         const dept = item.department || originalMeal?.department || "مطبخ";
-
         const fullName = item.modifiersSummary
           ? `${item.name} (${item.modifiersSummary})`
           : item.name;
-
         diffItems.push({
           itemId: item.mealId,
           name: fullName,
@@ -1504,18 +1501,15 @@ function OrderEntryDialog({
       }
     });
 
-    // ب. حساب المحذوفات بالكامل
     Object.keys(oldQtyMap).forEach((key) => {
       if (!currentQtyMap[key]) {
         const oldQty = oldQtyMap[key];
         const item = oldDetailsMap[key];
         const originalMeal = db.meals.find((m) => m.id === item.mealId);
         const dept = item.department || originalMeal?.department || "مطبخ";
-
         const fullName = item.modifiersSummary
           ? `${item.name} (${item.modifiersSummary})`
           : item.name;
-
         diffItems.push({
           itemId: item.mealId,
           name: fullName,
@@ -1527,52 +1521,78 @@ function OrderEntryDialog({
 
     if (diffItems.length === 0) return;
 
-    // 🌟 جلب قائمة الطابعات الديناميكية المخزنة في الـ localStorage
     const savedPrinters = JSON.parse(
       localStorage.getItem("pos_dynamic_printers") || "[]",
     );
-
-    // لو العميل لسه مضافش طابعات، هنشغل الطابعات الافتراضية الـ 5 للتست
     const printersToUse =
       savedPrinters.length > 0
         ? savedPrinters
         : [
-            { id: "1", name: "طابعة المطبخ الرئيسي", ip: "127.0.0.1", port: 9100, targetDept: "مطبخ" },
-            { id: "2", name: "طابعة البار والمشروبات", ip: "127.0.0.1", port: 9101, targetDept: "بار" },
-            { id: "3", name: "طابعة الشيشة الخارجية", ip: "127.0.0.1", port: 9102, targetDept: "شيشة" },
-            { id: "4", name: "طابعة الكاشير الفرعي", ip: "127.0.0.1", port: 9103, targetDept: "كاشير فرعي" },
-            { id: "5", name: "طابعة التجربة (Test 5)", ip: "127.0.0.1", port: 9104, targetDept: "عام" },
+            {
+              id: "1",
+              name: "طابعة المطبخ الرئيسي",
+              ip: "127.0.0.1",
+              port: 9100,
+              targetDept: "مطبخ",
+            },
+            {
+              id: "2",
+              name: "طابعة البار والمشروبات",
+              ip: "127.0.0.1",
+              port: 9101,
+              targetDept: "بار",
+            },
+            {
+              id: "3",
+              name: "طابعة الشيشة الخارجية",
+              ip: "127.0.0.1",
+              port: 9102,
+              targetDept: "شيشة",
+            },
+            {
+              id: "4",
+              name: "طابعة الكاشير الفرعي",
+              ip: "127.0.0.1",
+              port: 9103,
+              targetDept: "كاشير فرعي",
+            },
+            {
+              id: "5",
+              name: "طابعة التجربة (Test 5)",
+              ip: "127.0.0.1",
+              port: 9104,
+              targetDept: "عام",
+            },
           ];
 
-    // 🌟 دالة مطابقة ذكية تدعم كل الأقسام العربية والإنجليزية
     const matchDept = (itemDept: string, targetDept: string) => {
       const cleanItem = itemDept.trim().toLowerCase();
       const cleanTarget = targetDept.trim().toLowerCase();
-      
-      if (cleanTarget === "مطبخ" || cleanTarget === "kitchen") {
-        return cleanItem === "مطبخ" || cleanItem === "kitchen" || cleanItem === "صالة";
-      }
-      if (cleanTarget === "بار" || cleanTarget === "bar") {
+      if (cleanTarget === "مطبخ" || cleanTarget === "kitchen")
+        return (
+          cleanItem === "مطبخ" ||
+          cleanItem === "kitchen" ||
+          cleanItem === "صالة"
+        );
+      if (cleanTarget === "بار" || cleanTarget === "bar")
         return cleanItem === "بار" || cleanItem === "bar";
-      }
-      if (cleanTarget === "شيشة" || cleanTarget === "شيشه" || cleanTarget === "shisha" || cleanTarget === "shish") {
-        return cleanItem === "شيشة" || cleanItem === "شيشه" || cleanItem === "shisha" || cleanItem === "shish";
-      }
-      if (cleanTarget === "كاشير فرعي" || cleanTarget === "عام") {
-        return cleanItem === "كاشير فرعي" || cleanItem === "عام" || cleanItem === "other";
-      }
+      if (cleanTarget === "شيشة" || cleanTarget === "shisha")
+        return cleanItem === "شيشة" || cleanItem === "shisha";
+      if (cleanTarget === "كاشير فرعي" || cleanTarget === "عام")
+        return (
+          cleanItem === "كاشير فرعي" ||
+          cleanItem === "عام" ||
+          cleanItem === "other"
+        );
       return cleanItem === cleanTarget;
     };
 
-    // 🚀 الإرسال لكل طابعة بشكل مستقل بناءً على القسم المربوطة بيه
     for (const printer of printersToUse) {
       const printerItems = diffItems.filter((i) =>
         matchDept(i.department, printer.targetDept),
       );
-
       if (printerItems.length > 0) {
         try {
-          // 🌟 تصحيح قاتل: استخدام IP السيرفر الشبكي بدل localhost عشان يشتغل من التابلت والكاشير الفرعي
           await fetch("http://192.168.1.67:5000/api/print-kitchen", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1595,145 +1615,158 @@ function OrderEntryDialog({
   }
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  async function handleSaveAndDeduct(code: string) {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
 
-    try {
-      if (order.zone === "takeaway") {
-        let finalDeliveryPrice = 0;
-        const inputPrice = prompt(
-          "الرجاء إدخال مصاريف التوصيل (اتركه 0 إذا كان تيك أواي عادي):",
-          "0",
-        );
-        if (inputPrice === null) {
-          setIsSubmitting(false);
-          return;
-        }
-        finalDeliveryPrice = Number(inputPrice) || 0;
-        const computedType = finalDeliveryPrice > 0 ? "delivery" : "takeaway";
-
-        const isSecDevice =
-          localStorage.getItem("isSecCashierDevice") === "true";
-        const secName = localStorage.getItem("secCashierName") || "كاشير فرعي";
-        const currentCashierName = isSecDevice
-          ? secName
-          : pos.shift?.cashierName || "كاشير رئيسي";
-        const currentCashierId = isSecDevice
-          ? localStorage.getItem("secCashierId")
-          : pos.shift?.cashierId;
-        const currentTerminalId = isSecDevice ? "Sub-1" : "Main";
-
-        const inv: any = {
-          id: crypto.randomUUID(),
-          invoiceNumber: Math.floor(100000 + Math.random() * 900000),
-          type: computedType,
-          tableCode: code,
-          zone: "takeaway",
-          customerName: order.customerName || null,
-          customerAddress: order.customerAddress || null,
-          cashierId: currentCashierId || null,
-          cashierName: currentCashierName,
-          captainName: (order as any).captainName || null,
-          items: draftItems,
-          subtotal: totals.subtotal,
-          discountPct: order.discountPct,
-          discountValue: totals.discountValue,
-          taxPct: 0,
-          taxValue: 0,
-          deliveryPrice: finalDeliveryPrice,
-          createdAt: Date.now(),
-          terminalId: currentTerminalId,
-          createdBy: currentCashierName,
-          orderCategory: order.orderCategory || "normal",
-          commissionValue: totals.commissionValue,
-          total:
-            totals.subtotal -
-            totals.discountValue +
-            finalDeliveryPrice +
-            totals.commissionValue,
-        };
-
-        // 🌟 1. طباعة الأقسام للتيك أواي قبل مسح الأوردر وإغلاقه
-        // بنمرر الأوبجكت الجديد بالتعديلات الحالية عشان يقارنه بالقديم اللي في الـ store
+  // 🌟 تعديل هنا: دالة "حفظ" تفرق بين التيك أواي والصالة
+  async function handleSaveClick(code: string) {
+    if (order.zone === "takeaway") {
+      // لو تيك أواي، نفتح البوكس الأول بدل ما نحفظ فوراً
+      setTakeawayDiscount(order.discountPct || 0);
+      setTakeawayDeliveryFee(0);
+      setPendingTakeawayDiscount(null);
+      setTakeawayConfirmOpen(true);
+    } else {
+      // الصالة بتحفظ وتغلق فوراً بدون طباعة (الطباعة من برة)
+      if (isSubmitting) return;
+      setIsSubmitting(true);
+      try {
         await handleSendToKitchenPrinters({
           ...order,
           items: draftItems,
           tableCode: code,
         });
-
-        await addInvoice(inv);
-        deductInventoryForTakeaway();
-
-        // 🌟 التعديل السحري: تسجيل مبيعات التيك أواي في قسمها الأصلي (بار/مطبخ) عشان الكوست كنترول يقراها
-        const salesByDept: Record<string, any[]> = {};
-        draftItems.forEach((item: any) => {
-          const meal = db.meals.find((m) => m.id === item.mealId);
-          const dept = meal?.department || "عام";
-          if (!salesByDept[dept]) salesByDept[dept] = [];
-          salesByDept[dept].push(item);
-        });
-
-        for (const [deptName, deptLines] of Object.entries(salesByDept)) {
-          const lines = deptLines as any[];
-          if (lines.length > 0) {
-            const totalSales = lines.reduce(
-              (sum: number, l: any) =>
-                sum + (l.unitPrice || l.price || 0) * l.qty,
-              0,
-            );
-            let totalCost = 0;
-            for (const l of lines) {
-              const m = db.meals.find((x) => x.id === l.mealId);
-              if (m) {
-                const baseDeds = expandMealToBase(m, db.meals, db.items);
-                for (const [, info] of baseDeds) totalCost += info.cost * l.qty;
-              }
-            }
-
-            const newSale = {
-              id:
-                "sale_" + crypto.randomUUID().split("-")[0] + "_" + Date.now(),
-              date: new Date().toISOString().split("T")[0],
-              department: deptName,
-              lines: lines,
-              totalSales: totalSales,
-              totalCost: totalCost,
-              createdAt: Date.now(),
-            };
-
-            fetch("http://192.168.1.67:5000/api/sales", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(newSale),
-            }).catch((err) => console.error("❌ فشل تسجيل المبيعات:", err));
-          }
-        }
-
-        if (order.customerName) {
-          const c = pos.customers.find((c) => c.name === order.customerName);
-          if (c) incCustomerOrders(c.id);
-        }
-        clearOrder(code);
-        if (computedType === "delivery")
-          toast.success(
-            `تم حفظ الفاتورة كـ Order توصيل! 🛵 (+${finalDeliveryPrice} ج.م)`,
-          );
-        else toast.success("تم حفظ فاتورة تيك أواي بنجاح! 🛍️");
-        onClose();
-      } else {
-        // 🌟 2. طباعة الأقسام للصالة / الأقسام الداخلية (Dine-in / Others)
-        // بنستدعيها هنا فوراً قبل الـ upsertOrder عشان نلحق نحسب الفروقات بين الداتا الحالية والقديمة
-        await handleSendToKitchenPrinters({
-          ...order,
-          items: draftItems,
-          tableCode: code,
-        });
-
         upsertOrder({ ...order, items: draftItems, state: "active" });
         toast.success("تم حفظ طلب الصالة على الطاولة! 🍽️");
         onClose();
+      } catch (error: any) {
+        toast.error(`حدث خطأ: ${error.message}`);
+      } finally {
+        setIsSubmitting(false);
       }
+    }
+  }
+
+  // 🌟 الدالة الجديدة اللي هتنفذ حفظ وطباعة التيك أواي الفعلي بعد البوكس
+  async function executeTakeawaySave() {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const finalDiscountPct = takeawayDiscount;
+      const finalDeliveryPrice = takeawayDeliveryFee;
+      const computedType = finalDeliveryPrice > 0 ? "delivery" : "takeaway";
+
+      const updatedTotals = computeTotals(
+        draftItems,
+        finalDiscountPct,
+        order.taxPct,
+        order.orderCategory || "normal",
+      );
+
+      const isSecDevice = localStorage.getItem("isSecCashierDevice") === "true";
+      const secName = localStorage.getItem("secCashierName") || "كاشير فرعي";
+      const currentCashierName = isSecDevice
+        ? secName
+        : pos.shift?.cashierName || "كاشير رئيسي";
+      const currentCashierId = isSecDevice
+        ? localStorage.getItem("secCashierId")
+        : pos.shift?.cashierId;
+      const currentTerminalId = isSecDevice ? "Sub-1" : "Main";
+
+      const inv: any = {
+        id: crypto.randomUUID(),
+        invoiceNumber: Math.floor(100000 + Math.random() * 900000),
+        type: computedType,
+        tableCode: tableCode,
+        zone: "takeaway",
+        customerName: order.customerName || null,
+        customerAddress: order.customerAddress || null,
+        cashierId: currentCashierId || null,
+        cashierName: currentCashierName,
+        captainName: (order as any).captainName || null,
+        items: draftItems,
+        subtotal: updatedTotals.subtotal,
+        discountPct: finalDiscountPct,
+        discountValue: updatedTotals.discountValue,
+        taxPct: 0,
+        taxValue: 0,
+        deliveryPrice: finalDeliveryPrice,
+        createdAt: Date.now(),
+        terminalId: currentTerminalId,
+        createdBy: currentCashierName,
+        orderCategory: order.orderCategory || "normal",
+        commissionValue: updatedTotals.commissionValue,
+        total:
+          updatedTotals.subtotal -
+          updatedTotals.discountValue +
+          finalDeliveryPrice +
+          updatedTotals.commissionValue,
+      };
+
+      // 1. طباعة الأقسام الداخلية
+      await handleSendToKitchenPrinters({
+        ...order,
+        items: draftItems,
+        tableCode: tableCode,
+      });
+
+      // 2. حفظ الفاتورة والمخازن
+      await addInvoice(inv);
+      deductInventoryForTakeaway();
+
+      // 3. المبيعات
+      const salesByDept: Record<string, any[]> = {};
+      draftItems.forEach((item: any) => {
+        const meal = db.meals.find((m) => m.id === item.mealId);
+        const dept = meal?.department || "عام";
+        if (!salesByDept[dept]) salesByDept[dept] = [];
+        salesByDept[dept].push(item);
+      });
+
+      for (const [deptName, deptLines] of Object.entries(salesByDept)) {
+        const lines = deptLines as any[];
+        if (lines.length > 0) {
+          const totalSales = lines.reduce(
+            (sum: number, l: any) =>
+              sum + (l.unitPrice || l.price || 0) * l.qty,
+            0,
+          );
+          let totalCost = 0;
+          for (const l of lines) {
+            const m = db.meals.find((x) => x.id === l.mealId);
+            if (m) {
+              const baseDeds = expandMealToBase(m, db.meals, db.items);
+              for (const [, info] of baseDeds) totalCost += info.cost * l.qty;
+            }
+          }
+          const newSale = {
+            id: "sale_" + crypto.randomUUID().split("-")[0] + "_" + Date.now(),
+            date: new Date().toISOString().split("T")[0],
+            department: deptName,
+            lines: lines,
+            totalSales: totalSales,
+            totalCost: totalCost,
+            createdAt: Date.now(),
+          };
+          fetch("http://192.168.1.67:5000/api/sales", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newSale),
+          }).catch((err) => console.error("❌ فشل تسجيل المبيعات:", err));
+        }
+      }
+
+      if (order.customerName) {
+        const c = pos.customers.find((c) => c.name === order.customerName);
+        if (c) incCustomerOrders(c.id);
+      }
+
+      clearOrder(tableCode);
+
+      if (computedType === "delivery")
+        toast.success(`تم حفظ وطباعة الفاتورة 🛵 (+${finalDeliveryPrice} ج.م)`);
+      else toast.success("تم حفظ وطباعة فاتورة التيك أواي بنجاح 🛍️");
+
+      setTakeawayConfirmOpen(false);
+      onClose();
     } catch (error: any) {
       toast.error(`حدث خطأ: ${error.message}`);
     } finally {
@@ -1742,328 +1775,471 @@ function OrderEntryDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent
-        dir="rtl"
-        className="max-w-7xl w-[100vw] h-[95vh] p-0 overflow-hidden"
-      >
-        <div className="flex h-full">
-          <div className="flex-1 flex flex-col min-w-0 border-l border-border">
-            <div className="p-3 border-b border-border space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <DialogTitle>طلب الطاولة</DialogTitle>
-                <div className="text-sm flex items-center gap-3">
-                  <span className="px-2 py-1 rounded bg-secondary font-mono">
-                    {order.zone === "takeaway" ? "تيك أواي" : tableCode}
-                  </span>
-                  {order.customerName && (
-                    <span className="text-muted-foreground">
-                      {order.customerName}
+    <>
+      <Dialog open onOpenChange={(o) => !o && onClose()}>
+        <DialogContent
+          dir="rtl"
+          className="max-w-7xl w-[100vw] h-[95vh] p-0 overflow-hidden"
+        >
+          <div className="flex h-full">
+            <div className="flex-1 flex flex-col min-w-0 border-l border-border">
+              <div className="p-3 border-b border-border space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <DialogTitle>طلب الطاولة</DialogTitle>
+                  <div className="text-sm flex items-center gap-3">
+                    <span className="px-2 py-1 rounded bg-secondary font-mono">
+                      {order.zone === "takeaway" ? "تيك أواي" : tableCode}
                     </span>
-                  )}
+                    {order.customerName && (
+                      <span className="text-muted-foreground">
+                        {order.customerName}
+                      </span>
+                    )}
+                  </div>
                 </div>
+                <Input
+                  placeholder="ابحث عن صنف..."
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                />
               </div>
-              <Input
-                placeholder="ابحث عن صنف..."
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-              />
-            </div>
 
-            <div className="flex-1 overflow-auto p-3">
-              {q ? (
-                <div className="grid grid-cols-5 gap-3 justify-items-center">
-                  {filtered.map((m) => {
-                    const stockQty = manufacturable(m);
-                    // 🌟 الحسابات تعتمد على المسودة
-                    const addedInCart =
-                      draftItems.find((it) => it.mealId === m.id)?.qty || 0;
-                    const mq =
-                      typeof stockQty === "number"
-                        ? Math.max(0, stockQty - addedInCart)
-                        : stockQty;
-                    const isShisha = m.category === SHISHA_CATEGORY;
-                    const disabled = !isShisha && mq !== null && mq <= 0;
-                    return (
-                      <button
-                        key={m.id}
-                        disabled={disabled}
-                        onClick={() => onPickMeal(m)}
-                        className={`h-[150px] w-[170px] rounded-xl border-2 p-3 flex flex-col items-center justify-center text-center gap-2 transition ${disabled ? "opacity-40 cursor-not-allowed" : "hover:border-primary hover:bg-primary/5"} ${isShisha ? "border-purple-300 bg-purple-50 dark:bg-purple-950/30" : "border-border bg-card"}`}
-                      >
-                        <span className="font-bold text-base leading-tight">
-                          {m.name}
-                        </span>
-                        <span className="text-sm text-muted-foreground font-medium">
-                          {fmt2(m.sellingPrice)} ج.م
-                        </span>
-                        {isShisha ? (
-                          <span className="text-xs text-purple-700 dark:text-purple-300">
-                            شيشة
-                          </span>
-                        ) : (
-                          <span
-                            className={`text-xs font-bold ${(mq ?? 0) > 5 ? "text-emerald-600" : "text-amber-600"}`}
-                          >
-                            العدد: {mq ?? "—"}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : !activeCategory ? (
-                <div className="grid grid-cols-6 gap-4">
-                  {categories.map((cat) => (
-                    <button
-                      key={cat}
-                      onClick={() => setActiveCategory(cat ?? null)}
-                      className="h-[150px] rounded-xl border-2 border-primary/30 bg-primary/5 text-primary p-4 flex flex-col items-center justify-center text-center font-bold text-lg hover:bg-primary/10 hover:border-primary transition"
-                    >
-                      <span className="truncate w-full">{cat}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between border-b pb-2">
-                    <h4 className="font-bold text-lg text-primary">
-                      قسم: {activeCategory}
-                    </h4>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setActiveCategory(null)}
-                    >
-                      رجوع للأقسام ←
-                    </Button>
-                  </div>
+              <div className="flex-1 overflow-auto p-3">
+                {q ? (
                   <div className="grid grid-cols-5 gap-3 justify-items-center">
-                    {filtered
-                      .filter((m) => m.category === activeCategory)
-                      .map((m) => {
-                        const stockQty = manufacturable(m);
-                        // 🌟 الحسابات تعتمد على المسودة
-                        const addedInCart =
-                          draftItems.find((it) => it.mealId === m.id)?.qty || 0;
-                        const mq =
-                          typeof stockQty === "number"
-                            ? Math.max(0, stockQty - addedInCart)
-                            : stockQty;
-                        const isShisha = m.category === SHISHA_CATEGORY;
-                        const disabled = !isShisha && mq !== null && mq <= 0;
-                        return (
-                          <button
-                            key={m.id}
-                            disabled={disabled}
-                            onClick={() => onPickMeal(m)}
-                            className={`h-[150px] w-[170px] rounded-xl border-2 p-3 flex flex-col items-center justify-center text-center gap-2 transition ${disabled ? "opacity-40 cursor-not-allowed" : "hover:border-primary hover:bg-primary/5"} ${isShisha ? "border-purple-300 bg-purple-50 dark:bg-purple-950/30" : "border-border bg-card"}`}
-                          >
-                            <span className="font-bold text-base leading-tight">
-                              {m.name}
+                    {filtered.map((m) => {
+                      const stockQty = manufacturable(m);
+                      const addedInCart =
+                        draftItems.find((it) => it.mealId === m.id)?.qty || 0;
+                      const mq =
+                        typeof stockQty === "number"
+                          ? Math.max(0, stockQty - addedInCart)
+                          : stockQty;
+                      const isShisha = m.category === SHISHA_CATEGORY;
+                      const disabled = !isShisha && mq !== null && mq <= 0;
+                      return (
+                        <button
+                          key={m.id}
+                          disabled={disabled}
+                          onClick={() => onPickMeal(m)}
+                          className={`h-[150px] w-[170px] rounded-xl border-2 p-3 flex flex-col items-center justify-center text-center gap-2 transition ${disabled ? "opacity-40 cursor-not-allowed" : "hover:border-primary hover:bg-primary/5"} ${isShisha ? "border-purple-300 bg-purple-50 dark:bg-purple-950/30" : "border-border bg-card"}`}
+                        >
+                          <span className="font-bold text-base leading-tight">
+                            {m.name}
+                          </span>
+                          <span className="text-sm text-muted-foreground font-medium">
+                            {fmt2(m.sellingPrice)} ج.م
+                          </span>
+                          {isShisha ? (
+                            <span className="text-xs text-purple-700 dark:text-purple-300">
+                              شيشة
                             </span>
-                            <span className="text-sm text-muted-foreground font-medium">
-                              {fmt2(m.sellingPrice)} ج.م
+                          ) : (
+                            <span
+                              className={`text-xs font-bold ${(mq ?? 0) > 5 ? "text-emerald-600" : "text-amber-600"}`}
+                            >
+                              العدد: {mq ?? "—"}
                             </span>
-                            {isShisha ? (
-                              <span className="text-xs text-purple-700 dark:text-purple-300">
-                                شيشة
-                              </span>
-                            ) : (
-                              <span
-                                className={`text-xs font-bold ${(mq ?? 0) > 5 ? "text-emerald-600" : "text-amber-600"}`}
-                              >
-                                العدد: {mq ?? "—"}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
-                </div>
-              )}
-              {filtered.length === 0 && (
-                <div className="col-span-full text-center p-8 text-muted-foreground">
-                  لا توجد أصناف مطابقة.
-                </div>
-              )}
+                ) : !activeCategory ? (
+                  <div className="grid grid-cols-6 gap-4">
+                    {categories.map((cat) => (
+                      <button
+                        key={cat}
+                        onClick={() => setActiveCategory(cat ?? null)}
+                        className="h-[150px] rounded-xl border-2 border-primary/30 bg-primary/5 text-primary p-4 flex flex-col items-center justify-center text-center font-bold text-lg hover:bg-primary/10 hover:border-primary transition"
+                      >
+                        <span className="truncate w-full">{cat}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between border-b pb-2">
+                      <h4 className="font-bold text-lg text-primary">
+                        قسم: {activeCategory}
+                      </h4>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setActiveCategory(null)}
+                      >
+                        رجوع للأقسام ←
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-5 gap-3 justify-items-center">
+                      {filtered
+                        .filter((m) => m.category === activeCategory)
+                        .map((m) => {
+                          const stockQty = manufacturable(m);
+                          const addedInCart =
+                            draftItems.find((it) => it.mealId === m.id)?.qty ||
+                            0;
+                          const mq =
+                            typeof stockQty === "number"
+                              ? Math.max(0, stockQty - addedInCart)
+                              : stockQty;
+                          const isShisha = m.category === SHISHA_CATEGORY;
+                          const disabled = !isShisha && mq !== null && mq <= 0;
+                          return (
+                            <button
+                              key={m.id}
+                              disabled={disabled}
+                              onClick={() => onPickMeal(m)}
+                              className={`h-[150px] w-[170px] rounded-xl border-2 p-3 flex flex-col items-center justify-center text-center gap-2 transition ${disabled ? "opacity-40 cursor-not-allowed" : "hover:border-primary hover:bg-primary/5"} ${isShisha ? "border-purple-300 bg-purple-50 dark:bg-purple-950/30" : "border-border bg-card"}`}
+                            >
+                              <span className="font-bold text-base leading-tight">
+                                {m.name}
+                              </span>
+                              <span className="text-sm text-muted-foreground font-medium">
+                                {fmt2(m.sellingPrice)} ج.م
+                              </span>
+                              {isShisha ? (
+                                <span className="text-xs text-purple-700 dark:text-purple-300">
+                                  شيشة
+                                </span>
+                              ) : (
+                                <span
+                                  className={`text-xs font-bold ${(mq ?? 0) > 5 ? "text-emerald-600" : "text-amber-600"}`}
+                                >
+                                  العدد: {mq ?? "—"}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
 
-          <div className="w-80 flex flex-col bg-secondary/30 h-full overflow-hidden">
-            <div className="p-3 border-b border-border shrink-0">
-              <h3 className="font-bold text-sm">السلة ({draftItems.length})</h3>
-            </div>
-            <div className="flex-1 overflow-y-auto min-h-0 max-h-[360px] p-2 space-y-1.5">
-              {draftItems.length === 0 ? (
-                <p className="text-center text-muted-foreground text-xs p-6">
-                  السلة فارغة — اختر صنف للإضافة.
-                </p>
-              ) : (
-                draftItems.map((l, index) => (
-                  <div
-                    key={`${l.id}-${index}`}
-                    className="bg-card border border-border rounded-md p-1.5 text-xs shadow-sm"
-                  >
-                    <div className="flex items-start justify-between gap-1.5">
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium truncate">{l.name}</div>
-                        {l.modifiersSummary && (
-                          <div className="text-[10px] text-muted-foreground mt-0.5">
-                            {l.modifiersSummary}
-                          </div>
+            <div className="w-80 flex flex-col bg-secondary/30 h-full overflow-hidden">
+              <div className="p-3 border-b border-border shrink-0">
+                <h3 className="font-bold text-sm">
+                  السلة ({draftItems.length})
+                </h3>
+              </div>
+              <div className="flex-1 overflow-y-auto min-h-0 max-h-[360px] p-2 space-y-1.5">
+                {draftItems.length === 0 ? (
+                  <p className="text-center text-muted-foreground text-xs p-6">
+                    السلة فارغة — اختر صنف للإضافة.
+                  </p>
+                ) : (
+                  draftItems.map((l, index) => (
+                    <div
+                      key={`${l.id}-${index}`}
+                      className="bg-card border border-border rounded-md p-1.5 text-xs shadow-sm"
+                    >
+                      <div className="flex items-start justify-between gap-1.5">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate">{l.name}</div>
+                          {l.modifiersSummary && (
+                            <div className="text-[10px] text-muted-foreground mt-0.5">
+                              {l.modifiersSummary}
+                            </div>
+                          )}
+                        </div>
+                        {!isMicros && (
+                          <button
+                            onClick={() => removeLine(l.id)}
+                            className="text-destructive hover:bg-destructive/10 p-1 rounded transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </div>
-                      {!isMicros && (
+                      <div className="flex items-center gap-1 mt-2">
+                        {!isMicros && (
+                          <button
+                            onClick={() => changeQty(l.id, l.qty - 1)}
+                            className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
+                          >
+                            -
+                          </button>
+                        )}
+                        <input
+                          type="number"
+                          value={l.qty}
+                          className="w-10 h-7 text-center text-xs border rounded bg-background"
+                          readOnly
+                        />
                         <button
-                          onClick={() => removeLine(l.id)}
-                          className="text-destructive hover:bg-destructive/10 p-1 rounded transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 mt-2">
-                      {!isMicros && (
-                        <button
-                          onClick={() => changeQty(l.id, l.qty - 1)}
+                          onClick={() => changeQty(l.id, l.qty + 1)}
                           className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
                         >
-                          -
+                          +
                         </button>
-                      )}
-                      <input
-                        type="number"
-                        value={l.qty}
-                        className="w-10 h-7 text-center text-xs border rounded bg-background"
-                        readOnly
-                      />
-                      <button
-                        onClick={() => changeQty(l.id, l.qty + 1)}
-                        className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
-                      >
-                        +
-                      </button>
+                      </div>
                     </div>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="p-3 border-t border-border space-y-1 text-xs shrink-0 bg-background/50">
-              <Row label="المجموع" value={fmt2(totals.subtotal)} />
-              <Row
-                label={`الخصم (${order.discountPct}%)`}
-                value={fmt2(totals.discountValue)}
-              />
-              <Row
-                label={`الضريبة (${order.taxPct}%)`}
-                value={fmt2(totals.taxValue)}
-              />
-              {totals.commissionValue > 0 && (
-                <Row
-                  label="نسبة المنصة (+5%)"
-                  value={fmt2(totals.commissionValue)}
-                />
-              )}
-              <Row label="الإجمالي" value={fmt2(totals.total)} bold />
-            </div>
-            {/* 🌟 أزرار منصات التوصيل (تظهر للتيك أواي فقط) */}
-            {order.zone === "takeaway" && (
-              <div className="p-2 border-t border-border bg-background/40 space-y-2 shrink-0">
-                <div className="text-[11px] font-bold text-muted-foreground flex justify-between items-center">
-                  {totals.commissionValue > 0 && (
-                    <span className="text-amber-600 font-extrabold">
-                      +{fmt2(totals.commissionValue)} ج.م
-                    </span>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={
-                      order.orderCategory === "talabat" ? "default" : "outline"
-                    }
-                    className={`h-8 text-xs font-bold transition-all ${
-                      order.orderCategory === "talabat"
-                        ? "bg-orange-600 hover:bg-orange-700 text-white shadow"
-                        : "text-orange-600 border-orange-300 hover:bg-orange-50"
-                    }`}
-                    onClick={() => {
-                      const nextCat =
-                        order.orderCategory === "talabat"
-                          ? "normal"
-                          : "talabat";
-                      upsertOrder({
-                        ...order,
-                        items: draftItems,
-                        orderCategory: nextCat,
-                      });
-                      toast.success(
-                        nextCat === "talabat"
-                          ? "🚀 تم تطبيق نسبة منصة طلبات"
-                          : "🗑️ تم إلغاء عمولة طلبات",
-                      );
-                    }}
-                  >
-                    طلبات (Talabat)
-                  </Button>
-
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={
-                      order.orderCategory === "fast" ? "default" : "outline"
-                    }
-                    className={`h-8 text-xs font-bold transition-all ${
-                      order.orderCategory === "fast"
-                        ? "bg-blue-600 hover:bg-blue-700 text-white shadow"
-                        : "text-blue-600 border-blue-300 hover:bg-blue-50"
-                    }`}
-                    onClick={() => {
-                      const nextCat =
-                        order.orderCategory === "fast" ? "normal" : "fast";
-                      upsertOrder({
-                        ...order,
-                        items: draftItems,
-                        orderCategory: nextCat,
-                      });
-                      toast.success(
-                        nextCat === "fast"
-                          ? "⚡ تم تطبيق نسبة منصة فاست"
-                          : "🗑️ تم إلغاء عمولة فاست",
-                      );
-                    }}
-                  >
-                    فاست (Fast)
-                  </Button>
-                </div>
+                  ))
+                )}
               </div>
-            )}
-            <DialogFooter className="p-3 border-t border-border shrink-0">
+              <div className="p-3 border-t border-border space-y-1 text-xs shrink-0 bg-background/50">
+                <Row label="المجموع" value={fmt2(totals.subtotal)} />
+                <Row
+                  label={`الخصم (${order.discountPct}%)`}
+                  value={fmt2(totals.discountValue)}
+                />
+                <Row
+                  label={`الضريبة (${order.taxPct}%)`}
+                  value={fmt2(totals.taxValue)}
+                />
+                {totals.commissionValue > 0 && (
+                  <Row
+                    label="نسبة المنصة (+5%)"
+                    value={fmt2(totals.commissionValue)}
+                  />
+                )}
+                <Row label="الإجمالي" value={fmt2(totals.total)} bold />
+              </div>
+
+              {order.zone === "takeaway" && (
+                <div className="p-2 border-t border-border bg-background/40 space-y-2 shrink-0">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={
+                        order.orderCategory === "talabat"
+                          ? "default"
+                          : "outline"
+                      }
+                      className={`h-8 text-xs font-bold transition-all ${
+                        order.orderCategory === "talabat"
+                          ? "bg-orange-600 hover:bg-orange-700 text-white shadow"
+                          : "text-orange-600 border-orange-300 hover:bg-orange-50"
+                      }`}
+                      onClick={() => {
+                        const nextCat =
+                          order.orderCategory === "talabat"
+                            ? "normal"
+                            : "talabat";
+                        upsertOrder({
+                          ...order,
+                          items: draftItems,
+                          orderCategory: nextCat,
+                        });
+                      }}
+                    >
+                      طلبات (Talabat)
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={
+                        order.orderCategory === "fast" ? "default" : "outline"
+                      }
+                      className={`h-8 text-xs font-bold transition-all ${
+                        order.orderCategory === "fast"
+                          ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow"
+                          : "text-emerald-600 border-emerald-300 hover:bg-emerald-50"
+                      }`}
+                      onClick={() => {
+                        const nextCat =
+                          order.orderCategory === "fast" ? "normal" : "fast";
+                        upsertOrder({
+                          ...order,
+                          items: draftItems,
+                          orderCategory: nextCat,
+                        });
+                      }}
+                    >
+                      فاست (Fast)
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <DialogFooter className="p-3 border-t border-border shrink-0">
+                <Button
+                  onClick={() => handleSaveClick(tableCode)}
+                  disabled={draftItems.length === 0 || isSubmitting}
+                  className={`w-full text-sm h-10 ${order.zone === "takeaway" ? "bg-green-600 hover:bg-green-700 text-white" : ""}`}
+                >
+                  {order.zone === "takeaway"
+                    ? "ضرب الأوردر وإنهاء الفاتورة"
+                    : "حفظ وإغلاق الطاولة"}
+                </Button>
+              </DialogFooter>
+            </div>
+          </div>
+          {modifierMeal && (
+            <ModifierDialog
+              meal={modifierMeal}
+              onCancel={() => setModifierMeal(null)}
+              onConfirm={(extras, summary) => {
+                addLine(modifierMeal, extras, summary);
+                setModifierMeal(null);
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 🌟 البوكس الجديد المخصص للتيك أواي (بديل الـ prompts) 🌟 */}
+      {takeawayConfirmOpen && (
+        <Dialog
+          open={takeawayConfirmOpen}
+          onOpenChange={(o) => !o && setTakeawayConfirmOpen(false)}
+        >
+          <DialogContent dir="rtl" className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Printer className="w-5 h-5 text-green-600" /> إنهاء وطباعة -
+                تيك أواي
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="bg-white text-black border rounded p-4 font-mono text-xs space-y-1 print:block">
+              <div className="text-center font-bold text-sm">
+                مراجعة الفاتورة
+              </div>
+              <div className="text-center">النوع: تيك أواي / دليفري</div>
+              <hr className="border-dashed border-black my-2" />
+              {draftItems.map((l) => (
+                <div key={l.id} className="flex justify-between">
+                  <span>
+                    {l.name} ×{l.qty}
+                  </span>
+                  <span>
+                    {fmt2(
+                      (l.unitPrice +
+                        l.extras.reduce((s, e) => s + e.price, 0)) *
+                        l.qty,
+                    )}
+                  </span>
+                </div>
+              ))}
+              <hr className="border-dashed border-black my-2" />
+
+              {/* حساب الإجماليات اللحظية بناءً على المدخلات في البوكس */}
+              {(() => {
+                const twTotals = computeTotals(
+                  draftItems,
+                  takeawayDiscount,
+                  order.taxPct,
+                  order.orderCategory || "normal",
+                );
+                return (
+                  <>
+                    <div className="flex justify-between">
+                      <span>المجموع</span>
+                      <span>{fmt2(twTotals.subtotal)}</span>
+                    </div>
+                    {takeawayDiscount > 0 && (
+                      <div className="flex justify-between text-red-600 font-bold">
+                        <span>خصم {takeawayDiscount}%</span>
+                        <span>-{fmt2(twTotals.discountValue)}</span>
+                      </div>
+                    )}
+                    {twTotals.commissionValue > 0 && (
+                      <div className="flex justify-between text-amber-600">
+                        <span>عمولة المنصة</span>
+                        <span>+{fmt2(twTotals.commissionValue)}</span>
+                      </div>
+                    )}
+                    {takeawayDeliveryFee > 0 && (
+                      <div className="flex justify-between text-blue-600">
+                        <span>مصاريف التوصيل</span>
+                        <span>+{fmt2(takeawayDeliveryFee)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between font-bold text-sm border-t border-black pt-1">
+                      <span>الإجمالي</span>
+                      <span>{fmt2(twTotals.total + takeawayDeliveryFee)}</span>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center gap-2 no-print">
+                <label className="text-xs font-bold w-16">خصم %</label>
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  max="100"
+                  value={
+                    pendingTakeawayDiscount !== null
+                      ? pendingTakeawayDiscount
+                      : takeawayDiscount
+                  }
+                  onChange={(e) =>
+                    setPendingTakeawayDiscount(
+                      clamp0(parseFloat(cleanNumInput(e.target.value)) || 0),
+                    )
+                  }
+                  className="h-8 w-24"
+                />
+                {pendingTakeawayDiscount !== null &&
+                  pendingTakeawayDiscount !== takeawayDiscount && (
+                    <ActionGate
+                      requiredRole="محاسب"
+                      actionName="تطبيق نسبة الخصم"
+                      onSuccess={(employee) => {
+                        setTakeawayDiscount(pendingTakeawayDiscount);
+                        toast.success(
+                          `تم تطبيق خصم ${pendingTakeawayDiscount}% بواسطة: ${employee.name} 🛡️`,
+                        );
+                        setPendingTakeawayDiscount(null);
+                      }}
+                    >
+                      <Button size="sm">تطبيق</Button>
+                    </ActionGate>
+                  )}
+              </div>
+
+              <div className="flex items-center gap-2 no-print">
+                <label className="text-xs font-bold w-16">توصيل</label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={takeawayDeliveryFee || ""}
+                  onChange={(e) =>
+                    setTakeawayDeliveryFee(Number(e.target.value) || 0)
+                  }
+                  placeholder="0"
+                  className="h-8 w-24 border-blue-200 focus-visible:ring-blue-500"
+                />
+                <span className="text-xs text-muted-foreground font-bold">
+                  ج.م (للدليفري)
+                </span>
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 no-print mt-2">
               <Button
-                onClick={() => handleSaveAndDeduct(order.tableCode)}
-                className={`w-full text-sm h-10 ${order.zone === "takeaway" ? "bg-green-600 hover:bg-green-700 text-white" : ""}`}
+                variant="outline"
+                onClick={() => setTakeawayConfirmOpen(false)}
+                disabled={isSubmitting}
               >
-                {order.zone === "takeaway"
-                  ? "ضرب الأوردر وإنهاء الفاتورة"
-                  : "حفظ وإغلاق الطاولة"}
+                إلغاء
+              </Button>
+              <Button
+                onClick={executeTakeawaySave}
+                disabled={isSubmitting}
+                className="gap-2 bg-green-600 hover:bg-green-700 text-white font-bold px-6"
+              >
+                {isSubmitting ? (
+                  "جاري..."
+                ) : (
+                  <>
+                    <Printer className="w-4 h-4" /> حفظ وطباعة 🖨️
+                  </>
+                )}
               </Button>
             </DialogFooter>
-          </div>
-        </div>
-        {modifierMeal && (
-          <ModifierDialog
-            meal={modifierMeal}
-            onCancel={() => setModifierMeal(null)}
-            onConfirm={(extras, summary) => {
-              addLine(modifierMeal, extras, summary);
-              setModifierMeal(null);
-            }}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }
 function Row({
@@ -2159,157 +2335,6 @@ function ModifierDialog({
     </Dialog>
   );
 }
-
-// function TransferDialog({ onClose }: { onClose: () => void }) {
-//   const { db: pos, transferItems } = usePosDB();
-//   const [from, setFrom] = useState("");
-//   const [to, setTo] = useState("");
-//   const [search, setSearch] = useState("");
-//   const [showList, setShowList] = useState(false);
-//   const [picks, setPicks] = useState<Record<string, number>>({});
-//   const allTables = useMemo(() => {
-//     const cTables = Array.from({ length: 70 }, (_, i) => `C${i + 1}`);
-//     const oTables = Array.from({ length: 70 }, (_, i) => `O${i + 1}`);
-//     return [...cTables, ...oTables];
-//   }, []);
-//   const filteredTables = allTables.filter((t) =>
-//     t.toLowerCase().includes(search.toLowerCase()),
-//   );
-//   const src = from ? pos.orders[from.trim()] : null;
-//   async function doTransfer() {
-//     // 👈 ضفنا async هنا
-//     if (!from.trim() || !to.trim()) return toast.error("أدخل الطاولتين");
-//     const itemsToMove = Object.entries(picks).map(([id, qty]) => ({ id, qty }));
-//     if (itemsToMove.length === 0) return toast.error("اختر أصنافاً للنقل");
-
-//     const targetZone = to.startsWith("C") ? "dining" : "takeaway";
-
-//     // 👈 ضفنا await هنا عشان الكود يستنى السيرفر يرد
-//     const r = await transferItems(
-//       from.trim(),
-//       to.trim(),
-//       itemsToMove,
-//       targetZone as any,
-//     );
-
-//     if (!r.ok) return toast.error((r as any).error || "فشل نقل الأصناف");
-//     toast.success("تم النقل بنجاح");
-//     onClose();
-//   }
-//   return (
-//     <Dialog open onOpenChange={(o) => !o && onClose()}>
-//       <DialogContent dir="rtl" className="max-w-2xl">
-//         <DialogHeader>
-//           <DialogTitle>تحويل أصناف</DialogTitle>
-//         </DialogHeader>
-//         {/* ... (نفس كود الترانزفير كما هو بدون تعديل) ... */}
-//         <div className="grid grid-cols-2 gap-4">
-//           <div className="space-y-2">
-//             <label className="text-xs font-medium">المنقول منها</label>
-//             <Input
-//               value={from}
-//               onChange={(e) => {
-//                 setFrom(e.target.value);
-//                 setPicks({});
-//               }}
-//               placeholder="مثال: C1"
-//             />
-//             {src && (
-//               <div className="border rounded-lg max-h-60 overflow-auto p-2">
-//                 {src.items.map((l) => {
-//                   const isSelected = picks[l.id] !== undefined;
-//                   return (
-//                     <div
-//                       key={l.id}
-//                       className="flex items-center gap-2 border-b py-2 text-sm"
-//                     >
-//                       <input
-//                         type="checkbox"
-//                         checked={isSelected}
-//                         onChange={(e) => {
-//                           if (e.target.checked)
-//                             setPicks((prev) => ({ ...prev, [l.id]: l.qty }));
-//                           else
-//                             setPicks((prev) => {
-//                               const n = { ...prev };
-//                               delete n[l.id];
-//                               return n;
-//                             });
-//                         }}
-//                       />
-//                       <span className="flex-1">{l.name}</span>
-//                       {isSelected && (
-//                         <div className="flex items-center gap-1 bg-secondary rounded px-2">
-//                           <button
-//                             onClick={() =>
-//                               setPicks((p) => ({
-//                                 ...p,
-//                                 [l.id]: Math.min(l.qty, (p[l.id] || 0) + 1),
-//                               }))
-//                             }
-//                           >
-//                             +
-//                           </button>
-//                           <span className="w-6 text-center">{picks[l.id]}</span>
-//                           <button
-//                             onClick={() =>
-//                               setPicks((p) => ({
-//                                 ...p,
-//                                 [l.id]: Math.max(1, (p[l.id] || 0) - 1),
-//                               }))
-//                             }
-//                           >
-//                             -
-//                           </button>
-//                         </div>
-//                       )}
-//                     </div>
-//                   );
-//                 })}
-//               </div>
-//             )}
-//           </div>
-//           <div className="space-y-2 relative">
-//             <label className="text-xs font-medium">المنقول إليها</label>
-//             <Input
-//               value={search}
-//               placeholder="بحث (مثال: C5)..."
-//               onChange={(e) => {
-//                 setSearch(e.target.value);
-//                 setShowList(true);
-//               }}
-//               onFocus={() => setShowList(true)}
-//             />
-//             {showList && (
-//               <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-auto">
-//                 {filteredTables.map((t) => (
-//                   <div
-//                     key={t}
-//                     className="p-2 cursor-pointer hover:bg-secondary text-sm border-b"
-//                     onClick={() => {
-//                       setTo(t);
-//                       setSearch(t);
-//                       setShowList(false);
-//                     }}
-//                   >
-//                     {t}
-//                   </div>
-//                 ))}
-//               </div>
-//             )}
-//           </div>
-//         </div>
-//         <DialogFooter>
-//           <Button variant="outline" onClick={onClose}>
-//             إلغاء
-//           </Button>
-//           <Button onClick={doTransfer}>تنفيذ التحويل</Button>
-//         </DialogFooter>
-//       </DialogContent>
-//     </Dialog>
-//   );
-// }
-// 🌟 التعديل 1: خلينا الدالة تستقبل sourceTable كـ Prop أساسي
 function TransferDialog({
   sourceTable,
   onClose,
@@ -2614,11 +2639,25 @@ function PrintDialog({
               className="h-8 w-24"
             />
             {pendingDiscount !== null && pendingDiscount !== discount && (
-              <Button size="sm" onClick={() => setPinOpen(true)}>
-                تطبيق
-              </Button>
+              /* 🌟 لفينا زرار "تطبيق" بالـ ActionGate بتاعك مباشرة */
+              <ActionGate
+                requiredRole="محاسب"
+                actionName="تطبيق نسبة الخصم"
+                onSuccess={(employee) => {
+                  // عند نجاح البصمة وتأكيد صلاحية (محاسب فما فوق)
+                  setDiscount(pendingDiscount);
+                  upsertOrder({ ...order, discountPct: pendingDiscount });
+                  toast.success(
+                    `تم تطبيق خصم ${pendingDiscount}% بواسطة: ${employee.name} 🛡️`,
+                  );
+                  setPendingDiscount(null);
+                }}
+              >
+                <Button size="sm">تطبيق</Button>
+              </ActionGate>
             )}
           </div>
+
           <DialogFooter className="gap-2 no-print">
             <Button variant="outline" onClick={onClose}>
               إلغاء
@@ -2629,27 +2668,6 @@ function PrintDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <PinPrompt
-        open={pinOpen}
-        title="تعديل الخصم"
-        description="مطلوب كلمة سر المسؤول لتغيير نسبة الخصم."
-        onClose={() => {
-          setPinOpen(false);
-          setPendingDiscount(null);
-        }}
-        onSuccess={() => {
-          if (pendingDiscount !== null) {
-            setDiscount(pendingDiscount);
-            upsertOrder({ ...order, discountPct: pendingDiscount });
-            toast.success("تم تطبيق الخصم");
-          }
-          setPinOpen(false);
-          setPendingDiscount(null);
-        }}
-        onCancel={function (): void {
-          throw new Error("Function not implemented.");
-        }}
-      />
     </>
   );
 }
@@ -2675,37 +2693,6 @@ function CheckoutDialog({
     currentOrder.discountPct,
     currentOrder.taxPct,
   );
-
-  //   const perDept: Record<string, { itemId: string; baseQty: number }[]> = {};
-  //   for (const line of currentOrder.items) {
-  //     const meal = db.meals.find((m) => m.id === line.mealId);
-  //     if (!meal) continue;
-  //     if (meal.category === SHISHA_CATEGORY) continue;
-  //     const dept = meal.department;
-  //     for (const ing of meal.ingredients) {
-  //       if (ing.refKind === "meal") continue;
-  //       const it = db.items.find((x) => x.id === ing.itemId);
-  //       if (!it) continue;
-  //       const baseQty = round2(
-  //         clamp0(
-  //           convertToBase(
-  //             ing.qty,
-  //             ing.unit,
-  //             it.unit,
-  //             it.conversionFactor,
-  //             it.subUnitType,
-  //           ) * line.qty,
-  //         ),
-  //       );
-  //       if (baseQty <= 0) continue;
-  //       (perDept[dept] = perDept[dept] || []).push({ itemId: it.id, baseQty });
-  //     }
-  //   }
-  //   for (const [d, arr] of Object.entries(perDept))
-  //     deductSubStock(d as SubDept, arr);
-  // }
-
-  // 1. ضيف الـ State دي في بداية الكومبوننت لو مش ضايفها
   function deductInventory() {
     const perDept: Record<string, Record<string, number>> = {};
     for (const line of currentOrder.items) {
@@ -2929,125 +2916,298 @@ function CheckoutDialog({
   );
 }
 
-// 🌟 دالة الطباعة الذكية (بون مبدئي أو فاتورة نهائية)
-// eslint-disable-next-line react-refresh/only-export-components
+// 🌟 دالة الطباعة الذكية (بون مبدئي أو فاتورة نهائية) مدمجة مع التصميم الأنيق
 export const triggerPrint = (data: any, isFinal: boolean = false) => {
   const printWindow = window.open("", "_blank", "width=400,height=600");
   if (!printWindow) return;
-  // 🌟 1. قراءة قيمة عمولة المنصة بالجنيه
+
+  // 1. قراءة وتجهيز القيم الرقمية والأسعار متطابقة مع دالتك الأصلية
   const commVal =
     Number(data.commissionValue) || Number((data as any).commission_value) || 0;
   const dPrice = Number(data.deliveryPrice) || 0;
+  const finalDiscVal = Number(data.discountValue || 0);
+  const finalTaxVal = Number(data.taxValue || 0);
+  const computedTotal =
+    Number(data.total) ||
+    Number(data.subtotal || 0) - finalDiscVal + finalTaxVal + dPrice + commVal;
+
+  // 2. تجهيز النصوص والأسماء لتغذية التصميم
   const invoiceNumber = data.invoiceNumber || "000000";
   const createdAt = data.createdAt || Date.now();
-  const typeLabel =
+
+  const orderTypeArabic =
     data.type === "delivery"
-      ? "توصيل"
+      ? "توصيل 🛵"
       : data.type === "takeaway"
-        ? "تيك أواي"
-        : "صالة";
+        ? "تيك أواي 🛍️"
+        : "صالة 🍽️";
 
+  const formattedDate = new Date(createdAt).toLocaleDateString("en-GB");
+  const formattedTime = new Date(createdAt).toLocaleTimeString("ar-EG", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  const tableName = data.tableCode || data.customerName || "..........";
+  const cashierName = data.cashierName || "..........";
+
+  // تأمين فك الأري عشان لو جاية كنص من الداتابيز
+  const itemsArray =
+    typeof data.items === "string" ? JSON.parse(data.items) : data.items || [];
+
+  // 3. دمج هيكل الـ HTML الأنيق بالتصميم الـ Static وحقن البيانات ديناميكياً
   const html = `
-  <html dir="rtl">
-    <head>
-      <title>طباعة الفاتورة</title>
-      <style>
-        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; font-size: 14px; }
-        .header { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
-        .type-title { font-size: 18px; font-weight: bold; margin: 10px 0; border: 2px dashed #000; padding: 5px; background: #f9f9f9; }
-        .meta { margin-bottom: 10px; font-size: 12px; border-bottom: 1px dashed #000; padding-bottom: 5px; text-align: right; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; text-align: right; }
-        th { border-bottom: 1px solid #000; padding: 4px; font-size: 13px; }
-        td { padding: 4px; font-size: 13px; vertical-align: top; }
-        .totals { margin-top: 10px; border-top: 1px dashed #000; padding-top: 5px; text-align: right; }
-        .totals div { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 13px; }
-        .bold { font-weight: bold; font-size: 15px; }
-      </style>
-    </head>
-    <body>
-      <div class="header">مجمع الـمـول</div>
-      <div>النوع: ${typeLabel}</div>
-      <div class="type-title">
-        ${isFinal ? "فاتورة نهائية (مدفوعة)" : "بون حساب مبدئي (غير مدفوع)"}
-      </div>
-
-     <div class="meta">
-        <div>الوقت: ${new Date(createdAt).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", hour12: true })}</div>        
-        ${
-          (data.type === "takeaway" || data.type === "delivery") &&
-          data.orderCategory &&
-          data.orderCategory !== "normal"
-            ? `<div>منصة التحويل: <strong style="font-size:14px; color:#000;">${
-                data.orderCategory === "talabat"
-                  ? "(Talabat)"
-                  : data.orderCategory === "fast"
-                    ? "(Fast)"
-                    : data.orderCategory
-              }</strong></div>`
-            : ""
-        }
-
-        ${data.tableCode ? `<div>رقم الطاولة: ${data.tableCode}</div>` : ""}
-        ${data.cashierName ? `<div>الكاشير: ${data.cashierName}</div>` : ""}
-      </div>
-      
-      <table>
-        <thead>
-          <tr>
-            <th>الصنف</th>
-            <th style="text-align:center;">الكمية</th>
-            <th style="text-align:left;">الإجمالي</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${(typeof data.items === "string"
-            ? JSON.parse(data.items)
-            : data.items
-          )
-            .map((line: any) => {
-              const exStr =
-                line.extras && line.extras.length
-                  ? ` <br><span style="font-size:10px;color:#555;">(+${line.extras.map((e: any) => e.name || e.label).join(", ")})</span>`
-                  : "";
-              const lineTotal =
-                (line.unitPrice +
-                  (line.extras
-                    ? line.extras.reduce((s: number, e: any) => s + e.price, 0)
-                    : 0)) *
-                line.qty;
-              return `<tr><td>${line.mealName || line.name}${exStr}</td><td style="text-align:center;">${line.qty}</td><td style="text-align:left;">${lineTotal.toFixed(2)} ج</td></tr>`;
-            })
-            .join("")}
-        </tbody>
-      </table>
-      
-      <div class="totals">
-        <div><span>المجموع الأصلي:</span> <span>${Number(data.subtotal || 0).toFixed(2)} ج</span></div>
-        ${data.discountValue > 0 ? `<div><span>الخصم:</span> <span>${Number(data.discountValue).toFixed(2)} ج</span></div>` : ""}
-        ${data.taxValue > 0 ? `<div><span>الضريبة:</span> <span>${Number(data.taxValue).toFixed(2)} ج</span></div>` : ""}
-        
-        ${
-          commVal > 0
-            ? `
-          <div style="color: #d97706; font-weight: bold;">
-            <span>منصة (${data.orderCategory === "talabat" ? "طلبات" : data.orderCategory === "fast" ? "فاست" : "توصيل"}):</span> 
-            <span>+${commVal.toFixed(2)} ج</span>
+    <!doctype html>
+    <html lang="ar" dir="rtl">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>فاتورة - ${invoiceNumber}</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <style>
+          @media print {
+            body {
+              background: white;
+              margin: 0;
+              padding: 0;
+            }
+            .receipt-container {
+              box-shadow: none;
+              max-width: 100%;
+              padding: 10px;
+            }
+            /* لمنع تكرار راس الجدول */ 
+            thead {
+              display: table-row-group !important;
+            }
+          }
+          body {
+            background-color: #f5f5f5;
+            direction: rtl;
+            font-family: Arial, sans-serif;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .separator-line {
+            border-top: 1px dashed #333;
+            margin: 12px 0;
+          }
+          .separator-solid {
+            border-top: 2px solid #000;
+            margin: 16px 0;
+          }
+        </style>
+      </head>
+      <body class="p-4">
+        <div class="receipt-container bg-white rounded-lg shadow-lg px-8 py-10 max-w-2xl mx-auto">
+          
+          <div class="mb-6 text-right">
+            <div class="flex items-center justify-between mb-4">
+              <div class="text-right">
+                <div class="text-5xl font-bold text-black mb-1">مول زايد</div>
+                <div class="text-sm text-gray-800">عنوان المطعم - مدينة طنطا</div>
+              </div>
+              <img
+                class="h-16 w-16 ml-4"
+                src="../.././public/favicon.ico"
+                alt="Logo"
+              />
+            </div>
           </div>
-        `
-            : ""
-        }
 
-        ${dPrice > 0 ? `<div><span>التوصيل:</span> <span class="bold">${dPrice.toFixed(2)} ج</span></div>` : ""}
-        
-        <div class="bold" style="border-top:1px solid #000; padding-top:4px; margin-top:4px;">
-          <span>الإجمالي النهائي:</span> <span>${Number(data.total || 0).toFixed(2)} ج</span>
+          <div class="separator-solid"></div>
+
+          <div class="text-center mb-6">
+            <h2 class="text-2xl font-bold bg-gray-100 py-2 rounded-xl">
+              ${orderTypeArabic}
+            </h2>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 mb-6 text-center text-sm">
+            <div>
+              <div class="text-gray-500 mb-0.5">التاريخ</div>
+              <div class="font-bold text-black text-xs">${formattedDate}</div>
+            </div>
+            <div>
+              <div class="text-gray-500 mb-0.5">الوقت</div>
+              <div class="font-bold text-black text-xs">${formattedTime}</div>
+            </div>
+            <div>
+              <div>
+                <div class="text-gray-500 mb-0.5">اسم الطاولة / الطلب</div>
+                <div class="font-bold text-black border-b border-gray-300 pb-1">
+                  ${tableName.length > 15 ? tableName.substring(0, 15) + "..." : tableName}
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="text-gray-500 mb-0.5">اسم الكاشير</div>
+              <div class="font-bold text-black border-b border-gray-300 pb-1">
+                ${cashierName}
+              </div>
+            </div>
+          </div>
+
+          ${
+            (data.type === "takeaway" || data.type === "delivery") &&
+            data.orderCategory &&
+            data.orderCategory !== "normal"
+              ? `
+              <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-2.5 text-center text-xs font-bold mb-4">
+                منصة التوصيل: 
+                <span>
+                  ${
+                    data.orderCategory === "talabat"
+                      ? "طلبات (Talabat)"
+                      : data.orderCategory === "fast"
+                        ? "فاست (Fast)"
+                        : data.orderCategory
+                  }
+                </span>
+              </div>
+              `
+              : ""
+          }
+
+          <div class="separator-line"></div>
+
+          <div class="mb-6">
+            <table class="w-full table-fixed text-center text-sm mb-4">
+              <thead>
+                <tr class="border-b border-gray-300">
+                  <th class="w-[22%] text-gray-800 font-bold py-3 text-xs text-center whitespace-nowrap">الإجمالي</th>
+                  <th class="w-[20%] text-gray-800 font-bold py-3 text-xs text-center whitespace-nowrap">السعر</th>
+                  <th class="w-[13%] text-gray-800 font-bold py-3 text-xs text-center whitespace-nowrap">الكمية</th>
+                  <th class="w-[45%] text-gray-800 font-bold py-3 text-xs text-center whitespace-nowrap">الصنف</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemsArray
+                  .map((line: any) => {
+                    const exStr =
+                      line.extras && line.extras.length
+                        ? ` <span class="text-xs text-gray-500 block mt-0.5 font-normal break-words whitespace-normal leading-relaxed">(+ ${line.extras.map((e: any) => e.name || e.label).join(", ")})</span>`
+                        : "";
+
+                    const displayName =
+                      line.mealName || line.name || "صنف غير معروف";
+
+                    const singlePrice =
+                      Number(line.unitPrice || line.price || 0) +
+                      (line.extras
+                        ? line.extras.reduce(
+                            (s: number, e: any) => s + Number(e.price || 0),
+                            0,
+                          )
+                        : 0);
+
+                    const lineTotal = singlePrice * Number(line.qty || 1);
+
+                    return `
+                    <tr class="border-b border-gray-200">
+                      <td class="py-3 text-gray-700 text-center font-medium whitespace-nowrap">${lineTotal.toFixed(0)}</td>
+                      <td class="py-3 text-gray-700 text-center whitespace-nowrap">${singlePrice.toFixed(0)}</td>
+                      <td class="py-3 text-gray-700 text-center font-bold whitespace-nowrap">${line.qty}</td>
+                      <td class="py-3 text-gray-800 font-bold text-center break-words whitespace-normal pr-1 leading-tight">
+                        ${displayName}
+                        ${exStr}
+                      </td>
+                    </tr>
+                    `;
+                  })
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="separator-solid"></div>
+
+          <div class="mb-6 space-y-2.5 text-sm">
+            <div class="flex justify-between items-center">
+              <span class="text-gray-800 font-bold">المجموع الأصلي:</span>
+              <span class="text-gray-700 font-semibold">${Number(data.subtotal || 0).toFixed(2)}</span>
+            </div>
+            
+            ${
+              finalDiscVal > 0
+                ? `
+                <div class="flex justify-between items-center text-red-600 font-bold">
+                  <span>الخصم (${data.discountPct || 0}%):</span>
+                  <span>-${finalDiscVal.toFixed(2)}</span>
+                </div>
+                `
+                : ""
+            }
+            
+            ${
+              finalTaxVal > 0
+                ? `
+                <div class="flex justify-between items-center text-gray-700">
+                  <span>الضريبة (${data.taxPct || 0}%):</span>
+                  <span>${finalTaxVal.toFixed(2)}</span>
+                </div>
+                `
+                : ""
+            }
+
+            ${
+              commVal > 0
+                ? `
+                <div class="flex justify-between items-center text-amber-700 font-bold">
+                  <span>منصة (${data.orderCategory === "talabat" ? "طلبات" : "فاست"}):</span>
+                  <span>+${commVal.toFixed(2)}</span>
+                </div>
+                `
+                : ""
+            }
+
+            ${
+              dPrice > 0
+                ? `
+                <div class="flex justify-between items-center text-gray-700 font-semibold">
+                  <span>خدمة التوصيل:</span>
+                  <span>+${dPrice.toFixed(2)}</span>
+                </div>
+                `
+                : ""
+            }
+
+            <div class="flex justify-between items-center text-xl font-black border-t border-b border-gray-300 py-3.5 mt-2">
+              <span class="text-black">الإجمالي الكلي:</span>
+              <span class="text-black text-2xl">${computedTotal.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 gap-6 mb-6 text-right text-xs">
+            <div>
+              <div class="font-bold text-gray-800 mb-2 uppercase">أرقام التواصل</div>
+              <div class="space-y-1 text-gray-600" dir="ltr">
+                <div class="text-right">☎ +20 123 456 7890</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="text-center mt-4">
+            <div class="text-sm font-black text-gray-800 mb-2">
+              شكراً لاختيارك.. نرجو أن نكون قد نلنا اعجابكم 🙏
+            </div>
+          </div>
+
         </div>
-      </div>
-      <div style="margin-top:20px; font-size:11px; border-top:1px solid #000; padding-top:5px;">شكراً لزيارتكم!</div>
-      <script>window.onload = function() { window.print(); window.close(); }</script>
-    </body>
-  </html>
+
+        <script>
+          window.onload = function() {
+            setTimeout(() => {
+              window.print();
+              window.close();
+            }, 500);
+          }
+        </script>
+      </body>
+    </html>
   `;
+
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();

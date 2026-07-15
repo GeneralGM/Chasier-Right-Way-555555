@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>فاتورة</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @media print {
+        body {
+          background: white;
+          margin: 0;
+          padding: 0;
+        }
+        .receipt-container {
+          box-shadow: none;
+          max-width: 100%;
+        }
+      }
+      body {
+        background-color: #f5f5f5;
+        direction: rtl;
+        font-family: Arial, sans-serif;
+      }
+      .separator-line {
+        border-top: 1px dashed #333;
+        margin: 12px 0;
+      }
+      .separator-solid {
+        border-top: 2px solid #000;
+        margin: 16px 0;
+      }
+    </style>
+  </head>
+  <body class="p-4">
+    <div
+      class="receipt-container bg-white rounded-lg shadow-lg px-8 py-10 max-w-2xl mx-auto"
+    >
+      <!-- رأس الفاتورة مع الشعار -->
+      <div class="mb-8 text-right">
+        <div class="flex items-center justify-between mb-6">
+          <div class="text-center">
+            <div class="text-5xl font-bold text-black mb-1">مول زايد</div>
+            <div class="text-sm text-gray-800">عنوان المطعم - المدينة</div>
+          </div>
+          <img
+            class="h-16 w-16 ml-4"
+            src="https://tailwindflex.com/public/images/logos/favicon-32x32.png"
+            alt="Logo"
+          />
+        </div>
+      </div>
+
+      <div class="separator-solid"></div>
+
+      <div class="text-center mb-7">
+        <h2 class="text-2xl">النوع</h2>
+      </div>
+
+      <!-- معلومات الفاتورة الأساسية -->
+      <div class="grid grid-cols-2 gap-4 mb-6 text-center">
+        <div>
+          <div class="text-xl text-gray-600 mb-1">رقم الفاتورة</div>
+          <div class="text-sm font-semibold text-black">INV12345</div>
+        </div>
+        <div>
+          <div class="text-xl text-gray-600 mb-1">التاريخ</div>
+          <div class="text-sm font-semibold text-black">01/05/2023</div>
+        </div>
+        <div>
+          <div class="text-xl text-gray-600 mb-1">اسم الطاولة</div>
+          <div
+            class="text-sm font-semibold text-black border-b border-gray-300 pb-1"
+          >
+            ...........
+          </div>
+        </div>
+        <div>
+          <div class="text-xl text-gray-600 mb-1">اسم الكاشير</div>
+          <div
+            class="text-sm font-semibold text-black border-b border-gray-300 pb-1"
+          >
+            ...........
+          </div>
+        </div>
+      </div>
+
+      <div class="separator-line"></div>
+
+      <!-- جدول الطلبات -->
+      <div class="mb-8">
+        <table class="w-full text-right text-sm mb-4">
+          <thead>
+            <tr class="border-b border-gray-300">
+              <th class="text-gray-800 font-bold py-3 text-xs">الإجمالي</th>
+              <th class="text-gray-800 font-bold py-3 text-xs">السعر</th>
+              <th class="text-gray-800 font-bold py-3 text-xs">الكمية</th>
+              <th class="text-gray-800 font-bold py-3 text-xs">الصنف</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="border-b border-gray-200">
+              <td class="py-3 text-gray-700">100.00</td>
+              <td class="py-3 text-gray-700">100.00</td>
+              <td class="py-3 text-gray-700">1</td>
+              <td class="py-3 text-gray-700 font-medium">طلب 1</td>
+            </tr>
+            <tr class="border-b border-gray-200">
+              <td class="py-3 text-gray-700">100.00</td>
+              <td class="py-3 text-gray-700">50.00</td>
+              <td class="py-3 text-gray-700">2</td>
+              <td class="py-3 text-gray-700 font-medium">طلب 2</td>
+            </tr>
+            <tr class="border-b border-gray-200">
+              <td class="py-3 text-gray-700">225.00</td>
+              <td class="py-3 text-gray-700">75.00</td>
+              <td class="py-3 text-gray-700">3</td>
+              <td class="py-3 text-gray-700 font-medium">طلب 3</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="separator-line"></div>
+
+      <!-- الملخص المالي -->
+      <div class="mb-8 space-y-3" dir="ltr">
+        <div class="flex justify-between items-left text-sm">
+          <div class="text-gray-700">SubTotal:425.00</div>
+        </div>
+        <div class="flex justify-between items-left text-sm">
+          <div class="text-gray-700">Tax:25.50</div>
+        </div>
+        <div
+          class="flex justify-between items-left text-lg font-bold border-t border-b border-gray-300 py-3"
+        >
+          <div class="text-black">Total:450.50</div>
+        </div>
+      </div>
+
+      <div class="separator-line"></div>
+
+      <!-- معلومات التواصل والخدمة -->
+      <div class="grid grid-cols-2 gap-6 mb-8 text-right text-sm">
+        <div>
+          <div class="text-xs font-bold text-gray-800 mb-3 uppercase">
+            أرقام التواصل
+          </div>
+          <div class="space-y-2 text-gray-700 text-xs">
+            <div>☎ +20 123 456 7890</div>
+            <div>☎ +20 987 654 3210</div>
+          </div>
+        </div>
+        <div>
+          <div class="text-xs font-bold text-gray-800 mb-3 uppercase">
+            الخدمات
+          </div>
+          <div class="space-y-2 text-gray-700 text-xs">
+            <div>🌐 موقعنا على الويب</div>
+            <div class="font-bold text-xl">توصيل متاح</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="separator-solid"></div>
+
+      <!-- رسالة الشكر والتقدير -->
+      <div class="text-center mt-6">
+        <div class="text-sm font-semibold text-gray-800 mb-4">
+          شكراً لزيارتك 🙏
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

@@ -45,9 +45,10 @@ type InvTab = "takeaway" | "dinein";
 type Range = "today" | "week" | "all";
 
 const printInvoice = (invoice: Invoice) => {
-  const printWindow = window.open("", "_blank", "width=400,height=600");
+  const printWindow = window.open("", "_blank", "width=650,height=850");
   if (!printWindow) return;
 
+  // 1. الحسابات والتعامل الذكي مع القيم الرقمية من الداتابيز أو الفرونت إند
   const dPrice =
     Number(invoice.deliveryPrice) ||
     Number((invoice as any).delivery_price) ||
@@ -64,6 +65,7 @@ const printInvoice = (invoice: Invoice) => {
       Number(invoice.discountPct || (invoice as any).discount_pct || 0)) /
       100 ||
     0;
+
   // حساب الضريبة لو مش موجودة
   const finalTaxVal =
     taxVal ||
@@ -71,134 +73,319 @@ const printInvoice = (invoice: Invoice) => {
       Number(invoice.taxPct || (invoice as any).tax_pct || 0)) /
       100 ||
     0;
+
   // حساب الإجمالي النهائي
   const computedTotal =
     Number(invoice.total) ||
     Number(invoice.subtotal || 0) - discVal + finalTaxVal + dPrice;
 
-  // تأمين فك الأري عشان لو جاية كنص من الداتابيز
+  // تأمين فك المصفوفة (Items) لو جاية كـ String من قاعدة البيانات
   const itemsArray =
     typeof invoice.items === "string"
       ? JSON.parse(invoice.items)
       : invoice.items || [];
-  // 🌟 إضافة قراءة قيمة المنصة
+
+  // جلب قيمة عمولة المنصة
   const commVal =
     Number(invoice.commissionValue) ||
     Number((invoice as any).commission_value) ||
     0;
 
+  // تحضير اسم ونوع الطلب باللغة العربية
+  const orderTypeArabic =
+    invoice.type === "delivery"
+      ? "توصيل (Delivery)"
+      : invoice.type === "takeaway"
+        ? "تيك أواي (Takeaway)"
+        : "صالة (Dine-In)";
+
+  // تنسيق التاريخ والوقت بشكل مريح للعين
+  const formattedDate = invoice.createdAt
+    ? new Date(invoice.createdAt).toLocaleDateString("ar-EG", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      })
+    : new Date().toLocaleDateString("ar-EG");
+
+  const formattedTime = invoice.createdAt
+    ? new Date(invoice.createdAt).toLocaleTimeString("ar-EG", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      })
+    : new Date().toLocaleTimeString("ar-EG", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+
+  const cashierName =
+    (invoice as any).cashierName ||
+    (invoice as any).cashier_name ||
+    "...........";
+  const tableName =
+    (invoice as any).table_name || invoice.tableCode || "...........";
+
+  // 2. دمج هيكل الـ HTML الأنيق بالتصميم الـ Static وحقن البيانات ديناميكياً
   const html = `
-    <html>
+    <!doctype html>
+    <html lang="ar" dir="rtl">
       <head>
-        <title>طباعة الفاتورة</title>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>فاتورة - مول زايد</title>
+        <script src="https://cdn.tailwindcss.com"></script>
         <style>
-          body { font-family: Arial, sans-serif; direction: rtl; text-align: center; padding: 20px; font-size: 14px; }
-          .header { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
-          .type-title { font-size: 22px; font-weight: bold; margin: 10px 0; border: 2px dashed #000; padding: 5px; text-transform: uppercase; }
-          .meta { margin-bottom: 10px; font-size: 12px; border-bottom: 1px dashed #000; padding-bottom: 5px; }
-          table { width: 100%; border-collapse: collapse; margin-top: 10px; text-align: right; }
-          th { border-bottom: 1px solid #000; padding: 4px; font-size: 13px; }
-          td { padding: 4px; font-size: 13px; vertical-align: top; }
-          .totals { margin-top: 10px; border-top: 1px dashed #000; padding-top: 5px; text-align: right; }
-          .totals div { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 13px; }
-          .bold { font-weight: bold; font-size: 15px; }
+          @media print {
+            body {
+              background: white;
+              margin: 0;
+              padding: 0;
+            }
+            .receipt-container {
+              box-shadow: none;
+              max-width: 100%;
+              padding: 10px;
+            }
+              /* لمنع تكررا راس الجدول  */ 
+            thead {
+              display: table-row-group !important;
+            }
+          }
+          body {
+            background-color: #f5f5f5;
+            direction: rtl;
+            font-family: Arial, sans-serif;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .separator-line {
+            border-top: 1px dashed #333;
+            margin: 12px 0;
+          }
+          .separator-solid {
+            border-top: 2px solid #000;
+            margin: 16px 0;
+          }
         </style>
       </head>
-      <body>
-        <div class="header">Zayed Mall</div>
-        <div>النوع: ${invoice.type === "delivery" ? "توصيل" : invoice.type === "takeaway" ? "تيك أواي" : "صالة"}</div>
+      <body class="p-4">
+        <div class="receipt-container bg-white rounded-lg shadow-lg px-8 py-10 max-w-2xl mx-auto">
+          
+          <div class="mb-6 text-right">
+            <div class="flex items-center justify-between mb-4">
+              <div class="text-right">
+                <div class="text-5xl font-bold text-black mb-1">مول زايد</div>
+                <div class="text-sm text-gray-800">عنوان المطعم - مدينة طنطا</div>
+              </div>
+              <img
+                class="h-16 w-16 ml-4"
+                src="../.././public/favicon.ico"
+                alt="Logo"
+              />
+            </div>
+          </div>
 
-        <div class="meta">
-          <div>الوقت: ${new Date(invoice.createdAt).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", hour12: true })}</div>          
+          <div class="separator-solid"></div>
+
+          <div class="text-center mb-6">
+            <h2 class="text-2xl font-bold bg-gray-100 py-2 rounded-xl ">
+              ${orderTypeArabic}
+            </h2>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 mb-6 text-center text-sm">
+
+            <div>
+              <div class="text-gray-500 mb-0.5">التاريخ</div>
+              <div class="font-bold text-black text-xs">${formattedDate} </div>
+            </div>
+            <div>
+              <div class="text-gray-500 mb-0.5">التاريخ</div>
+              <div class="font-bold text-black text-xs">${formattedTime}</div>
+            </div>
+            <div>
+            <div>
+              <div class="text-gray-500 mb-0.5">اسم الطاولة / الطلب</div>
+              <div class="font-bold text-black border-b border-gray-300 pb-1">
+                ${tableName.length > 3 ? tableName.substring(0, 3) + "..." : tableName}
+              </div>
+            </div>
+            </div>
+            <div>
+              <div class="text-gray-500 mb-0.5">اسم الكاشير</div>
+              <div class="font-bold text-black border-b border-gray-300 pb-1">
+                ${cashierName}
+              </div>
+            </div>
+          </div>
+
           ${
             (invoice.type === "takeaway" || invoice.type === "delivery") &&
             invoice.orderCategory &&
             invoice.orderCategory !== "normal"
-              ? `<div>منصة التحويل: <strong>${
-                  invoice.orderCategory === "talabat"
-                    ? "طلبات (Talabat)"
-                    : invoice.orderCategory === "fast"
-                      ? "فاست (Fast)"
-                      : invoice.orderCategory
-                }</strong></div>`
+              ? `
+              <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-2.5 text-center text-xs font-bold mb-4">
+                منصة التوصيل: 
+                <span>
+                  ${
+                    invoice.orderCategory === "talabat"
+                      ? "طلبات (Talabat)"
+                      : invoice.orderCategory === "fast"
+                        ? "فاست (Fast)"
+                        : invoice.orderCategory
+                  }
+                </span>
+              </div>
+              `
               : ""
           }
-        </div>
 
-        <table>
-          <thead>
-            <tr>
-              <th>الصنف</th>
-              <th style="text-align:center;">الكمية</th>
-              <th style="text-align:left;">الإجمالي</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsArray
-              .map((line: any) => {
-                const exStr =
-                  line.extras && line.extras.length
-                    ? ` <span style="font-size:11px;color:#555;">(+${line.extras.map((e: any) => e.name || e.label).join(", ")})</span>`
-                    : "";
+          <div class="separator-line"></div>
 
-                const displayName =
-                  line.mealName || line.name || "صنف غير معروف";
-                const lineTotal =
-                  (Number(line.unitPrice || line.price) +
+          <div class="mb-6">
+          <table class="w-full table-fixed text-center text-sm mb-4">
+            <thead>
+              <tr class="border-b border-gray-300">
+                <th class="w-[22%] text-gray-800 font-bold py-3 text-xs text-center whitespace-nowrap">الإجمالي</th>
+                <th class="w-[20%] text-gray-800 font-bold py-3 text-xs text-center whitespace-nowrap">السعر</th>
+                <th class="w-[13%] text-gray-800 font-bold py-3 text-xs text-center whitespace-nowrap">الكمية</th>
+                <th class="w-[45%] text-gray-800 font-bold py-3 text-xs text-center whitespace-nowrap">الصنف</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsArray
+                .map((line: any) => {
+                  // تجميع وعرض الإضافات (Extras) إن وجدت
+                  const exStr =
+                    line.extras && line.extras.length
+                      ? ` <span class="text-xs text-gray-500 block mt-0.5 font-normal break-words whitespace-normal leading-relaxed">(+ ${line.extras.map((e: any) => e.name || e.label).join(", ")})</span>`
+                      : "";
+
+                  const displayName =
+                    line.mealName || line.name || "صنف غير معروف";
+
+                  // حساب السعر الفردي شامل الإضافات
+                  const singlePrice =
+                    Number(line.unitPrice || line.price || 0) +
                     (line.extras
                       ? line.extras.reduce(
-                          (s: number, e: any) => s + Number(e.price),
+                          (s: number, e: any) => s + Number(e.price || 0),
                           0,
                         )
-                      : 0)) *
-                  Number(line.qty);
+                      : 0);
 
-                return `
-                <tr>
-                  <td>${displayName}${exStr}</td>
-                  <td style="text-align:center;">${line.qty}</td>
-                  <td style="text-align:left;">${lineTotal.toFixed(2)} ج</td>
-                </tr>
-                `;
-              })
-              .join("")}
-          </tbody>
-        </table>
+                  const lineTotal = singlePrice * Number(line.qty || 1);
 
-       <div class="totals">
-          <div><span>المجموع الأصلي:</span> <span>${Number(invoice.subtotal).toFixed(2)} ج</span></div>
-          ${finalDiscVal > 0 ? `<div><span>الخصم (${invoice.discountPct || 0}%):</span> <span>${finalDiscVal.toFixed(2)} ج</span></div>` : ""}
-          ${finalTaxVal > 0 ? `<div><span>الضريبة (${invoice.taxPct || 0}%):</span> <span>${finalTaxVal.toFixed(2)} ج</span></div>` : ""}          
-          
-          ${
-            commVal > 0
-              ? `
-            <div style="color: #d97706; font-weight: bold;">
-              <span>منصة (${invoice.orderCategory === "talabat" ? "طلبات" : invoice.orderCategory === "fast" ? "فاست" : "توصيل"}):</span> 
-              <span>+${commVal.toFixed(2)} ج</span>
-            </div>
-          `
-              : ""
-          }
-
-          <div><span>التوصيل:</span> <span class="bold">${dPrice.toFixed(2)} ج</span></div>
-          
-          <div class="bold" style="border-top:1px solid #000; padding-top:4px; margin-top:4px;">
-            <span>الإجمالي النهائي:</span> <span>${computedTotal.toFixed(2)} ج</span>
+                  return `
+                  <tr class="border-b border-gray-200">
+                    <td class="py-3 text-gray-700 text-center font-medium whitespace-nowrap">${lineTotal.toFixed(0)}</td>
+                    <td class="py-3 text-gray-700 text-center whitespace-nowrap">${singlePrice.toFixed(0)}</td>
+                    <td class="py-3 text-gray-700 text-center font-bold whitespace-nowrap">${line.qty}</td>
+                    
+                    <td class="py-3 text-gray-800 font-bold text-center break-words whitespace-normal pr-1 leading-tight">
+                      ${displayName}
+                      ${exStr}
+                    </td>
+                  </tr>
+                  `;
+                })
+                .join("")}
+            </tbody>
+          </table>
           </div>
-        </div>
 
-        <div style="margin-top:20px; font-size:11px; border-top:1px solid #000; padding-top:5px;">
-          شكراً لزيارتكم!
-        </div>
+          <div class="separator-solid"></div>
+
+          <div class="mb-6 space-y-2.5 text-sm">
+            <div class="flex justify-between items-center">
+              <span class="text-gray-800 font-bold">المجموع الأصلي:</span>
+              <span class="text-gray-700 font-semibold">${Number(invoice.subtotal || 0).toFixed(2)}</span>
+            </div>
+            
+            ${
+              finalDiscVal > 0
+                ? `
+                <div class="flex justify-between items-center text-red-600 font-bold">
+                  <span>الخصم (${invoice.discountPct || 0}%):</span>
+                  <span>-${finalDiscVal.toFixed(2)}</span>
+                </div>
+                `
+                : ""
+            }
+            
+            ${
+              finalTaxVal > 0
+                ? `
+                <div class="flex justify-between items-center text-gray-700">
+                  <span>الضريبة (${invoice.taxPct || 0}%):</span>
+                  <span>${finalTaxVal.toFixed(2)}</span>
+                </div>
+                `
+                : ""
+            }
+
+            ${
+              commVal > 0
+                ? `
+                <div class="flex justify-between items-center text-amber-700 font-bold">
+                  <span>منصة (${invoice.orderCategory === "talabat" ? "طلبات" : "فاست"}):</span>
+                  <span>+${commVal.toFixed(2)}</span>
+                </div>
+                `
+                : ""
+            }
+
+            ${
+              dPrice > 0
+                ? `
+                <div class="flex justify-between items-center text-gray-700 font-semibold">
+                  <span>خدمة التوصيل:</span>
+                  <span>+${dPrice.toFixed(2)}</span>
+                </div>
+                `
+                : ""
+            }
+
+            <div class="flex justify-between items-center text-xl font-black border-t border-b border-gray-300 py-3.5 mt-2">
+              <span class="text-black">الإجمالي الكلي:</span>
+              <span class="text-black text-2xl">${computedTotal.toFixed(2)}</span>
+            </div>
+          </div>
+
+
+          <div class="grid grid-cols-1 gap-6 mb-6 text-right text-xs">
+            <div>
+              <div class="font-bold text-gray-800 mb-2 uppercase">أرقام التواصل</div>
+              <div class="space-y-1 text-gray-600">
+                <div>☎ +20 123 456 7890</div>
+              </div>
+            </div>
+            
+          </div>
+          
+          <div class="text-center mt-4">
+            <div class="text-sm font-black text-gray-800 mb-2">
+              شكراً لاختيارك.. نرجو أن نكون قد نلنا اعجابكم 🙏
+            </div>
+          </div>
+
+          </div>
 
         <script>
-          window.onload = function() { window.print(); window.close(); }
+          window.onload = function() {
+            setTimeout(() => {
+              window.print();
+              // نغلق النافذة المنبثقة تلقائياً بعد انتهاء أمر الطباعة أو إلغائه
+              window.close();
+            }, 300);
+          }
         </script>
       </body>
     </html>
   `;
 
+  // كتابة محتوى الـ HTML المشكّل ديناميكياً وعرضه
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
@@ -536,7 +723,7 @@ function InvoicesTab() {
                   {/* 🌟 خلية الكابتن أو التوصيل حسب حالة الصالة */}
                   {sub === "dinein" ? (
                     <td className="p-3 font-bold text-blue-600">
-                      {inv.captainName || "—"}
+                      {inv.captainName || inv.captain_name || "—"}
                     </td>
                   ) : (
                     <td className="p-3 font-medium text-amber-600">

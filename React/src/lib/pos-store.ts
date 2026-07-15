@@ -114,6 +114,7 @@ export interface ActiveOrder {
 }
 
 export interface Invoice {
+  captain_name: string | null | undefined;
   id: string;
   type: "dinein" | "takeaway" | "delivery";
   deliveryPrice?: number;

@@ -109,7 +109,9 @@ function SecCashierLogin({
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch("http://192.168.1.67:5000/api/employees");
+        const response = await fetch(
+          "http://192.168.100.195:5000/api/employees",
+        );
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -257,7 +259,9 @@ function ShiftLogin() {
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch("http://192.168.1.67:5000/api/employees");
+        const response = await fetch(
+          "http://192.168.100.195:5000/api/employees",
+        );
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -580,7 +584,7 @@ function PosScreen() {
 
     try {
       const res = await fetch(
-        "http://192.168.1.67:5000/api/pos/verify-captain",
+        "http://192.168.100.195:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1593,7 +1597,7 @@ function OrderEntryDialog({
       );
       if (printerItems.length > 0) {
         try {
-          await fetch("http://192.168.1.67:5000/api/print-kitchen", {
+          await fetch("http://192.168.100.195:5000/api/print-kitchen", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1746,7 +1750,7 @@ function OrderEntryDialog({
             totalCost: totalCost,
             createdAt: Date.now(),
           };
-          fetch("http://192.168.1.67:5000/api/sales", {
+          fetch("http://192.168.100.195:5000/api/sales", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(newSale),
@@ -2832,7 +2836,7 @@ function CheckoutDialog({
             createdAt: Date.now(),
           };
 
-          fetch("http://192.168.1.67:5000/api/sales", {
+          fetch("http://192.168.100.195:5000/api/sales", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(newSale),
@@ -3235,7 +3239,7 @@ function TransferCaptainDialog({
     if (isMicros) return;
     async function fetchEmps() {
       try {
-        const res = await fetch("http://192.168.1.67:5000/api/employees");
+        const res = await fetch("http://192.168.100.195:5000/api/employees");
         if (res.ok) setServerEmployees(await res.json());
       } catch (e) {
         console.error(e);
@@ -3268,7 +3272,7 @@ function TransferCaptainDialog({
 
     try {
       const res = await fetch(
-        "http://192.168.1.67:5000/api/pos/verify-captain",
+        "http://192.168.100.195:5000/api/pos/verify-captain",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

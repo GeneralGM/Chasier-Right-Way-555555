@@ -103,7 +103,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const syncDeviceTypeWithServer = async () => {
       try {
-        const res = await fetch("http://192.168.1.67:5000/api/device-check");
+        const res = await fetch("http://192.168.100.195:5000/api/device-check");
         const data = await res.json();
         const fetchedType = data.deviceType; // "main" أو "micros" أو "sec_cashier"
 
@@ -131,7 +131,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         // 🌟 🚀 الإضافة السحرية هنا: مزامنة الطابعات بالخلفية 🚀 🌟
         try {
           const printersRes = await fetch(
-            "http://192.168.1.67:5000/api/printers",
+            "http://192.168.100.195:5000/api/printers",
           );
           if (printersRes.ok) {
             const dbPrinters = await printersRes.json();

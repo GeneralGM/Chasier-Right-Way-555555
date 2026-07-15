@@ -59,7 +59,7 @@ export function PrintersSettingsTab() {
     }
 
     // جلب أحدث نسخة من الداتابيز في الخلفية لضمان التطابق
-    fetch("http://192.168.1.67:5000/api/printers")
+    fetch("http://192.168.100.195:5000/api/printers")
       .then((res) => (res.ok ? res.json() : null))
       .then((dbData) => {
         if (dbData && Array.isArray(dbData)) {
@@ -79,7 +79,7 @@ export function PrintersSettingsTab() {
 
       // إرسال المصفوفة للباك إند
       const response = await fetch(
-        "http://192.168.1.67:5000/api/printers/bulk",
+        "http://192.168.100.195:5000/api/printers/bulk",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

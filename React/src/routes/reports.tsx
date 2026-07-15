@@ -80,18 +80,24 @@ function ReportsPage() {
 
       // تجميع مبيعات الأقسام من الأصناف
       for (const line of inv.items) {
+        const extras =
+          line.extras?.reduce((s, e) => s + Number(e.price || 0), 0) || 0;
+        const v =
+          (Number(line.unitPrice || line.price || 0) + extras) *
+          Number(line.qty || 1);
+
+        let deptName = line.department || "مطبخ"; // افتراضي حتى لو الصنف اتمسح من المنيو
         const meal = db.meals.find((m) => m.id === line.mealId);
-        if (!meal) continue;
+        if (meal) {
+          const isShisha =
+            meal.department === "شيشه" ||
+            (meal.category || "").trim().replace("ة", "ه") === "شيشه";
+          if (isShisha) deptName = "شيشة";
+          else if (meal.department) deptName = meal.department;
+        }
 
-        const extras = line.extras.reduce((s, e) => s + e.price, 0);
-        const v = (line.unitPrice + extras) * line.qty;
-
-        const isShisha =
-          meal.department === "شيشه" ||
-          (meal.category || "").trim().replace("ة", "ه") === "شيشه";
-
-        if (isShisha) shisha += v;
-        else if (meal.department === "بار") bar += v;
+        if (deptName.includes("شيش")) shisha += v;
+        else if (deptName.includes("بار")) bar += v;
         else kitchen += v;
       }
     }
@@ -114,145 +120,145 @@ function ReportsPage() {
     };
   }, [currentShiftInvoices, db.meals]);
   // 🌟 دالة طباعة تقرير الوردية بدون تقفيل (X-Report)
-  const printCurrentReport = () => {
-    if (!pos.shift) {
-      toast.error("لا يوجد وردية مفتوحة للطباعة");
-      return;
-    }
+  // const printCurrentReport = () => {
+  //   if (!pos.shift) {
+  //     toast.error("لا يوجد وردية مفتوحة للطباعة");
+  //     return;
+  //   }
 
-    const printWindow = window.open("", "_blank", "width=600,height=800");
-    if (!printWindow) {
-      toast.error("يرجى السماح بالنوافذ المنبثقة (Pop-ups) للطباعة");
-      return;
-    }
+  //   const printWindow = window.open("", "_blank", "width=600,height=800");
+  //   if (!printWindow) {
+  //     toast.error("يرجى السماح بالنوافذ المنبثقة (Pop-ups) للطباعة");
+  //     return;
+  //   }
 
-    // 💡 تجهيز المتغيرات للطباعة من الـ stats
-    const shiftOpenTime = new Date(pos.shift.openedAt).toLocaleString("ar-EG");
-    const shiftCloseTime = new Date().toLocaleString("ar-EG"); // الوقت الحالي لأن الشيفت لسه مفتوح
-    const cashierName = pos.shift.cashierName;
+  //   // 💡 تجهيز المتغيرات للطباعة من الـ stats
+  //   const shiftOpenTime = new Date(pos.shift.openedAt).toLocaleString("ar-EG");
+  //   const shiftCloseTime = new Date().toLocaleString("ar-EG"); // الوقت الحالي لأن الشيفت لسه مفتوح
+  //   const cashierName = pos.shift.cashierName;
 
-    // حسابات الأقسام
-    const totalDineIn = stats.revenues - stats.takeaway - stats.deliveryTotal; // الصالة بس
-    const totalBar = stats.bar;
-    const totalShisha = stats.shisha;
-    const totalTakeaway = stats.takeaway;
-    const totalDelivery = stats.deliveryTotal;
+  //   // حسابات الأقسام
+  //   const totalDineIn = stats.revenues - stats.takeaway - stats.deliveryTotal; // الصالة بس
+  //   const totalBar = stats.bar;
+  //   const totalShisha = stats.shisha;
+  //   const totalTakeaway = stats.takeaway;
+  //   const totalDelivery = stats.deliveryTotal;
 
-    const totalHospitality = 0; // لو عندك ضيافة مستقبلا
-    const totalTax = stats.tax;
-    const totalDiscount = stats.discount;
-    const netSales = stats.revenues;
-    const totalDeliveryFee = stats.deliveryFees; // رسوم التوصيل والخدمة
+  //   const totalHospitality = 0; // لو عندك ضيافة مستقبلا
+  //   const totalTax = stats.tax;
+  //   const totalDiscount = stats.discount;
+  //   const netSales = stats.revenues;
+  //   const totalDeliveryFee = stats.deliveryFees; // رسوم التوصيل والخدمة
 
-    // طرق الدفع (مؤقتاً بنعتبر كله كاش لحد ما تفصلهم في السيستم)
-    const cashTotal = stats.total;
-    const visaTotal = 0;
-    const expectedDrawer = stats.total;
+  //   // طرق الدفع (مؤقتاً بنعتبر كله كاش لحد ما تفصلهم في السيستم)
+  //   const cashTotal = stats.total;
+  //   const visaTotal = 0;
+  //   const expectedDrawer = stats.total;
 
-    const htmlContent = `
-      <html dir="rtl">
-        <head>
-          <title>تقرير الوردية</title>
-          <style>
-            @page { margin: 0; size: auto; }
-            body {
-              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-              width: 100%;
-              max-width: 80mm;
-              margin: 0 auto;
-              padding: 10px 5px;
-              color: #000;
-              background: #fff;
-              font-size: 13px;
-              line-height: 1.5;
-              box-sizing: border-box;
-            }
-            h2 { text-align: center; margin: 0 0 10px 0; font-size: 18px; font-weight: bold; text-decoration: underline; }
-            .header-box {
-              border: 1.5px solid #000;
-              padding: 6px;
-              margin-bottom: 12px;
-              font-size: 12px;
-              font-weight: bold;
-            }
-            .header-row {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 4px;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 12px;
-              font-size: 13px;
-            }
-            th, td {
-              border: 1.5px solid #000;
-              padding: 5px;
-            }
-            td:first-child { width: 65%; font-weight: bold; }
-            td:last-child { width: 35%; text-align: center; font-family: monospace; font-size: 14px;}
-            .table-header {
-              text-align: center !important;
-              background-color: #f0f0f0 !important;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-              font-weight: bold;
-              font-size: 14px;
-            }
-            .bold { font-weight: bold; }
-          </style>
-        </head>
-        <body onload="setTimeout(() => { window.print(); window.close(); }, 500);">
+  //   const htmlContent = `
+  //     <html dir="rtl">
+  //       <head>
+  //         <title>تقرير الوردية</title>
+  //         <style>
+  //           @page { margin: 0; size: auto; }
+  //           body {
+  //             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  //             width: 100%;
+  //             max-width: 80mm;
+  //             margin: 0 auto;
+  //             padding: 10px 5px;
+  //             color: #000;
+  //             background: #fff;
+  //             font-size: 13px;
+  //             line-height: 1.5;
+  //             box-sizing: border-box;
+  //           }
+  //           h2 { text-align: center; margin: 0 0 10px 0; font-size: 18px; font-weight: bold; text-decoration: underline; }
+  //           .header-box {
+  //             border: 1.5px solid #000;
+  //             padding: 6px;
+  //             margin-bottom: 12px;
+  //             font-size: 12px;
+  //             font-weight: bold;
+  //           }
+  //           .header-row {
+  //             display: flex;
+  //             justify-content: space-between;
+  //             margin-bottom: 4px;
+  //           }
+  //           table {
+  //             width: 100%;
+  //             border-collapse: collapse;
+  //             margin-bottom: 12px;
+  //             font-size: 13px;
+  //           }
+  //           th, td {
+  //             border: 1.5px solid #000;
+  //             padding: 5px;
+  //           }
+  //           td:first-child { width: 65%; font-weight: bold; }
+  //           td:last-child { width: 35%; text-align: center; font-family: monospace; font-size: 14px;}
+  //           .table-header {
+  //             text-align: center !important;
+  //             background-color: #f0f0f0 !important;
+  //             -webkit-print-color-adjust: exact;
+  //             print-color-adjust: exact;
+  //             font-weight: bold;
+  //             font-size: 14px;
+  //           }
+  //           .bold { font-weight: bold; }
+  //         </style>
+  //       </head>
+  //       <body onload="setTimeout(() => { window.print(); window.close(); }, 500);">
           
-          <h2>تقرير وردية (مؤقت)</h2>
+  //         <h2>تقرير وردية (مؤقت)</h2>
           
-          <div class="header-box">
-            <div class="header-row">
-              <span>من:</span>
-              <span dir="ltr">${shiftOpenTime}</span>
-            </div>
-            <div class="header-row">
-              <span>إلى:</span>
-              <span dir="ltr">${shiftCloseTime}</span>
-            </div>
-            <div class="header-row">
-              <span>الكاشير:</span>
-              <span>${cashierName || "غير معروف"}</span>
-            </div> 
-          </div>
+  //         <div class="header-box">
+  //           <div class="header-row">
+  //             <span>من:</span>
+  //             <span dir="ltr">${shiftOpenTime}</span>
+  //           </div>
+  //           <div class="header-row">
+  //             <span>إلى:</span>
+  //             <span dir="ltr">${shiftCloseTime}</span>
+  //           </div>
+  //           <div class="header-row">
+  //             <span>الكاشير:</span>
+  //             <span>${cashierName || "غير معروف"}</span>
+  //           </div> 
+  //         </div>
             
-          <table>
-            <tr><td colspan="2" class="table-header">تفاصيل المبيعات</td></tr>
-            <tr><td>صالة</td><td class="bold">${totalDineIn.toFixed(2)}</td></tr>
-            <tr><td>بار</td><td class="bold">${totalBar.toFixed(2)}</td></tr>
-            <tr><td>شيشة</td><td class="bold">${totalShisha.toFixed(2)}</td></tr>
-            <tr><td>ضيافة</td><td class="bold">${totalHospitality.toFixed(2)}</td></tr>
-            <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
-            <tr><td>تيك اواي</td><td class="bold">${totalTakeaway.toFixed(2)}</td></tr>
-            <tr><td>دليفري</td><td class="bold">${totalDelivery.toFixed(2)}</td></tr>
-            <tr><td>إجمالي الخصم</td><td class="bold">${totalDiscount.toFixed(2)}</td></tr>
-            <tr><td>إجمالي الإيرادات</td><td class="bold">${netSales.toFixed(2)}</td></tr>
-            <tr><td>إجمالي الخدمة/التوصيل</td><td class="bold">${totalDeliveryFee.toFixed(2)}</td></tr>
-          </table>
+  //         <table>
+  //           <tr><td colspan="2" class="table-header">تفاصيل المبيعات</td></tr>
+  //           <tr><td>صالة</td><td class="bold">${totalDineIn.toFixed(2)}</td></tr>
+  //           <tr><td>بار</td><td class="bold">${totalBar.toFixed(2)}</td></tr>
+  //           <tr><td>شيشة</td><td class="bold">${totalShisha.toFixed(2)}</td></tr>
+  //           <tr><td>ضيافة</td><td class="bold">${totalHospitality.toFixed(2)}</td></tr>
+  //           <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
+  //           <tr><td>تيك اواي</td><td class="bold">${totalTakeaway.toFixed(2)}</td></tr>
+  //           <tr><td>دليفري</td><td class="bold">${totalDelivery.toFixed(2)}</td></tr>
+  //           <tr><td>إجمالي الخصم</td><td class="bold">${totalDiscount.toFixed(2)}</td></tr>
+  //           <tr><td>إجمالي الإيرادات</td><td class="bold">${netSales.toFixed(2)}</td></tr>
+  //           <tr><td>إجمالي الخدمة/التوصيل</td><td class="bold">${totalDeliveryFee.toFixed(2)}</td></tr>
+  //         </table>
 
-          <table>
-            <tr><td colspan="2" class="table-header">طرق الدفع</td></tr>
-            <tr><td>نقدي</td><td class="bold">${cashTotal.toFixed(2)}</td></tr>
-            <tr><td>فيزا</td><td class="bold">${visaTotal.toFixed(2)}</td></tr>
-          </table>
+  //         <table>
+  //           <tr><td colspan="2" class="table-header">طرق الدفع</td></tr>
+  //           <tr><td>نقدي</td><td class="bold">${cashTotal.toFixed(2)}</td></tr>
+  //           <tr><td>فيزا</td><td class="bold">${visaTotal.toFixed(2)}</td></tr>
+  //         </table>
 
-          <table>
-            <tr><td>الرصيد النهائي بالدرج</td><td class="bold">${expectedDrawer.toFixed(2)}</td></tr>
-          </table>
+  //         <table>
+  //           <tr><td>الرصيد النهائي بالدرج</td><td class="bold">${expectedDrawer.toFixed(2)}</td></tr>
+  //         </table>
 
-        </body>
-      </html>
-    `;
+  //       </body>
+  //     </html>
+  //   `;
 
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-  };
+  //   printWindow.document.write(htmlContent);
+  //   printWindow.document.close();
+  // };
 
   async function closeShiftAndLogout() {
     // 1. طلب الفلوس الفعلية من الكاشير لعد الخزنة
@@ -285,12 +291,13 @@ function ReportsPage() {
         const report = responseData.auditReport;
         const variance = report.variance;
         let varianceStatus = "متطابق 🟢";
-        if (variance < 0) varianceStatus = `عجز: ${Math.abs(variance)} ج.م 🔴`;
-        else if (variance > 0) varianceStatus = `زيادة: ${variance} ج.م 🔵`;
+        if (variance < 0) varianceStatus = `عجز: ${Math.abs(variance).toFixed(2)} ج.م 🔴`;
+        else if (variance > 0) varianceStatus = `زيادة: ${variance.toFixed(2)} ج.م 🔵`;
 
         // تجهيز متغيرات الأقسام للطباعة
         const totalDineIn =
           stats.revenues - stats.takeaway - stats.deliveryTotal;
+        const kitchenSales = stats.kitchen;  
         const totalBar = stats.bar;
         const totalShisha = stats.shisha;
         const totalTakeaway = stats.takeaway;
@@ -386,16 +393,24 @@ function ReportsPage() {
                   
                 <table>
                   <tr><td colspan="2" class="table-header">تفاصيل المبيعات</td></tr>
-                  <tr><td>صالة</td><td class="bold">${totalDineIn.toFixed(2)}</td></tr>
+                  <tr><td>المطبخ</td><td class="bold">${kitchenSales.toFixed(2)}</td></tr>
                   <tr><td>بار</td><td class="bold">${totalBar.toFixed(2)}</td></tr>
                   <tr><td>شيشة</td><td class="bold">${totalShisha.toFixed(2)}</td></tr>
-                  <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
+                  </table>
+                  
+                  <table>
+                  <tr><td colspan="2" class="table-header">الطلبات</td></tr>
                   <tr><td>تيك اواي</td><td class="bold">${totalTakeaway.toFixed(2)}</td></tr>
                   <tr><td>دليفري</td><td class="bold">${totalDelivery.toFixed(2)}</td></tr>
+                  <tr><td>إجمالي الخدمة / التوصيل</td><td class="bold">${totalDeliveryFee.toFixed(2)}</td></tr>
+                  </table>
+                  
+                  <table>
+                  <tr><td colspan="2" class="table-header">المجموع النهائي</td></tr>
+                  <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
                   <tr><td>إجمالي الخصم</td><td class="bold">${totalDiscount.toFixed(2)}</td></tr>
                   <tr><td>إجمالي الإيرادات</td><td class="bold">${netSales.toFixed(2)}</td></tr>
-                  <tr><td>إجمالي الخدمة / التوصيل</td><td class="bold">${totalDeliveryFee.toFixed(2)}</td></tr>
-                </table>
+                  </table>
 
                 <table>
                   <tr><td colspan="2" class="table-header">طرق الدفع</td></tr>

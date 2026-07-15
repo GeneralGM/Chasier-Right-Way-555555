@@ -449,7 +449,7 @@ function InvoicesTab() {
         end.setHours(23, 59, 59, 999);
 
         const response = await fetch(
-          `http://192.168.1.67:5000/api/invoices?startDate=${start.toISOString()}&endDate=${end.toISOString()}`,
+          `http://192.168.100.195:5000/api/invoices?startDate=${start.toISOString()}&endDate=${end.toISOString()}`,
         );
         if (response.ok) {
           const data = await response.json();
@@ -467,8 +467,8 @@ function InvoicesTab() {
   // 🌟 دمج الفواتير وتطبيق فلاتر النص والنوع
   const rows: Invoice[] = useMemo(() => {
     const map = new Map<string, Invoice>();
-    serverInvoices.forEach((inv) => map.set(inv.id, inv));
     pos.invoices.forEach((inv) => map.set(inv.id, inv));
+    serverInvoices.forEach((inv) => map.set(inv.id, inv));
 
     const mergedInvoices = Array.from(map.values()).sort(
       (a, b) => b.createdAt - a.createdAt,
@@ -483,7 +483,7 @@ function InvoicesTab() {
 
       if (q) {
         const hay =
-          `${i.tableCode || ""} ${i.customerName || ""} ${i.customerAddress || ""}`.toLowerCase();
+          `${i.invoiceNumber || ""} ${i.tableCode || ""} ${i.customerName || ""} ${i.customerAddress || ""}`.toLowerCase();
         if (!hay.includes(q.toLowerCase())) return false;
       }
       return true;
@@ -831,10 +831,10 @@ function ShiftsTab() {
         // التعديل هنا: بنضمن إننا بنجيب الشيفتات الشاملة للمحل كله من السيرفر المركزي
         const [shiftsRes, invoicesRes] = await Promise.all([
           fetch(
-            `http://192.168.1.67:5000/api/shifts?startDate=${startIso}&endDate=${endIso}`,
+            `http://192.168.100.195:5000/api/shifts?startDate=${startIso}&endDate=${endIso}`,
           ),
           fetch(
-            `http://192.168.1.67:5000/api/invoices?startDate=${startIso}&endDate=${endIso}`,
+            `http://192.168.100.195:5000/api/invoices?startDate=${startIso}&endDate=${endIso}`,
           ),
         ]);
 
@@ -1101,27 +1101,31 @@ function ShiftsTab() {
           <div class="header-box">
             <div class="header-row"><span>من:</span><span dir="ltr">${shiftOpenTime}</span></div>
             <div class="header-row"><span>إلى:</span><span dir="ltr">${shiftCloseTime}</span></div>
-            <div class="header-row"><span>الكاشير:</span><span>${shift.cashierName || "غير معروف"}</span></div> 
+            <div class="header-row"><span>الكاشير:</span><span>${shift.cashierName || shift.cashier_name|| "غير معروف"}</span></div> 
           </div>
             
           <table>
-            <tr><td colspan="2" class="table-header">إيرادات الأقسام (أصناف)</td></tr>
+            <tr><td colspan="2" class="table-header">إيرادات الأقسام</td></tr>
             <tr><td>إجمالي المطبخ</td><td class="bold">${kitchenSales.toFixed(2)}</td></tr>
             <tr><td>إجمالي البار</td><td class="bold">${barSales.toFixed(2)}</td></tr>
             <tr><td>إجمالي الشيشة</td><td class="bold">${shishaSales.toFixed(2)}</td></tr>
-          </table>
-
-          <table>
-            <tr><td colspan="2" class="table-header">تفاصيل المبيعات (حالة الطلب)</td></tr>
-            <tr><td>مبيعات التيك أواي</td><td class="bold">${totalTakeaway.toFixed(2)}</td></tr>
-            <tr><td>مبيعات الدليفري</td><td class="bold">${totalDelivery.toFixed(2)}</td></tr>
+            </table>
+            
+            <table>
+            <tr><td colspan="2" class="table-header">الطلبات</td></tr>
+            <tr><td> التيك أواي</td><td class="bold">${totalTakeaway.toFixed(2)}</td></tr>
+            <tr><td> الدليفري</td><td class="bold">${totalDelivery.toFixed(2)}</td></tr>
             ${totalHospitality > 0 ? `<tr><td>ضيافة</td><td class="bold">${totalHospitality.toFixed(2)}</td></tr>` : ""}
             ${totalStaff > 0 ? `<tr><td>وجبات موظفين</td><td class="bold">${totalStaff.toFixed(2)}</td></tr>` : ""}
-            <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
-            <tr><td>إجمالي الخصم</td><td class="bold">${totalDiscount.toFixed(2)}</td></tr>
             <tr><td>رسوم التوصيل</td><td class="bold">${totalDeliveryFee.toFixed(2)}</td></tr>
-            <tr style="background:#eee;"><td>الإيرادات الصافية</td><td class="bold">${netSales.toFixed(2)}</td></tr>
-          </table>
+            </table>
+            
+            <table>
+            <tr><td colspan="2" class="table-header">المجموع النهائي</td></tr>
+              <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
+              <tr><td>إجمالي الخصم</td><td class="bold">${totalDiscount.toFixed(2)}</td></tr>
+              <tr style="background:#eee;"><td>الإيرادات الصافية</td><td class="bold">${netSales.toFixed(2)}</td></tr>
+            </table>
 
           <table>
             <tr><td colspan="2" class="table-header">طرق الدفع</td></tr>

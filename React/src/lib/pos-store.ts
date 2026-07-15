@@ -81,6 +81,7 @@ export const PAGE_SIZE = 20;
 export type TableState = "empty" | "active" | "printed";
 
 export interface OrderItem {
+  price: number;
   department: string;
   mealName: any;
   id: string;
@@ -225,10 +226,10 @@ export function usePosDB() {
         const currentTerminalId = isSecCashier ? "Sub-1" : "Main";
 
         const [ordersRes, shiftRes] = await Promise.all([
-          fetch("http://192.168.1.67:5000/api/pos/orders").catch(() => null),
+          fetch("http://192.168.100.195:5000/api/pos/orders").catch(() => null),
           // 👈 بنبعت رقم الجهاز الحالي (Sub-1 للتابلت) عشان السيرفر يرد بالشيفت بتاعه
           fetch(
-            `http://192.168.1.67:5000/api/pos/shift?terminalId=${currentTerminalId}`,
+            `http://192.168.100.195:5000/api/pos/shift?terminalId=${currentTerminalId}`,
           ).catch(() => null),
         ]);
 
@@ -321,11 +322,14 @@ export function usePosDB() {
       };
 
       try {
-        const res = await fetch("http://192.168.1.67:5000/api/pos/shift/open", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(newShiftData),
-        });
+        const res = await fetch(
+          "http://192.168.100.195:5000/api/pos/shift/open",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newShiftData),
+          },
+        );
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -413,7 +417,7 @@ export function usePosDB() {
       };
 
       try {
-        const res = await fetch("http://192.168.1.67:5000/api/shifts", {
+        const res = await fetch("http://192.168.100.195:5000/api/shifts", {
           method: "POST",
           mode: "cors",
           headers: { "Content-Type": "application/json" },
@@ -546,7 +550,7 @@ export function usePosDB() {
 
       // 🌟 إرسال للباك إند (pgAdmin)
       try {
-        await fetch("http://192.168.1.67:5000/api/customers", {
+        await fetch("http://192.168.100.195:5000/api/customers", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(newCustomer),
@@ -577,7 +581,7 @@ export function usePosDB() {
 
       // 🌟 تحديث في الباك إند (pgAdmin)
       try {
-        await fetch(`http://192.168.1.67:5000/api/customers/${id}`, {
+        await fetch(`http://192.168.100.195:5000/api/customers/${id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(updatedCustomer),
@@ -598,7 +602,7 @@ export function usePosDB() {
     // 2️⃣ إرسال التحديث للسيرفر (قاعدة البيانات الحقيقية)
     try {
       const response = await fetch(
-        "http://192.168.1.67:5000/api/pos/orders/upsert",
+        "http://192.168.100.195:5000/api/pos/orders/upsert",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -627,7 +631,7 @@ export function usePosDB() {
 
     // 2️⃣ إبلاغ السيرفر بمسح الطاولة عشان تتشال من عند الميكروس برضه
     try {
-      await fetch("http://192.168.1.67:5000/api/pos/orders/clear", {
+      await fetch("http://192.168.100.195:5000/api/pos/orders/clear", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableCode }),
@@ -673,12 +677,15 @@ export function usePosDB() {
 
       // 3️⃣ إرسال الفاتورة
       try {
-        const response = await fetch("http://192.168.1.67:5000/api/invoices", {
-          method: "POST",
-          mode: "cors",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fullInvoice),
-        });
+        const response = await fetch(
+          "http://192.168.100.195:5000/api/invoices",
+          {
+            method: "POST",
+            mode: "cors",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(fullInvoice),
+          },
+        );
         if (response.ok) {
           console.log("✅ تم حفظ الفاتورة بنجاح في قاعدة البيانات!");
         } else {
@@ -712,7 +719,7 @@ export function usePosDB() {
 
     // إرسال التحديث لـ PostgreSQL
     try {
-      await fetch(`http://192.168.1.67:5000/api/customers/${id}/increment`, {
+      await fetch(`http://192.168.100.195:5000/api/customers/${id}/increment`, {
         method: "PATCH",
       });
     } catch (err) {
@@ -726,7 +733,7 @@ export function usePosDB() {
 
     const fetchCustomers = async () => {
       try {
-        const res = await fetch("http://192.168.1.67:5000/api/customers");
+        const res = await fetch("http://192.168.100.195:5000/api/customers");
         if (!res.ok) return;
         const serverCustomers = await res.json();
 
@@ -760,7 +767,7 @@ export function usePosDB() {
 
         // ⚠️ تأكد إن الـ IP ده هو الصح اللي شغال عليه باقي السيستم
         const res = await fetch(
-          `http://192.168.1.67:5000/api/invoices?startDate=${start.toISOString()}&endDate=${end.toISOString()}`,
+          `http://192.168.100.195:5000/api/invoices?startDate=${start.toISOString()}&endDate=${end.toISOString()}`,
         );
         if (!res.ok) return;
 
@@ -860,7 +867,7 @@ export function usePosDB() {
 
       // 🌟 4. إرسال التحويل للسيرفر (قاعدة البيانات active_orders)
       try {
-        await fetch("http://192.168.1.67:5000/api/pos/orders/transfer", {
+        await fetch("http://192.168.100.195:5000/api/pos/orders/transfer", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -895,7 +902,7 @@ export function usePosDB() {
       // 2. المزامنة مع السيرفر (PostgreSQL)
       try {
         const res = await fetch(
-          "http://192.168.1.67:5000/api/pos/orders/transfer-captain",
+          "http://192.168.100.195:5000/api/pos/orders/transfer-captain",
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },

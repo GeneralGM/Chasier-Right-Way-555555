@@ -492,7 +492,7 @@ function EmployeeDialog({
   const baseRoles =
     activeTab === "staff"
       ? ["كاشير", "كابتن صالة"]
-      : ["محاسب", "مدير", "مبرمج"];
+      : ["محاسب", "مدير"];
 
   const availableRoles = baseRoles.filter(
     (r) => (ROLE_WEIGHTS[r] || 0) <= operatorWeight,

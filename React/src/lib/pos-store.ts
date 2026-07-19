@@ -94,6 +94,7 @@ export interface OrderItem {
   unitPrice: number;
   extras: { name?: any; label: string; price: number }[];
   modifiersSummary?: string;
+  notes?: string; // 🌟 إضافة حقل الملاحظات للصنف
 }
 
 export interface ActiveOrder {
@@ -325,14 +326,11 @@ export function usePosDB() {
       };
 
       try {
-        const res = await fetch(
-          `http://${API_URL}:5000/api/pos/shift/open`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(newShiftData),
-          },
-        );
+        const res = await fetch(`http://${API_URL}:5000/api/pos/shift/open`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newShiftData),
+        });
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -680,15 +678,12 @@ export function usePosDB() {
 
       // 3️⃣ إرسال الفاتورة
       try {
-        const response = await fetch(
-          `http://${API_URL}:5000/api/invoices`,
-          {
-            method: "POST",
-            mode: "cors",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(fullInvoice),
-          },
-        );
+        const response = await fetch(`http://${API_URL}:5000/api/invoices`, {
+          method: "POST",
+          mode: "cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fullInvoice),
+        });
         if (response.ok) {
           console.log("✅ تم حفظ الفاتورة بنجاح في قاعدة البيانات!");
         } else {

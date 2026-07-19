@@ -243,12 +243,11 @@ function formatInvoiceToFrontend(inv) {
   };
 }
 
-// 1️⃣ تعديل مسار حفظ الفاتورة (POST) لضمان تسجيل الضريبة والخصم صح
+// 1️⃣ تعديل مسار حفظ الفاتورة (POST) لضمان تسلسل الأرقام وحفظ الضريبة والخصم
 app.post("/api/invoices", async (req, res) => {
   const {
     id,
     type,
-    invoiceNumber,
     tableCode,
     zone,
     customerName,
@@ -272,11 +271,18 @@ app.post("/api/invoices", async (req, res) => {
   } = req.body;
 
   try {
-    // تأمين القيم الافتراضية لمنع أي undefined
     const finalOrderCategory =
       orderCategory || req.body.order_category || "normal";
     const finalCommissionValue =
       Number(commissionValue) || Number(req.body.commission_value) || 0;
+
+    // 🌟 السحر هنا: توليد رقم فاتورة متسلسل بناءً على أعلى رقم تم تسجيله اليوم
+    const seqQuery = await pool.query(
+      `SELECT COALESCE(MAX(invoice_number), 0) + 1 AS next_num 
+       FROM invoices 
+       WHERE DATE(created_at) = CURRENT_DATE`,
+    );
+    const generatedInvoiceNumber = Number(seqQuery.rows[0].next_num) || 1;
 
     const query = `
       INSERT INTO invoices (
@@ -289,9 +295,9 @@ app.post("/api/invoices", async (req, res) => {
     `;
 
     const result = await pool.query(query, [
-      id,
+      id || crypto.randomUUID(),
       type,
-      invoiceNumber,
+      generatedInvoiceNumber, // 👈 الرقم المتسلسل التلقائي
       tableCode,
       zone,
       customerName,
@@ -317,9 +323,7 @@ app.post("/api/invoices", async (req, res) => {
     res.status(201).json(formatInvoiceToFrontend(result.rows[0]));
   } catch (err) {
     console.error("❌ خطأ أثناء حفظ الفاتورة في السيرفر:", err.message);
-    res
-      .status(500)
-      .json({ error: "فشل حفظ الفاتورة في قاعدة البيانات: " + err.message });
+    res.status(500).json({ error: "فشل حفظ الفاتورة: " + err.message });
   }
 });
 
@@ -1439,6 +1443,11 @@ app.post("/api/print-kitchen", (req, res) => {
         item.diffQty > 0 ? ` ${item.diffQty} ` : `${item.diffQty}`;
       const statusLabel = item.diffQty < 0 ? " **(ملغي)**" : "";
       bounText += `${qtyPrefix.padEnd(13)}${item.name}${statusLabel}\n`;
+
+      // 🌟 لو فيه ملاحظة للصنف، نطبعها بخط واضح تحته مباشرة
+      if (item.notes && item.notes.trim() !== "") {
+        bounText += `   >> ملاحظة: (${item.notes.trim()})\n`;
+      }
     });
 
     bounText += "================================\n";

@@ -1281,7 +1281,6 @@ function TakeawayView({
     </div>
   );
 }
-
 /* ---------------- Order entry (فتح) ---------------- */
 function OrderEntryDialog({
   tableCode,
@@ -1325,6 +1324,12 @@ function OrderEntryDialog({
   const [isMicros, setIsMicros] = useState(
     () => localStorage.getItem("isMicrosDevice") === "true",
   );
+
+  function changeNotes(lineId: string, notes: string) {
+    setDraftItems(
+      draftItems.map((l) => (l.id === lineId ? { ...l, notes } : l)),
+    );
+  }
 
   useEffect(() => {
     setIsMicros(localStorage.getItem("isMicrosDevice") === "true");
@@ -1426,7 +1431,8 @@ function OrderEntryDialog({
         modifiersSummary: summary,
         mealName: undefined,
         department: meal.department || "مطبخ",
-        price: 0
+        price: 0,
+        notes: "", // 🌟 هنا
       };
       setDraftItems([...draftItems, line]);
     }
@@ -1496,6 +1502,7 @@ function OrderEntryDialog({
           name: fullName,
           diffQty: diff,
           department: dept,
+          notes: item.notes || "",
         });
       }
     });
@@ -1514,6 +1521,7 @@ function OrderEntryDialog({
           name: fullName,
           diffQty: -oldQty,
           department: dept,
+          notes: item.notes || "",
         });
       }
     });
@@ -1952,27 +1960,49 @@ function OrderEntryDialog({
                           </button>
                         )}
                       </div>
-                      <div className="flex items-center gap-1 mt-2">
-                        {!isMicros && (
-                          <button
-                            onClick={() => changeQty(l.id, l.qty - 1)}
-                            className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
-                          >
-                            -
-                          </button>
-                        )}
+
+                      {/* 🌟 مربع كتابة الملاحظات للصنف (مطبخ / بار / غيره) */}
+                      <div className="mt-1.5">
                         <input
-                          type="number"
-                          value={l.qty}
-                          className="w-10 h-7 text-center text-xs border rounded bg-background"
-                          readOnly
+                          type="text"
+                          placeholder="📝 إضافة ملاحظة (مثال: بدون بصل، سكر زيادة...)"
+                          value={l.notes || ""}
+                          onChange={(e) => changeNotes(l.id, e.target.value)}
+                          className="w-full text-[11px] px-2 py-1 bg-secondary/40 border border-border/60 rounded focus:bg-background focus:border-primary transition-colors outline-none text-foreground placeholder:text-muted-foreground/70 font-medium"
                         />
-                        <button
-                          onClick={() => changeQty(l.id, l.qty + 1)}
-                          className="w-7 h-7 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80"
-                        >
-                          +
-                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-1 mt-2">
+                        <span className="font-bold text-primary text-[11px]">
+                          {fmt2(
+                            (l.unitPrice +
+                              l.extras.reduce((s, e) => s + e.price, 0)) *
+                              l.qty,
+                          )}{" "}
+                          ج.م
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {!isMicros && (
+                            <button
+                              onClick={() => changeQty(l.id, l.qty - 1)}
+                              className="w-6 h-6 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80 font-bold"
+                            >
+                              -
+                            </button>
+                          )}
+                          <input
+                            type="number"
+                            value={l.qty}
+                            className="w-8 h-6 text-center text-xs border rounded bg-background font-bold"
+                            readOnly
+                          />
+                          <button
+                            onClick={() => changeQty(l.id, l.qty + 1)}
+                            className="w-6 h-6 flex items-center justify-center rounded bg-secondary hover:bg-secondary/80 font-bold"
+                          >
+                            +
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))

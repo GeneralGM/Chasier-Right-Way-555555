@@ -627,12 +627,16 @@ function InvoicesTab() {
                     {inv.invoiceNumber || "-"}
                   </td>
                   {/* 🌟 عرض الوقت فقط بدون ثواني بناءً على طلبك السابق */}
-                  <td className="p-3 font-mono">
-                    {new Date(inv.createdAt).toLocaleTimeString("ar-EG", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: true,
-                    })}
+                  <td className="p-3 font-mono" dir="ltr">
+                    {new Date(inv.createdAt)
+                      .toLocaleString("en-GB", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: true,
+                        day: "2-digit",
+                        month: "2-digit",
+                      })
+                      .replace(",", " ||")}
                   </td>
                   <td className="p-3 text-xs">
                     {inv.type === "delivery" ? (
@@ -1422,7 +1426,6 @@ function ShiftsTab() {
                 accent="emerald"
               />
 
-              
               <Card
                 icon={DollarSign}
                 label="الإيرادات الأساسية"

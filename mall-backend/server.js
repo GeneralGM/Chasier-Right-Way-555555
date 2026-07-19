@@ -207,13 +207,14 @@ app.delete("/api/employees/:id", async (req, res) => {
 // --- مسارات الفواتير (Invoices) ---
 
 // 🌟 تحديث الدالة المساعدة لضمان قراءة الضريبة والخصم بأي شكل وهي راجعة للفرونت إند
+// 🌟 تحديث الدالة المساعدة لضمان قراءة كل أنواع الفواتير والمناطق بشكل سليم
 function formatInvoiceToFrontend(inv) {
   if (!inv) return null;
 
   return {
     id: inv.id,
     invoiceNumber: Number(inv.invoice_number || inv.invoiceNumber || 0),
-    type: inv.type,
+    type: inv.type, // 👈 بياخد dinein, takeaway, delivery, staff, hospitality بدون أي فلترة
     tableCode: inv.table_code || inv.tableCode || "",
     zone: inv.zone || "",
     customerName: inv.customer_name || inv.customerName || "",
@@ -224,14 +225,13 @@ function formatInvoiceToFrontend(inv) {
     items:
       typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items || [],
 
-    // 🌟 تأمين قراءة قيم الحسابات والضرائب من الداتابيز (تلقط الـ snake_case والـ camelCase)
     subtotal: Number(inv.subtotal || 0),
     discountPct: Number(inv.discount_pct || inv.discountPct || 0),
     discountValue: Number(inv.discount_value || inv.discountValue || 0),
     taxPct: Number(inv.tax_pct || inv.taxPct || 0),
-    taxValue: Number(inv.tax_value || inv.taxValue || 0), // 👈 دي اللي كانت مخلية الفرونت يقراها 0
+    taxValue: Number(inv.tax_value || inv.taxValue || 0),
     deliveryPrice: Number(inv.delivery_price || inv.deliveryPrice || 0),
-    total: Number(inv.total || 0),
+    total: Number(inv.total || 0), // 👈 ده المجموع النهائي الصافي بعد كل الإضافات والخصومات
 
     createdAt: inv.created_at
       ? new Date(inv.created_at).getTime()
@@ -242,6 +242,33 @@ function formatInvoiceToFrontend(inv) {
     commissionValue: Number(inv.commission_value || inv.commissionValue || 0),
   };
 }
+
+// 🌟 مسار جلب الفواتير (GET) للأرشيف والتقارير
+app.get("/api/invoices", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    let query = "SELECT * FROM invoices";
+    let params = [];
+
+    if (startDate && endDate) {
+      query += ` WHERE created_at BETWEEN $1::timestamp AND $2::timestamp`;
+      params.push(startDate, endDate);
+    }
+
+    query += " ORDER BY created_at DESC";
+    const result = await pool.query(query, params);
+
+    const formattedInvoices = result.rows.map((row) =>
+      formatInvoiceToFrontend(row),
+    );
+    res.json(formattedInvoices);
+  } catch (err) {
+    console.error("❌ خطأ أثناء جلب الفواتير والأرشيف:", err.message);
+    res
+      .status(500)
+      .json({ error: "حدث خطأ أثناء جلب الفواتير", details: err.message });
+  }
+});
 
 // 1️⃣ تعديل مسار حفظ الفاتورة (POST) لضمان تسلسل الأرقام وحفظ الضريبة والخصم
 app.post("/api/invoices", async (req, res) => {
@@ -1015,6 +1042,7 @@ app.get("/api/audits", async (req, res) => {
 const MICROS_IPS = [
   "192.168.100.205", // تابلتothersPromptOpen 2
   "192.168.1.40", // جهاز كاشير فرعي 1
+  // "192.168.0.103"
 ];
 // 🖥️ قائمة بالـ IPs الثابتة لأجهزة الكاشير الفرعي 🌟 (الجديدة)
 const Sec_chasierIPs = [

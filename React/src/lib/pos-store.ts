@@ -121,7 +121,7 @@ export interface ActiveOrder {
 export interface Invoice {
   captain_name: string | null | undefined;
   id: string;
-  type: "dinein" | "takeaway" | "delivery";
+  type: "dinein" | "takeaway" | "delivery" | "staff" | "hospitality";
   deliveryPrice?: number;
   invoiceNumber: number;
   tableCode?: string;

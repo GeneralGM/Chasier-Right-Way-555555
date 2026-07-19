@@ -62,14 +62,24 @@ export const Route = createFileRoute("/orders")({
   component: OrdersGate,
 });
 
+// ✅ الكود الجديد المحمي من السيرفر والـ SSR
 function OrdersGate() {
   const { db: pos } = usePosDB();
-  const [isSecCashier] = useState(
-    () => localStorage.getItem("isSecCashierDevice") === "true",
-  );
-  const [secCashierName, setSecCashierName] = useState(() =>
-    localStorage.getItem("secCashierName"),
-  );
+
+  // حماية الـ localStorage عشان تشتغل في المتصفح بس
+  const [isSecCashier] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("isSecCashierDevice") === "true";
+    }
+    return false; // القيمة الافتراضية أثناء رندر السيرفر
+  });
+
+  const [secCashierName, setSecCashierName] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("secCashierName");
+    }
+    return null;
+  });
 
   // 1. لو الشيفت الرئيسي مقفول، نوقف الكل هنا
   if (!pos.shift) return <ShiftLogin />;
@@ -79,8 +89,10 @@ function OrdersGate() {
     return (
       <SecCashierLogin
         onLogin={(name, id) => {
-          localStorage.setItem("secCashierName", name);
-          localStorage.setItem("secCashierId", id);
+          if (typeof window !== "undefined") {
+            localStorage.setItem("secCashierName", name);
+            localStorage.setItem("secCashierId", id);
+          }
           setSecCashierName(name);
         }}
       />
@@ -625,13 +637,29 @@ function PosScreen() {
   }
 
   function actionPrint() {
-    if (!selectedTable || !pos.orders[selectedTable])
+    const order = selectedTable ? pos.orders[selectedTable] : null;
+    if (!selectedTable || !order)
       return toast.error("لا يوجد طلب على هذه الطاولة");
+
+    // التعديل: منع طباعة الطاولة الفاضية
+    if (!order.items || order.items.length === 0)
+      return toast.error("لا يمكن طباعة طاولة فارغة من الأصناف");
+
     setPrintOrder(selectedTable);
   }
+
   function actionCheckout() {
-    if (!selectedTable || !pos.orders[selectedTable])
+    const order = selectedTable ? pos.orders[selectedTable] : null;
+    if (!selectedTable || !order)
       return toast.error("لا يوجد طلب على هذه الطاولة");
+
+    // التعديل: لو الطاولة فاضية وعملها إنهاء، نمسحها فوراً
+    if (!order.items || order.items.length === 0) {
+      clearOrder(selectedTable);
+      setSelectedTable(null);
+      return toast.success("تم إلغاء الطاولة لأنها فارغة");
+    }
+
     setCheckoutConfirm(selectedTable);
   }
   // 🌟 1. تحديد بيانات الكاشير الفرعي ودالة تسجيل الخروج الذكية
@@ -674,7 +702,10 @@ function PosScreen() {
             order={pos.orders[openOrder]}
             meals={db.meals}
             items={db.items}
-            onClose={() => handleOpenOrder(null)}
+            onClose={() => {
+              // 🌟 التعديل: شلنا الـ clearOrder التلقائي عشان الطاولة تفضل محجوزة ومفتوحة حتى لو لسه فارغة
+              handleOpenOrder(null);
+            }}
           />
         )}
       </PosFrame>
@@ -848,17 +879,28 @@ function PosScreen() {
                 <Printer className="w-5 h-5" /> طباعة
               </Button>
               <Button
-                onClick={() => setTransferOpen(true)}
+                onClick={() => {
+                  const o = selectedTable ? pos.orders[selectedTable] : null;
+                  if (!selectedTable || !o)
+                    return toast.error("اختر طاولة نشطة أولاً");
+                  // التعديل: منع التحويل لطاولة فاضية
+                  if (!o.items || o.items.length === 0)
+                    return toast.error("لا يمكن تحويل طاولة فارغة");
+                  setTransferOpen(true);
+                }}
                 variant="secondary"
                 className="h-16 text-base gap-2"
               >
-                <ArrowLeftRight className="w-5 h-5" /> تحويل الطالة
+                <ArrowLeftRight className="w-5 h-5" /> تحويل الطاولة
               </Button>
               <Button
                 onClick={() => {
-                  if (!selectedTable || !pos.orders[selectedTable]) {
+                  const o = selectedTable ? pos.orders[selectedTable] : null;
+                  if (!selectedTable || !o)
                     return toast.error("اختر طاولة نشطة أولاً");
-                  }
+                  // التعديل: منع تحويل الكابتن لطاولة فاضية
+                  if (!o.items || o.items.length === 0)
+                    return toast.error("لا يمكن تحويل كابتن لطاولة فارغة");
                   setTransferCaptainOpen(true);
                 }}
                 variant="secondary"
@@ -941,7 +983,10 @@ function PosScreen() {
           order={pos.orders[openOrder]}
           meals={db.meals}
           items={db.items}
-          onClose={() => setOpenOrder(null)}
+          onClose={() => {
+            // 🌟 التعديل: منع مسح الطاولة عند الإغلاق لضمان بقاء الحماية والباسوورد للكابتن اللي فتحها
+            handleOpenOrder(null);
+          }}
         />
       )}
       {transferOpen && selectedTable && (
@@ -2087,12 +2132,22 @@ function OrderEntryDialog({
               <DialogFooter className="p-3 border-t border-border shrink-0">
                 <Button
                   onClick={() => handleSaveClick(tableCode)}
-                  disabled={draftItems.length === 0 || isSubmitting}
-                  className={`w-full text-sm h-10 ${order.zone === "takeaway" ? "bg-green-600 hover:bg-green-700 text-white" : ""}`}
+                  // 🌟 التعديل: خلينا الزرار متاح دايماً للصالة، وميتقفلش غير في التيك أواي بس لو السلة فاضية
+                  disabled={
+                    (order.zone === "takeaway" && draftItems.length === 0) ||
+                    isSubmitting
+                  }
+                  className={`w-full text-[15px] font-bold h-11 transition-all ${
+                    order.zone === "takeaway"
+                      ? "bg-green-600 hover:bg-green-700 text-white shadow-md shadow-green-600/20"
+                      : "bg-primary hover:bg-primary/90 text-primary-foreground shadow-md"
+                  }`}
                 >
                   {order.zone === "takeaway"
-                    ? "ضرب الأوردر وإنهاء الفاتورة"
-                    : "حفظ وإغلاق الطاولة"}
+                    ? "⚡ ضرب الأوردر وإنهاء الفاتورة"
+                    : draftItems.length === 0
+                      ? "🔒 تأكيد حجز الطاولة (بدون طلبات حالياً)"
+                      : "💾 حفظ الطلبات وإغلاق الطاولة"}
                 </Button>
               </DialogFooter>
             </div>

@@ -125,6 +125,11 @@ const printInvoice = (invoice: Invoice) => {
     (invoice as any).cashierName ||
     (invoice as any).cashier_name ||
     "...........";
+  const captainName =
+    (invoice as any).captainName ||
+    (invoice as any).captain_name ||
+    (invoice as any).captain ||
+    "—";
   const tableName =
     (invoice as any).table_name || invoice.tableCode || "...........";
 
@@ -221,6 +226,20 @@ const printInvoice = (invoice: Invoice) => {
               </div>
             </div>
           </div>
+          <!-- ✨ الجزء الجديد الخاص بالكابتن -->
+          ${
+            invoice.type === "dinein"
+              ? `
+              <div>
+                <div class="text-gray-500 mb-0.5">اسم الكابتن</div>
+                <div class="font-bold text-black border-b border-gray-300 pb-1">
+                  ${captainName}
+                </div>
+              </div>
+              `
+              : ""
+          }
+
 
           ${
             (invoice.type === "takeaway" || invoice.type === "delivery") &&
@@ -427,24 +446,26 @@ function SettingsPage() {
 }
 function InvoicesTab() {
   const { db: pos } = usePosDB();
-  const [sub, setSub] = useState<InvTab>("takeaway");
   const [q, setQ] = useState("");
 
-  // 🌟 فلاتر التاريخ الجديدة (الافتراضي: اليوم الحالي)
+  // 🌟 1. فلاتر التاريخ (الافتراضي: اليوم الحالي)
   const [fromDate, setFromDate] = useState(
     new Date().toISOString().slice(0, 10),
   );
   const [toDate, setToDate] = useState(new Date().toISOString().slice(0, 10));
 
+  // 🌟 2. الفلاتر المتقدمة المدمجة
+  const [tableFilter, setTableFilter] = useState<string>("all"); // نوع الطاولة (C, O, X, K, ص, ك, takeaway)
+  const [amountFilter, setAmountFilter] = useState<string>("all"); // المدي المالي للمجموع النهائي
+
   const [serverInvoices, setServerInvoices] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // 🔄 جلب الفواتير بناءً على التاريخ المختار
+  // 🔄 جلب الفواتير من السيرفر
   useEffect(() => {
     async function fetchInvoicesFromPostgres() {
       try {
         setIsLoading(true);
-        // تظبيط الساعات عشان يجيب اليوم من أوله لآخره
         const start = new Date(fromDate);
         start.setHours(0, 0, 0, 0);
         const end = new Date(toDate);
@@ -464,9 +485,9 @@ function InvoicesTab() {
       }
     }
     fetchInvoicesFromPostgres();
-  }, [fromDate, toDate]); // 👈 هتتحدث تلقائي لما تغير التاريخ
+  }, [fromDate, toDate]);
 
-  // 🌟 دمج الفواتير وتطبيق فلاتر النص والنوع
+  // 🌟 دمج الفواتير وتطبيق الفلاتر المتقدمة (الطاولة + المبلغ + البحث)
   const rows: Invoice[] = useMemo(() => {
     const map = new Map<string, Invoice>();
     pos.invoices.forEach((inv) => map.set(inv.id, inv));
@@ -476,21 +497,70 @@ function InvoicesTab() {
       (a, b) => b.createdAt - a.createdAt,
     );
 
-    return mergedInvoices.filter((i) => {
-      if (sub === "takeaway" && i.type !== "takeaway" && i.type !== "delivery")
-        return false;
-      if (sub === "dinein" && i.type !== "dinein") return false;
+    return mergedInvoices.filter((inv) => {
+      // 1️⃣ فلترة نوع الطاولة / المنطقة (C, O, X, K, ص, ك, تيك أواي)
+      if (tableFilter !== "all") {
+        const code = (inv.tableCode || "").trim().toUpperCase();
+        const type = inv.type || "";
 
-      // شلنا فلتر الوقت من هنا لأن السيرفر بقى يجيب المتفلتر جاهز!
+        if (tableFilter === "takeaway") {
+          if (
+            type !== "takeaway" &&
+            type !== "delivery" &&
+            !code.startsWith("TAK") &&
+            !code.startsWith("DEL") &&
+            !code.startsWith("T") &&
+            !code.startsWith("D")
+          )
+            return false;
+        } else if (tableFilter === "X") {
+          // 🌟 طاولات others (موظفين / ضيافة / حرف X)
+          if (
+            !code.startsWith("X") &&
+            type !== "staff" &&
+            type !== "hospitality" &&
+            inv.zone !== "others"
+          )
+            return false;
+        } else {
+          // لباقي الحروف (C, O, K, ص, ك)
+          if (!code.startsWith(tableFilter.toUpperCase())) return false;
+        }
+      }
 
+      // 2️⃣ فلترة المبلغ النهائي (شامل كل الإضافات والخصومات)
+      if (amountFilter !== "all") {
+        const total = Number(inv.total) || 0;
+        if (amountFilter === "lt200" && total >= 200) return false;
+        if (amountFilter === "200-500" && (total < 200 || total > 500))
+          return false;
+        if (amountFilter === "500-700" && (total < 500 || total > 700))
+          return false;
+        if (amountFilter === "700-1000" && (total < 700 || total > 1000))
+          return false;
+        if (amountFilter === "gt1000" && total <= 1000) return false;
+      }
+
+      // 3️⃣ البحث النصي السريع
       if (q) {
         const hay =
-          `${i.invoiceNumber || ""} ${i.tableCode || ""} ${i.customerName || ""} ${i.customerAddress || ""}`.toLowerCase();
+          `${inv.invoiceNumber || ""} ${inv.tableCode || ""} ${inv.customerName || ""} ${inv.customerAddress || ""}`.toLowerCase();
         if (!hay.includes(q.toLowerCase())) return false;
       }
+
       return true;
     });
-  }, [pos.invoices, serverInvoices, sub, q]);
+  }, [pos.invoices, serverInvoices, tableFilter, amountFilter, q]);
+
+  // 🌟 حسابات شريط العدادات الذكية المدمجة
+  const stats = useMemo(() => {
+    const totalCount = rows.length;
+    const totalMoney = rows.reduce(
+      (sum, inv) => sum + (Number(inv.total) || 0),
+      0,
+    );
+    return { count: totalCount, sum: totalMoney };
+  }, [rows]);
 
   function exportToExcel() {
     const data = rows.map((inv) => {
@@ -507,97 +577,156 @@ function InvoicesTab() {
           ? `${shift.cashierName} (${new Date(shift.openedAt).toLocaleDateString("ar-EG")})`
           : "—",
         التاريخ: new Date(inv.createdAt).toLocaleString("ar-EG"),
+        "المجموع النهائي": fmt2(inv.total),
+        "نوع الطلب":
+          inv.type === "staff"
+            ? "موظفين"
+            : inv.type === "hospitality"
+              ? "ضيافة"
+              : inv.type,
         "رقم الطاولة": inv.tableCode || "تيك أواي",
       };
     });
     const ws = XLSX.utils.json_to_sheet(data);
-    ws["!cols"] = [{ wch: 60 }, { wch: 30 }, { wch: 25 }, { wch: 15 }];
+    ws["!cols"] = [
+      { wch: 60 },
+      { wch: 30 },
+      { wch: 25 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 15 },
+    ];
     ws["!dir"] = "rtl";
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "الفواتير");
-    const fileName = `فواتير_${sub}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const fileName = `فواتير_أرشيف_${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(wb, fileName);
   }
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex bg-secondary rounded-lg p-1">
-          {(["takeaway", "dinein"] as InvTab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setSub(t)}
-              className={`px-3 h-8 rounded-md text-sm ${sub === t ? "bg-card shadow-sm" : "text-muted-foreground"}`}
-            >
-              {t === "takeaway" ? "تيك أواي / دليفري" : "زبون (صالة)"}
-            </button>
-          ))}
-        </div>
-        {/* 🌟 فلاتر التاريخ (من - إلى) للفواتير */}
-        <div className="flex items-center gap-2 bg-secondary rounded-lg p-1 px-2 border border-border">
-          <span className="text-xs font-bold text-muted-foreground">من:</span>
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-            className="h-7 text-xs rounded bg-background border-none px-1 text-primary font-bold cursor-pointer"
-          />
-          <span className="text-xs font-bold text-muted-foreground">إلى:</span>
-          <input
-            type="date"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-            className="h-7 text-xs rounded bg-background border-none px-1 text-primary font-bold cursor-pointer"
-          />
-        </div>
-        <div className="relative flex-1 min-w-48">
+      {/* 🌟 شريط التحكم الموحد: دمج البحث والفلاتر بشكل رايق جداً */}
+      <div className="bg-card p-2.5 rounded-xl border border-border shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5">
+        {/* مربع البحث النصي الأساسي */}
+        <div className="relative flex-1 min-w-[220px]">
           <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             dir="rtl"
-            placeholder="ابحث برقم الطاولة أو اسم العميل..."
+            placeholder="ابحث برقم الفاتورة، الطاولة، العميل..."
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            className="pe-10"
+            className="pe-9 h-9 text-xs bg-secondary/30 focus:bg-background transition-colors"
           />
         </div>
+
+        {/* فلاتر المنطقة والمبالغ المالي */}
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={tableFilter}
+            onChange={(e) => setTableFilter(e.target.value)}
+            className="h-9 px-2.5 rounded-lg border border-input bg-secondary/50 text-xs font-bold text-foreground focus:ring-2 focus:ring-primary outline-none cursor-pointer"
+          >
+            <option value="all">🌐 كل المناطق</option>
+            <option value="C">🔒 صالة (C)</option>
+            <option value="O">☀️ صالة (O)</option>
+            <option value="X">👥 داخلي / موظفين (X)</option>
+            <option value="K">🧸 أطفال (K)</option>
+            <option value="ص">🏠 قاعة صغيرة (ص)</option>
+            <option value="ك">🏛️ قاعة كبيرة (ك)</option>
+            <option value="takeaway">🛍️ تيك أواي / دليفري</option>
+          </select>
+
+          <select
+            value={amountFilter}
+            onChange={(e) => setAmountFilter(e.target.value)}
+            className="h-9 px-2.5 rounded-lg border border-input bg-secondary/50 text-xs font-bold text-foreground focus:ring-2 focus:ring-primary outline-none cursor-pointer"
+          >
+            <option value="all">💰 كل المبالغ</option>
+            <option value="lt200">🔻 أقل من 200 ج.م</option>
+            <option value="200-500">💵 200 : 500 ج.م</option>
+            <option value="500-700">💵 500 : 700 ج.م</option>
+            <option value="700-1000">💵 700 : 1000 ج.م</option>
+            <option value="gt1000">💎 أكبر من 1000 ج.م</option>
+          </select>
+
+          {/* منتقي التاريخ المنظم */}
+          <div className="flex items-center gap-1 bg-secondary/50 rounded-lg p-1 px-2 border border-input">
+            <span className="text-[11px] font-bold text-muted-foreground">
+              من:
+            </span>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="h-7 text-xs rounded bg-background border-none px-1 text-primary font-bold cursor-pointer outline-none"
+            />
+            <span className="text-[11px] font-bold text-muted-foreground">
+              إلى:
+            </span>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="h-7 text-xs rounded bg-background border-none px-1 text-primary font-bold cursor-pointer outline-none"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* 🌟 شريط العدادات المصغر (Mini-Stats Bar) مدمج فوق الجدول */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-secondary/20 p-2 rounded-xl border border-border/60">
+        <div className="flex items-center gap-4 px-2">
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground font-semibold">
+              عدد الفواتير:
+            </span>
+            <span className="font-extrabold bg-primary/10 text-primary px-2 py-0.5 rounded-md font-mono">
+              {stats.count}
+            </span>
+          </div>
+          <div className="h-4 w-[1px] bg-border" />
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground font-semibold">
+              الإجمالي النهائي:
+            </span>
+            <span className="font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-md font-mono">
+              {fmt2(stats.sum)} ج.م
+            </span>
+          </div>
+        </div>
+
         <Button
           variant="outline"
           size="sm"
           onClick={exportToExcel}
-          className="gap-2"
+          className="gap-1.5 h-8 text-xs font-bold bg-card hover:bg-secondary shadow-sm"
         >
-          <Download className="w-4 h-4" /> تصدير Excel
+          <Download className="w-3.5 h-3.5 text-emerald-600" /> تصدير Excel
         </Button>
       </div>
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
+
+      {/* 🌟 جدول عرض الفواتير */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
         <table className="w-full text-sm">
-          <thead className="bg-secondary/50 text-xs">
+          <thead className="bg-secondary/60 text-xs">
             <tr>
               <th className="text-right p-3">رقم الفاتورة</th>
-              <th className="text-right p-3">التاريخ</th>
+              <th className="text-right p-3">التاريخ والوقت</th>
               <th className="text-right p-3">نوع الطلب</th>
               <th className="text-right p-3">البيان (الطاولة / العميل)</th>
               <th className="text-right p-3">الكاشير</th>
               <th className="text-right p-3">الأصناف</th>
-              <th className="text-right p-3">المجموع</th>
+              <th className="text-right p-3">المجموع الأصلي</th>
               <th className="text-right p-3">الخصم</th>
-              {/* 🌟 الشرط الجديد: لو صالة يظهر الضريبة، لو تيك أواي أو دليفري تظهر قيمة المنصة */}
-              {sub === "dinein" ? (
-                <th className="text-right p-3 w-16 text-purple-600">الضريبة</th>
-              ) : (
-                <th className="text-right p-3 w-20 text-amber-600 font-bold">
-                  منصة توصيل
-                </th>
-              )}
-              {/* 🌟 تعديل ديناميكي لعمود الكابتن والتوصيل */}
-              {sub === "dinein" ? (
-                <th className="text-right p-3 text-blue-600 font-bold">
-                  كابتن
-                </th>
-              ) : (
-                <th className="text-right p-3">التوصيل</th>
-              )}
-              <th className="text-right p-3">الإجمالي</th>
+              <th className="text-right p-3 text-purple-600 font-bold">
+                الضريبة
+              </th>
+              <th className="text-right p-3 text-blue-600 font-bold">
+                الكابتن / التوصيل
+              </th>
+              <th className="text-right p-3 text-emerald-600 font-bold">
+                الإجمالي النهائي
+              </th>
               <th className="text-right p-3">طباعة</th>
             </tr>
           </thead>
@@ -617,17 +746,19 @@ function InvoicesTab() {
                   colSpan={12}
                   className="p-8 text-center text-muted-foreground"
                 >
-                  لا توجد فواتير مطابقة للفلاتر المحددة.
+                  لا توجد فواتير مطابقة للفلاتر المحددة حالياً.
                 </td>
               </tr>
             ) : (
               rows.map((inv) => (
-                <tr key={inv.id} className="border-t border-border">
-                  <td className="p-3 font-mono text-xs">
+                <tr
+                  key={inv.id}
+                  className="border-t border-border hover:bg-secondary/30 transition-colors"
+                >
+                  <td className="p-3 font-mono text-xs font-bold">
                     {inv.invoiceNumber || "-"}
                   </td>
-                  {/* 🌟 عرض الوقت فقط بدون ثواني بناءً على طلبك السابق */}
-                  <td className="p-3 font-mono" dir="ltr">
+                  <td className="p-3 font-mono text-xs" dir="ltr">
                     {new Date(inv.createdAt)
                       .toLocaleString("en-GB", {
                         hour: "2-digit",
@@ -647,6 +778,14 @@ function InvoicesTab() {
                       <span className="px-2 py-1 rounded bg-green-100 text-green-800 font-medium">
                         تيك أواي 🛍️
                       </span>
+                    ) : inv.type === "staff" ? (
+                      <span className="px-2 py-1 rounded bg-purple-100 text-purple-800 font-bold">
+                        موظفين 👤
+                      </span>
+                    ) : inv.type === "hospitality" ? (
+                      <span className="px-2 py-1 rounded bg-pink-100 text-pink-800 font-bold">
+                        ضيافة ☕
+                      </span>
                     ) : (
                       <span className="px-2 py-1 rounded bg-blue-100 text-blue-800 font-medium">
                         صالة 🍽️
@@ -660,21 +799,21 @@ function InvoicesTab() {
                           {inv.customerName || "عميل نقدي"}
                         </div>
                         {inv.customerAddress && (
-                          <div className="text-xs text-muted-foreground">
+                          <div className="text-xs text-muted-foreground truncate max-w-[150px]">
                             {inv.customerAddress}
                           </div>
                         )}
                       </div>
                     ) : (
-                      <span className="font-mono font-bold text-blue-600">
+                      <span className="font-mono font-bold text-primary text-base">
                         {inv.tableCode || "—"}
                       </span>
                     )}
                   </td>
-                  <td className="p-3 text-muted-foreground">
+                  <td className="p-3 text-muted-foreground text-xs font-medium">
                     {inv.cashierName || "—"}
                   </td>
-                  <td className="p-3">
+                  <td className="p-3 font-bold text-center">
                     {(typeof inv.items === "string"
                       ? JSON.parse(inv.items)
                       : inv.items || []
@@ -683,100 +822,48 @@ function InvoicesTab() {
                       0,
                     )}
                   </td>
-                  <td className="p-3">{fmt2(inv.subtotal)}</td>
-                  <td className="p-3">
+                  <td className="p-3 font-medium">{fmt2(inv.subtotal)}</td>
+                  <td className="p-3 text-xs">
                     {Math.floor(
                       +fmt2(inv.discountPct || (inv as any).discount_pct || 0),
                     )}
                     % &asymp;&nbsp;
-                    {fmt2(
-                      inv.discountValue || (inv as any).discount_value || 0,
-                    )}
-                  </td>
-                  {sub === "dinein" ? (
-                    <td className="p-3">
+                    <span className="text-red-600 font-bold">
                       {fmt2(
-                        inv.taxValue ||
-                          (inv as any).tax_value ||
-                          ((Number(inv.subtotal) -
-                            Number(
-                              inv.discountValue ||
-                                (inv as any).discount_value ||
-                                0,
-                            )) *
-                            Number(inv.taxPct || (inv as any).tax_pct || 0)) /
-                            100 ||
-                          0,
+                        inv.discountValue || (inv as any).discount_value || 0,
                       )}
-                    </td>
-                  ) : (
-                    <td className="p-3 font-bold">
-                      {inv.orderCategory === "talabat" ? (
-                        <span className="px-2 py-0.5 rounded bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200">
-                          طلبات
-                        </span>
-                      ) : inv.orderCategory === "fast" ? (
-                        <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200">
-                          فاست
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground font-normal">
-                          عادي
-                        </span>
-                      )}
-                    </td>
-                  )}
-                  {/* 🌟 خلية الكابتن أو التوصيل حسب حالة الصالة */}
-                  {sub === "dinein" ? (
-                    <td className="p-3 font-bold text-blue-600">
-                      {inv.captainName || inv.captain_name || "—"}
-                    </td>
-                  ) : (
-                    <td className="p-3 font-medium text-amber-600">
-                      {inv.deliveryPrice && inv.deliveryPrice > 0
-                        ? `${fmt2(inv.deliveryPrice)} ج.م`
-                        : "—"}
-                    </td>
-                  )}
-                  <td className="p-3 font-bold text-emerald-600">
-                    {fmt2(
-                      inv.total ||
-                        Number(inv.subtotal || 0) -
-                          Number(
-                            inv.discountValue ||
-                              (inv as any).discount_value ||
-                              0,
-                          ) +
-                          Number(
-                            inv.taxValue ||
-                              (inv as any).tax_value ||
-                              ((Number(inv.subtotal || 0) -
-                                Number(
-                                  inv.discountValue ||
-                                    (inv as any).discount_value ||
-                                    0,
-                                )) *
-                                Number(
-                                  inv.taxPct || (inv as any).tax_pct || 0,
-                                )) /
-                                100 ||
-                              0,
-                          ) +
-                          Number(
-                            inv.deliveryPrice ||
-                              (inv as any).delivery_price ||
-                              0,
-                          ),
+                    </span>
+                  </td>
+                  <td className="p-3 text-purple-600 font-medium">
+                    {fmt2(inv.taxValue || (inv as any).tax_value || 0)}
+                  </td>
+                  <td className="p-3 font-bold text-xs">
+                    {inv.type === "delivery" || inv.type === "takeaway" ? (
+                      <span className="text-amber-600">
+                        {inv.deliveryPrice && inv.deliveryPrice > 0
+                          ? `+${fmt2(inv.deliveryPrice)} ج.م`
+                          : "—"}
+                      </span>
+                    ) : (
+                      <span className="text-blue-600">
+                        {(inv as any).captainName ||
+                          (inv as any).captain_name ||
+                          (inv as any).captain ||
+                          "—"}
+                      </span>
                     )}
                   </td>
-                  <td className="p-3 font-bold">
+                  <td className="p-3 font-black text-emerald-600 text-base">
+                    {fmt2(inv.total)}
+                  </td>
+                  <td className="p-3">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => printInvoice(inv)}
-                      className="gap-2"
+                      className="gap-1.5 h-8 font-bold"
                     >
-                      <Printer className="w-4 h-4" /> طباعة
+                      <Printer className="w-3.5 h-3.5" /> طباعة
                     </Button>
                   </td>
                 </tr>

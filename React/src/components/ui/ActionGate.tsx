@@ -8,6 +8,10 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { getApiUrl } from "@/api";
+
+// 🌟 السحر هنا: استخدمنا الدالة بدل اللينك الثابت
+const API_URL = getApiUrl();
 
 // 🌟 الحل: تم إضافة "مالك" هنا في الأنواع المسموحة
 type EmployeeRole =
@@ -55,7 +59,7 @@ export default function ActionGate({
 
   useEffect(() => {
     if (isOpen && employees.length === 0) {
-      fetch("http://192.168.100.195:5000/api/employees")
+      fetch(`http://${API_URL}:5000/api/employees`)
         .then((res) => res.json())
         .then((data: Employee[]) => setEmployees(data))
         .catch((err) => console.error("Error fetching employees:", err));

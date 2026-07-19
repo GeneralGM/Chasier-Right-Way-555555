@@ -25,6 +25,8 @@ import {
   ShieldAlert,
   Lock,
 } from "lucide-react";
+import { getApiUrl } from "@/api";
+const API_URL = getApiUrl();
 
 // 🌟 استدعاء مكون الحماية
 import ActionGate from "@/components/ui/ActionGate";
@@ -33,7 +35,7 @@ export const Route = createFileRoute("/roles")({
   head: () => ({ meta: [{ title: "بصمات الموظفين - الصلاحيات" }] }),
   component: RolesPage,
 });
-const API_BASE_URL = "http://192.168.100.195:5000";
+const API_BASE_URL = `http://${API_URL}:5000`;
 
 // 🌟 جدول أوزان الصلاحيات للمقارنة الذكية
 const ROLE_WEIGHTS: Record<string, number> = {
@@ -69,7 +71,7 @@ function RolesPage() {
       try {
         setIsLoading(true);
         const response = await fetch(
-          "http://192.168.100.195:5000/api/employees",
+          `http://${API_URL}:5000/api/employees`,
         );
         if (response.ok) {
           const data = await response.json();

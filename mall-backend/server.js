@@ -13,11 +13,11 @@ dotenv.config();
 
 // إعداد الاتصال بقاعدة البيانات PostgreSQL
 const pool = new Pool({
-  user: "postgres",
-  host: "localhost",
-  database: "mall_erp",
-  password: "123456",
-  port: 5432,
+  user: process.env.DB_USER || "postgres",
+  host: process.env.DB_HOST || "localhost", // 👈 هيقرأ الـ IP بتاع الجهاز الرئيسي لو جهاز فرعي
+  database: process.env.DB_DATABASE || "mall_erp",
+  password: process.env.DB_PASSWORD || "123456",
+  port: Number(process.env.DB_PORT) || 5432,
 });
 
 // اختبار الاتصال بقاعدة البيانات للتأكد من نجاحه

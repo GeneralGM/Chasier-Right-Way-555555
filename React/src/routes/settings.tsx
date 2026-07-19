@@ -34,6 +34,8 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
+import { getApiUrl } from "@/api";
+const API_URL = getApiUrl();
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "الإعدادات - أرشيف الفواتير" }] }),
@@ -449,7 +451,7 @@ function InvoicesTab() {
         end.setHours(23, 59, 59, 999);
 
         const response = await fetch(
-          `http://192.168.100.195:5000/api/invoices?startDate=${start.toISOString()}&endDate=${end.toISOString()}`,
+          `http://${API_URL}:5000/api/invoices?startDate=${start.toISOString()}&endDate=${end.toISOString()}`,
         );
         if (response.ok) {
           const data = await response.json();
@@ -797,6 +799,13 @@ interface ShiftReport {
   tax: number;
   total: number;
   revenues: number;
+  // 🌟 الحقول الجديدة لدعم فاست وطلبات
+  fastTotal: number;
+  fastCount: number;
+  fastCommission: number;
+  talabatTotal: number;
+  talabatCount: number;
+  talabatCommission: number;
 }
 
 function ShiftsTab() {
@@ -831,10 +840,10 @@ function ShiftsTab() {
         // التعديل هنا: بنضمن إننا بنجيب الشيفتات الشاملة للمحل كله من السيرفر المركزي
         const [shiftsRes, invoicesRes] = await Promise.all([
           fetch(
-            `http://192.168.100.195:5000/api/shifts?startDate=${startIso}&endDate=${endIso}`,
+            `http://${API_URL}:5000/api/shifts?startDate=${startIso}&endDate=${endIso}`,
           ),
           fetch(
-            `http://192.168.100.195:5000/api/invoices?startDate=${startIso}&endDate=${endIso}`,
+            `http://${API_URL}:5000/api/invoices?startDate=${startIso}&endDate=${endIso}`,
           ),
         ]);
 
@@ -857,7 +866,6 @@ function ShiftsTab() {
   }, [fromDate, toDate]); // 👈 تتحدث فوراً لو اخترت تاريخ مختلف
 
   const shiftsWithData: ShiftReport[] = useMemo(() => {
-    // 🌟 التعديل السحري هنا: دمج الأرشيف القادم من السيرفر مع المحلي لمنع فقدان أي شيفت
     const shiftsMap = new Map();
     serverShifts.forEach((s) => shiftsMap.set(s.id, s));
     pos.shifts.forEach((s) => shiftsMap.set(s.id, s));
@@ -890,6 +898,14 @@ function ShiftsTab() {
 
       let subtotal = kitchen + bar + shisha;
 
+      // 🌟 متغيرات تتبع المنصات لكل شيفت بشكل منفصل
+      let fastTotal = 0;
+      let fastCount = 0;
+      let fastCommission = 0;
+      let talabatTotal = 0;
+      let talabatCount = 0;
+      let talabatCommission = 0;
+
       if (shiftInvoices.length > 0 && db.meals && db.meals.length > 0) {
         kitchen = 0;
         bar = 0;
@@ -912,6 +928,7 @@ function ShiftsTab() {
             Number(inv.taxValue || (inv as any).tax_value) ||
             ((Number(inv.subtotal) - invDiscount) * invTaxPct) / 100 ||
             0;
+
           const deliveryFee = Number(inv.deliveryPrice) || 0;
           deliveryFeesOnly += deliveryFee;
 
@@ -921,10 +938,25 @@ function ShiftsTab() {
             deliveryOnly += inv.total - deliveryFee;
           }
 
-          // 🌟 حساب الأقسام بذكاء بناءً على المكونات عشان الـ Info Modal يطلع مظبوط
+          // 🌟 فرز وحساب منصات فاست وطلبات للشيفتات المجمعة لأرشيف التفاصيل
+          const cat =
+            inv.orderCategory || (inv as any).order_category || "normal";
+          if (cat === "fast") {
+            fastTotal += inv.total;
+            fastCount++;
+            fastCommission += Number(
+              inv.commissionValue || (inv as any).commission_value || 0,
+            );
+          } else if (cat === "talabat") {
+            talabatTotal += inv.total;
+            talabatCount++;
+            talabatCommission += Number(
+              inv.commissionValue || (inv as any).commission_value || 0,
+            );
+          }
+
           for (const line of inv.items) {
             const meal = db.meals.find((m) => m.id === line.mealId);
-
             const extras =
               line.extras?.reduce(
                 (s: any, e: any) => s + Number(e.price || 0),
@@ -934,7 +966,7 @@ function ShiftsTab() {
               (Number(line.unitPrice || line.price || 0) + extras) *
               Number(line.qty || 1);
 
-            let deptName = line.department || "مطبخ"; // الافتراضي
+            let deptName = line.department || "مطبخ";
             if (meal) {
               const isShisha =
                 meal.department === "شيشه" ||
@@ -950,9 +982,8 @@ function ShiftsTab() {
         }
       }
 
-      const finalNetCash = shift.totalRevenue
-        ? Number(shift.totalRevenue)
-        : kitchen + bar + shisha + tax - discount;
+      // المعادلة النهائية المتناسقة
+      const finalNetCash = kitchen + bar + shisha + tax - discount;
 
       return {
         shift,
@@ -969,13 +1000,19 @@ function ShiftsTab() {
         tax: clamp0(tax),
         total: clamp0(finalNetCash),
         revenues: clamp0(finalNetCash),
+        // 🌟 إرسال البيانات المحدثة للمودال
+        fastTotal: clamp0(fastTotal),
+        fastCount,
+        fastCommission: clamp0(fastCommission),
+        talabatTotal: clamp0(talabatTotal),
+        talabatCount,
+        talabatCommission: clamp0(talabatCommission),
       };
     });
   }, [pos.shifts, serverShifts, pos.invoices, serverInvoices, db.meals]);
 
-  // 🌟 دالة طباعة تقرير الشيفت (نفس الصورة بالظبط بدون أي زيادات)
+  // 🌟 دالة طباعة تقرير الشيفت المحدثة بالكامل (مطابقة للشاشة والتقارير)
   const printShiftReport = (shift: any, shiftInvoices: any[]) => {
-    // 1. الحسابات الأساسية للطباعة
     let totalDineIn = 0;
     let totalTakeaway = 0;
     let totalDelivery = 0;
@@ -986,7 +1023,6 @@ function ShiftsTab() {
     let totalDiscount = 0;
     let totalTax = 0;
     let totalDeliveryFee = 0;
-    let netSales = 0;
 
     let cashTotal = 0;
     let visaTotal = 0;
@@ -995,8 +1031,12 @@ function ShiftsTab() {
     let barSales = 0;
     let shishaSales = 0;
 
+    // 🌟 متغيرات المنصات المضافة حديثاً للطباعة
+    let fastTotal = 0;
+    let talabatTotal = 0;
+    let talabatCommission = 0;
+
     shiftInvoices.forEach((inv) => {
-      // تفاصيل المبيعات (أنواع الطلبات)
       if (inv.type === "dinein" || inv.type === "dine-in")
         totalDineIn += Number(inv.total) || 0;
       else if (inv.type === "takeaway") totalTakeaway += Number(inv.total) || 0;
@@ -1006,7 +1046,6 @@ function ShiftsTab() {
       else if (inv.type === "hospitality" || inv.type === "ضيافة")
         totalHospitality += Number(inv.total) || 0;
 
-      // الحسابات المالية
       grossSales += Number(inv.subtotal) || 0;
       const invDiscount =
         Number(inv.discountValue || (inv as any).discount_value) || 0;
@@ -1020,16 +1059,24 @@ function ShiftsTab() {
 
       totalDeliveryFee +=
         Number(inv.deliveryPrice || (inv as any).delivery_price) || 0;
-      netSales += Number(inv.total) || 0;
 
-      // طرق الدفع
+      // 🌟 تجميع حسابات فاست وطلبات جوه لوب الطباعة
+      const cat = inv.orderCategory || (inv as any).order_category || "normal";
+      if (cat === "fast") {
+        fastTotal += Number(inv.total) || 0;
+      } else if (cat === "talabat") {
+        talabatTotal += Number(inv.total) || 0;
+        talabatCommission += Number(
+          inv.commissionValue || (inv as any).commission_value || 0,
+        );
+      }
+
       if (inv.paymentMethod === "visa" || inv.paymentMethod === "فيزا") {
         visaTotal += Number(inv.total) || 0;
       } else {
         cashTotal += Number(inv.total) || 0;
       }
 
-      // 🌟 حساب الأقسام الحقيقية من الأصناف (لإنهاء العبث)
       const itemsArray =
         typeof inv.items === "string" ? JSON.parse(inv.items) : inv.items || [];
       itemsArray.forEach((item: any) => {
@@ -1058,7 +1105,10 @@ function ShiftsTab() {
       });
     });
 
-    // بيانات الهيدر والخزينة
+    // 🌟 المعادلة الموحدة والنهائية للتوتال الصافي تطابق شاشة الـ Reports تماماً
+    const finalNetSales =
+      kitchenSales + barSales + shishaSales + totalTax - totalDiscount;
+
     const shiftOpenTime = shift.openedAt
       ? new Date(shift.openedAt).toLocaleString("ar-EG")
       : "غير محدد";
@@ -1069,7 +1119,6 @@ function ShiftsTab() {
       Number(shift.startingCash) || Number(shift.initialCash) || 0;
     const expectedDrawer = openingBalance + cashTotal;
 
-    // 2. تصميم نافذة الطباعة (HTML/CSS)
     const printWindow = window.open("", "_blank", "width=600,height=800");
     if (!printWindow) {
       toast.error("يرجى السماح بالنوافذ المنبثقة (Pop-ups) للطباعة");
@@ -1101,7 +1150,7 @@ function ShiftsTab() {
           <div class="header-box">
             <div class="header-row"><span>من:</span><span dir="ltr">${shiftOpenTime}</span></div>
             <div class="header-row"><span>إلى:</span><span dir="ltr">${shiftCloseTime}</span></div>
-            <div class="header-row"><span>الكاشير:</span><span>${shift.cashierName || shift.cashier_name|| "غير معروف"}</span></div> 
+            <div class="header-row"><span>الكاشير:</span><span>${shift.cashierName || shift.cashier_name || "غير معروف"}</span></div> 
           </div>
             
           <table>
@@ -1109,23 +1158,25 @@ function ShiftsTab() {
             <tr><td>إجمالي المطبخ</td><td class="bold">${kitchenSales.toFixed(2)}</td></tr>
             <tr><td>إجمالي البار</td><td class="bold">${barSales.toFixed(2)}</td></tr>
             <tr><td>إجمالي الشيشة</td><td class="bold">${shishaSales.toFixed(2)}</td></tr>
-            </table>
+          </table>
             
-            <table>
-            <tr><td colspan="2" class="table-header">الطلبات</td></tr>
-            <tr><td> التيك أواي</td><td class="bold">${totalTakeaway.toFixed(2)}</td></tr>
-            <tr><td> الدليفري</td><td class="bold">${totalDelivery.toFixed(2)}</td></tr>
+          <table>
+            <tr><td colspan="2" class="table-header">توزيع الطلبات والمنصات</td></tr>
+            <tr><td>التيك أواي</td><td class="bold">${totalTakeaway.toFixed(2)}</td></tr>
+            <tr><td>الدليفري</td><td class="bold">${totalDelivery.toFixed(2)}</td></tr>
+            <tr><td>فاست فود (مبيعات)</td><td class="bold">${fastTotal.toFixed(2)}</td></tr>
+            <tr><td>طلبات Talabat (مبيعات)</td><td class="bold">${talabatTotal.toFixed(2)}</td></tr>
             ${totalHospitality > 0 ? `<tr><td>ضيافة</td><td class="bold">${totalHospitality.toFixed(2)}</td></tr>` : ""}
             ${totalStaff > 0 ? `<tr><td>وجبات موظفين</td><td class="bold">${totalStaff.toFixed(2)}</td></tr>` : ""}
             <tr><td>رسوم التوصيل</td><td class="bold">${totalDeliveryFee.toFixed(2)}</td></tr>
-            </table>
+          </table>
             
-            <table>
+          <table>
             <tr><td colspan="2" class="table-header">المجموع النهائي</td></tr>
-              <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
-              <tr><td>إجمالي الخصم</td><td class="bold">${totalDiscount.toFixed(2)}</td></tr>
-              <tr style="background:#eee;"><td>الإيرادات الصافية</td><td class="bold">${netSales.toFixed(2)}</td></tr>
-            </table>
+            <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
+            <tr><td>إجمالي الخصم</td><td class="bold">${totalDiscount.toFixed(2)}</td></tr>
+            <tr style="background:#eee;"><td>الإيرادات الصافية (شاملة النسبة)</td><td class="bold">${finalNetSales.toFixed(2)}</td></tr>
+          </table>
 
           <table>
             <tr><td colspan="2" class="table-header">طرق الدفع</td></tr>
@@ -1313,15 +1364,8 @@ function ShiftsTab() {
               </div>
             </div>
 
-            {/* 📊 شبكة الكروت الإحصائية (مطابقة تماماً لصفحة التقارير) */}
+            {/* 📊 شبكة الكروت الإحصائية الموحدة وشاملة المنصات والعمولة */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {/* الصف الأول: الإيرادات الأساسية للأقسام */}
-              <Card
-                icon={DollarSign}
-                label="الإيرادات الأساسية"
-                value={detailShift.subtotal}
-                accent="slate"
-              />
               <Card
                 icon={ChefHat}
                 label="المطبخ"
@@ -1341,7 +1385,24 @@ function ShiftsTab() {
                 accent="purple"
               />
 
-              {/* الصف الثاني: أنواع الطلبات (إحصائية) */}
+              {/* 🌟 إضافة كروت المنصات والنسبة بالجنيه بشكل مطابق تماماً لصفحة التقرير */}
+              <CardWithCommission
+                icon={Receipt}
+                label="فاست (Fast)"
+                value={detailShift.fastTotal}
+                commission={detailShift.fastCommission}
+                count={detailShift.fastCount}
+                accent="amber"
+              />
+              <CardWithCommission
+                icon={ShoppingBag}
+                label="طلبات (Talabat)"
+                value={detailShift.talabatTotal}
+                commission={detailShift.talabatCommission}
+                count={detailShift.talabatCount}
+                accent="orange"
+              />
+
               <Card
                 icon={ShoppingBag}
                 label="التيك أواي (إحصائية)"
@@ -1360,14 +1421,26 @@ function ShiftsTab() {
                 value={detailShift.deliveryFees}
                 accent="emerald"
               />
+
+              
+              <Card
+                icon={DollarSign}
+                label="الإيرادات الأساسية"
+                value={detailShift.subtotal}
+                accent="slate"
+              />
+              <Card
+                icon={Minus}
+                label="الخصم"
+                value={detailShift.discount}
+                accent="rose"
+              />
               <Card
                 icon={Percent}
                 label="القيمة المضافة (14%)"
                 value={detailShift.tax}
                 accent="indigo"
               />
-
-              {/* الصف الثالث: الحسابات الإجمالية والخصومات */}
               <Card
                 icon={Receipt}
                 label="المجموع الكلي"
@@ -1377,12 +1450,6 @@ function ShiftsTab() {
                   detailShift.deliveryFees
                 }
                 accent="slate"
-              />
-              <Card
-                icon={Minus}
-                label="الخصم"
-                value={detailShift.discount}
-                accent="rose"
               />
             </div>
 
@@ -1462,6 +1529,53 @@ function Card({
         {fmt2(value)}{" "}
         <span className="text-xs font-normal text-muted-foreground">ج.م</span>
       </p>
+    </div>
+  );
+}
+// 🌟 الكومبوننت المساعد لعرض كروت فاست وطلبات شاملة النسبة المضافة بالجنيه
+function CardWithCommission({
+  icon: Icon,
+  label,
+  value,
+  commission,
+  count,
+  accent,
+}: {
+  icon: any;
+  label: string;
+  value: number;
+  commission: number;
+  count: number;
+  accent: string;
+}) {
+  const colors: Record<string, string> = {
+    orange: "bg-orange-50 text-orange-700",
+    amber: "bg-amber-50 text-amber-700",
+  };
+  return (
+    <div className="bg-card border rounded-xl p-4 flex flex-col justify-between relative overflow-hidden">
+      <div className="flex justify-between items-start">
+        <div
+          className={`w-10 h-10 rounded-lg grid place-items-center ${colors[accent] || colors.orange}`}
+        >
+          <Icon className="w-5 h-5" />
+        </div>
+        <span className="text-[11px] font-extrabold bg-pink-50 text-pink-700 px-2 py-1 rounded-md border border-pink-200">
+          {fmt2(commission)}
+        </span>
+      </div>
+      <div className="mt-2">
+        <div className="flex justify-between items-baseline">
+          <p className="text-xs font-bold text-foreground">{label}</p>
+          <span className="text-[10px] text-muted-foreground">
+            ({count} أوردر)
+          </span>
+        </div>
+        <p className="text-xl font-black mt-1 text-primary">
+          {fmt2(value)}{" "}
+          <span className="text-xs font-normal text-muted-foreground">ج.م</span>
+        </p>
+      </div>
     </div>
   );
 }

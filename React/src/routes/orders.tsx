@@ -55,7 +55,8 @@ import {
   Monitor,
   RefreshCw,
 } from "lucide-react";
-
+import { getApiUrl } from "@/api";
+const API_URL = getApiUrl();
 export const Route = createFileRoute("/orders")({
   head: () => ({ meta: [{ title: "الطلبات - نقطة البيع" }] }),
   component: OrdersGate,
@@ -109,9 +110,7 @@ function SecCashierLogin({
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch(
-          "http://192.168.100.195:5000/api/employees",
-        );
+        const response = await fetch(`http://${API_URL}:5000/api/employees`);
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -259,9 +258,7 @@ function ShiftLogin() {
       if (pos.employees && pos.employees.length > 0) return;
       try {
         setIsLoadingEmployees(true);
-        const response = await fetch(
-          "http://192.168.100.195:5000/api/employees",
-        );
+        const response = await fetch(`http://${API_URL}:5000/api/employees`);
         if (response.ok) {
           const data = await response.json();
           setServerEmployees(data);
@@ -583,17 +580,14 @@ function PosScreen() {
       captainPromptMode === "verify_existing" ? order?.captainName : undefined;
 
     try {
-      const res = await fetch(
-        "http://192.168.100.195:5000/api/pos/verify-captain",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            password: captainPin,
-            expectedCaptainName: expectedCaptain, // 🌟 بنبعت للسيرفر الاسم اللي فاتح الطاولة حالياً
-          }),
-        },
-      );
+      const res = await fetch(`http://${API_URL}:5000/api/pos/verify-captain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          password: captainPin,
+          expectedCaptainName: expectedCaptain, // 🌟 بنبعت للسيرفر الاسم اللي فاتح الطاولة حالياً
+        }),
+      });
       const data = await res.json();
 
       if (data.success) {
@@ -1432,6 +1426,7 @@ function OrderEntryDialog({
         modifiersSummary: summary,
         mealName: undefined,
         department: meal.department || "مطبخ",
+        price: 0
       };
       setDraftItems([...draftItems, line]);
     }
@@ -1597,7 +1592,7 @@ function OrderEntryDialog({
       );
       if (printerItems.length > 0) {
         try {
-          await fetch("http://192.168.100.195:5000/api/print-kitchen", {
+          await fetch(`http://${API_URL}:5000/api/print-kitchen`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1750,7 +1745,7 @@ function OrderEntryDialog({
             totalCost: totalCost,
             createdAt: Date.now(),
           };
-          fetch("http://192.168.100.195:5000/api/sales", {
+          fetch(`http://${API_URL}:5000/api/sales`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(newSale),
@@ -2836,7 +2831,7 @@ function CheckoutDialog({
             createdAt: Date.now(),
           };
 
-          fetch("http://192.168.100.195:5000/api/sales", {
+          fetch(`http://${API_URL}:5000/api/sales`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(newSale),
@@ -3239,7 +3234,7 @@ function TransferCaptainDialog({
     if (isMicros) return;
     async function fetchEmps() {
       try {
-        const res = await fetch("http://192.168.100.195:5000/api/employees");
+        const res = await fetch(`http://${API_URL}:5000/api/employees`);
         if (res.ok) setServerEmployees(await res.json());
       } catch (e) {
         console.error(e);
@@ -3271,14 +3266,11 @@ function TransferCaptainDialog({
     setIsSubmitting(true);
 
     try {
-      const res = await fetch(
-        "http://192.168.100.195:5000/api/pos/verify-captain",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password: pin }),
-        },
-      );
+      const res = await fetch(`http://${API_URL}:5000/api/pos/verify-captain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pin }),
+      });
       const data = await res.json();
 
       if (data.success) {

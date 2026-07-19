@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import ActionGate from "@/components/ui/ActionGate";
+import { getApiUrl } from "@/api";
+const API_URL = getApiUrl();
 
 const warehouseNav = [
   { to: "/", label: "لوحة التحكم", icon: LayoutDashboard },
@@ -103,7 +105,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const syncDeviceTypeWithServer = async () => {
       try {
-        const res = await fetch("http://192.168.100.195:5000/api/device-check");
+        const res = await fetch(`http://${API_URL}:5000/api/device-check`);
         const data = await res.json();
         const fetchedType = data.deviceType; // "main" أو "micros" أو "sec_cashier"
 
@@ -131,7 +133,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         // 🌟 🚀 الإضافة السحرية هنا: مزامنة الطابعات بالخلفية 🚀 🌟
         try {
           const printersRes = await fetch(
-            "http://192.168.100.195:5000/api/printers",
+            `http://${API_URL}:5000/api/printers`,
           );
           if (printersRes.ok) {
             const dbPrinters = await printersRes.json();

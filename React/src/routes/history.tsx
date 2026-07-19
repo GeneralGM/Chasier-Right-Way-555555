@@ -12,6 +12,8 @@ import {
   CalendarDays,
   CalendarRange,
 } from "lucide-react";
+import { getApiUrl } from "@/api";
+const API_URL = getApiUrl();
 
 export const Route = createFileRoute("/history")({
   head: () => ({ meta: [{ title: "سجل العمليات - نظام المخزون" }] }),
@@ -78,7 +80,7 @@ function HistoryPage() {
     async function fetchVouchersFromDB() {
       try {
         const response = await fetch(
-          "http://192.168.100.195:5000/api/vouchers",
+          `http://${API_URL}:5000/api/vouchers`,
         );
         if (response.ok) {
           const data = await response.json();

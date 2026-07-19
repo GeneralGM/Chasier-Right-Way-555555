@@ -1,9 +1,12 @@
+/* eslint-disable prettier/prettier */
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { Plus, Trash2, Shield, Network } from "lucide-react";
+import { getApiUrl } from "@/api";
+const API_URL = getApiUrl();
 
 // 🌟 السطر السحري اللي بيعرف الـ Router إن دي صفحة وليها مسار
 export const Route = createFileRoute("/printers-settings")({
@@ -59,7 +62,7 @@ export function PrintersSettingsTab() {
     }
 
     // جلب أحدث نسخة من الداتابيز في الخلفية لضمان التطابق
-    fetch("http://192.168.100.195:5000/api/printers")
+    fetch(`http://${API_URL}:5000/api/printers`)
       .then((res) => (res.ok ? res.json() : null))
       .then((dbData) => {
         if (dbData && Array.isArray(dbData)) {
@@ -79,7 +82,7 @@ export function PrintersSettingsTab() {
 
       // إرسال المصفوفة للباك إند
       const response = await fetch(
-        "http://192.168.100.195:5000/api/printers/bulk",
+        `http://${API_URL}:5000/api/printers/bulk`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

@@ -831,7 +831,9 @@ function InvoicesTab() {
                       0,
                     )}
                   </td>
-                  <td className="p-3 text-center font-medium">{fmt2(inv.subtotal)}</td>
+                  <td className="p-3 text-center font-medium">
+                    {fmt2(inv.subtotal)}
+                  </td>
                   <td className="p-3 text-center text-xs">
                     {Math.floor(
                       +fmt2(inv.discountPct || (inv as any).discount_pct || 0),
@@ -1215,7 +1217,7 @@ function ShiftsTab() {
 
     // 🌟 المعادلة الموحدة والنهائية للتوتال الصافي تطابق شاشة الـ Reports تماماً
     const finalNetSales =
-      kitchenSales + barSales + shishaSales + totalTax - totalDiscount;
+      kitchenSales + barSales + shishaSales + talabatCommission + totalTax - totalDiscount;
 
     const shiftOpenTime = shift.openedAt
       ? new Date(shift.openedAt).toLocaleString("ar-EG")
@@ -1283,6 +1285,7 @@ function ShiftsTab() {
             <tr><td colspan="2" class="table-header">المجموع النهائي</td></tr>
             <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
             <tr><td>إجمالي الخصم</td><td class="bold">${totalDiscount.toFixed(2)}</td></tr>
+            <tr><td>إجمالي الخصم</td><td class="bold">${talabatCommission.toFixed(2)}</td></tr>
             <tr style="background:#eee;"><td>الإيرادات الصافية (شاملة النسبة)</td><td class="bold">${finalNetSales.toFixed(2)}</td></tr>
           </table>
 

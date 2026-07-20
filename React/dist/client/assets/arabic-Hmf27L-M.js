@@ -1,0 +1,1 @@
+function a(e){return e?e.trim().toLowerCase().replace(/[\u064B-\u065F\u0670]/g,"").replace(/[ةه]/g,"ه").replace(/[أإآا]/g,"ا").replace(/ى/g,"ي").replace(/ؤ/g,"و").replace(/ئ/g,"ي").replace(/\s+/g," "):""}function n(e,c){const r=a(c);return r?a(e).includes(r):!0}export{n as a};

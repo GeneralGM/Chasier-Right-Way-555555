@@ -2,6 +2,6 @@
 // src/config.ts
 export const getApiUrl = () => {
   // بيحاول يقرأ الـ IP اللي الفني كتبه وخزنه في البرنامج، لو ملاقاش حاجة بياخد الـ localhost كافتراضي
-  const savedIp = "192.168.1.88";
+  const savedIp = "192.168.100.195";
   return savedIp;
 };

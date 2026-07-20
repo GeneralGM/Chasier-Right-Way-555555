@@ -1,6 +1,23 @@
-import { type ReactNode } from "react";
+import { type ReactNode, useState } from "react";
+import BeginningReloader from "@/components/Beginningreloader";
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  // إلغاء صفحة اللوجن بالكامل وعرض محتوى التطبيق مباشرة
-  return <>{children}</>;
+  const [isLoading, setIsLoading] = useState(true);
+
+  const handleLoadingComplete = () => {
+    setIsLoading(false);
+  };
+
+  return (
+    <>
+      {isLoading ? (
+        <BeginningReloader
+          onComplete={handleLoadingComplete}
+          duration={3500} // 3.5 ثانية (عدّلها لو تبغي وقت تاني)
+        />
+      ) : (
+        children
+      )}
+    </>
+  );
 }

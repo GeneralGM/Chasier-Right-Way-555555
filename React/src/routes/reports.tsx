@@ -128,7 +128,8 @@ function ReportsPage() {
 
     // 🌟 المعادلة النهائية: الإيراد الأساسي للأقسام + الضريبة والخدمة - الخصم
     // بما إن الـ subtotal والـ total بتوع الفاتورة في pos-store مضاف عليهم العمولة جاهز، فالتوتال النهائي مظبوط
-    const finalNetCash = kitchen + bar + shisha + tax - discount;
+    const finalNetCash =
+      kitchen + bar + totalTalabatCommission + shisha + tax - discount;
 
     return {
       kitchen: clamp0(kitchen),
@@ -333,6 +334,13 @@ function ReportsPage() {
           accent="purple"
         />
 
+        <Card
+          icon={ShoppingBag}
+          label="التيك أواي (إحصائية)"
+          value={stats.takeaway}
+          accent="sky"
+        />
+
         <CardWithCommission
           icon={Zap}
           label="فاست(Fast)"
@@ -351,12 +359,6 @@ function ReportsPage() {
           accent="orange"
         />
 
-        <Card
-          icon={ShoppingBag}
-          label="التيك أواي (إحصائية)"
-          value={stats.takeaway}
-          accent="sky"
-        />
         <Card
           icon={Bike}
           label="أوردر التوصيل (إحصائية)"

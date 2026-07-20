@@ -1599,5 +1599,5 @@ app.post("/api/printers/bulk", async (req, res) => {
 //////////////////////////////////////////////////////////////////////////////////////
 const PORT = 5000;
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server is running on all network interfaces on port ${PORT}`);
+  console.log(` Server is running on all network interfaces on port ${PORT}`);
 });

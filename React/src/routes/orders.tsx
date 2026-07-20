@@ -1723,9 +1723,9 @@ function OrderEntryDialog({
         : pos.shift?.cashierId;
       const currentTerminalId = isSecDevice ? "Sub-1" : "Main";
 
+      // ❌ امسح سطر توليد الـ invoiceNumber العشوائي اللي كان هنا
       const inv: any = {
         id: crypto.randomUUID(),
-        invoiceNumber: Math.floor(100000 + Math.random() * 900000),
         type: computedType,
         tableCode: tableCode,
         zone: "takeaway",
@@ -1760,10 +1760,20 @@ function OrderEntryDialog({
         tableCode: tableCode,
       });
 
-      // 2. حفظ الفاتورة والمخازن
-      await addInvoice(inv);
+      // 2. 🌟 حفظ الفاتورة واستقبال النسخة الرسمية المتسلسلة من دالة الـ Store
+      const savedInvoice = await addInvoice(inv);
       deductInventoryForTakeaway();
 
+      // ... (سيب كود تسجيل المبيعات للباك إند زي ما هو بدون تغيير) ...
+
+      // 3. 🌟 طباعة الفاتورة للعميل بالرقم المتسلسل الصح الراجع من السيرفر
+      if (savedInvoice) {
+        triggerPrint(savedInvoice, true); // 👈 لرقم المترتب (1، 2، 3...)دي اللي هتطبع ا
+      }
+
+      clearOrder(tableCode);
+      setTakeawayConfirmOpen(false);
+      onClose();
       // 3. المبيعات
       const salesByDept: Record<string, any[]> = {};
       draftItems.forEach((item: any) => {
@@ -2849,9 +2859,9 @@ function CheckoutDialog({
         ? localStorage.getItem("secCashierId")
         : pos.shift?.cashierId;
 
+      // ❌ امسح سطر توليد الـ invoiceNumber العشوائي اللي كان هنا
       const inv: any = {
         id: crypto.randomUUID(),
-        invoiceNumber: Math.floor(100000 + Math.random() * 900000),
         type: computedType,
         tableCode: tableCode || currentOrder.tableCode,
         zone: currentOrder.zone || (isTakeaway ? "takeaway" : "dine-in"),
@@ -2872,9 +2882,17 @@ function CheckoutDialog({
         createdBy: currentCashierName || "كاشير رئيسي",
       };
 
-      await addInvoice(inv);
+      // 🌟 حفظ الفاتورة واستقبال الفاتورة الرسمية المترتبة من السيرفر
+      const savedInvoice = await addInvoice(inv);
       deductInventory();
-      triggerPrint(inv, true);
+
+      // 🌟 طباعة الفاتورة النهائية بالرقم المتسلسل الصح
+      if (savedInvoice) {
+        triggerPrint(savedInvoice, true); // 👈 طباعة الرقم الصح 1، 2، 3...
+      }
+
+
+      onDone();
 
       const salesByDept: Record<string, any[]> = {};
       currentOrder.items.forEach((item: any) => {

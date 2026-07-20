@@ -645,11 +645,9 @@ export function usePosDB() {
   const addInvoice = useCallback(
     async (inv: Omit<Invoice, "invoiceNumber" | "createdAt">) => {
       const cur = load();
-      const invoiceNumber = Math.floor(100000 + Math.random() * 900000);
       const createdAt = Date.now();
 
       // 1️⃣ حساب القيم بالملي
-      const currentTaxPct = inv.type === "dinein" ? 14 : 0;
       const totals = computeTotals(
         inv.items,
         inv.discountPct || 0,
@@ -657,26 +655,28 @@ export function usePosDB() {
         inv.orderCategory || "normal",
       );
 
-      const deliveryPrice = Number(inv.deliveryPrice || 0); // 🌟 تأمين قيمة الدليفري
+      const deliveryPrice = Number(inv.deliveryPrice || 0);
 
+      // 🌟 جهزنا الأوبجكت المبدئي بدون توليد أي رقم عشوائي هنا
       const fullInvoice: any = {
         ...inv,
         id: crypto.randomUUID(),
-        invoiceNumber,
         createdAt,
-        subtotal: totals.subtotal, // الـ subtotal المدمج فيه الـ 5% جاهز
+        subtotal: totals.subtotal,
         discountValue: totals.discountValue,
-        deliveryPrice: Number(inv.deliveryPrice || 0),
+        deliveryPrice: deliveryPrice,
         taxPct: totals.taxPct,
         taxValue: totals.taxValue,
-        orderCategory: inv.orderCategory || "normal", // 🌟 إرسال الفئة للسيرفر
-        commissionValue: totals.commissionValue, // 🌟 إرسال العمولة للسيرفر
-        total: totals.total + Number(inv.deliveryPrice || 0),
+        orderCategory: inv.orderCategory || "normal",
+        commissionValue: totals.commissionValue,
+        total: totals.total + deliveryPrice,
         terminalId: inv.terminalId || "Main",
         createdBy: inv.cashierName || "Main Cashier",
       };
 
-      // 3️⃣ إرسال الفاتورة
+      let finalInvoiceToSave = { ...fullInvoice, invoiceNumber: 0 }; // قيمة افتراضية للأمان
+
+      // 2️⃣ إرسال الفاتورة واستقبال الرقم المترتب من السيرفر
       try {
         const response = await fetch(`http://${API_URL}:5000/api/invoices`, {
           method: "POST",
@@ -684,20 +684,29 @@ export function usePosDB() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(fullInvoice),
         });
+
         if (response.ok) {
-          console.log("✅ تم حفظ الفاتورة بنجاح في قاعدة البيانات!");
+          // 🌟 السحر هنا: بنستقبل أوبجكت الفاتورة الرسمي اللي السيرفر حط فيه الرقم المتسلسل الصح (1, 2, 3...)
+          const serverInvoice = await response.json();
+          finalInvoiceToSave = serverInvoice;
+          console.log("✅ تم حفظ الفاتورة بالترتيب الصحيح من السيرفر!");
         } else {
-          console.error("❌ السيرفر رفض حفظ الفاتورة، تشيك على الراوت");
+          console.error("❌ السيرفر رفض حفظ الفاتورة");
         }
       } catch (error) {
         console.error("❌ فشل الاتصال بالسيرفر:", error);
       }
 
-      cur.invoices = [fullInvoice, ...cur.invoices];
+      // 3️⃣ حفظ النسخة الرسمية المتسلسلة جوه الكاش المحلي عشان الأرشيف والتقارير
+      cur.invoices = [finalInvoiceToSave, ...cur.invoices];
       save(cur);
       setDb(cur);
-      toast.success(`🎉 تم اعتماد الفاتورة رقم: ${invoiceNumber}`);
-      return fullInvoice;
+
+      toast.success(
+        `🎉 تم اعتماد الفاتورة رقم: ${finalInvoiceToSave.invoiceNumber}`,
+      );
+
+      return finalInvoiceToSave; // 👈 رجعنا الفاتورة الرسمية عشان شاشة الطباعة تاخد الرقم الصح
     },
     [],
   );

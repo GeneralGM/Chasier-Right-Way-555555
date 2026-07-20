@@ -34,6 +34,8 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
+import { FastIcon, TalabatIcon } from "@/Fast&talabaticon";
+
 import { getApiUrl } from "@/api";
 const API_URL = getApiUrl();
 
@@ -609,7 +611,6 @@ function InvoicesTab() {
       <div className="bg-card p-2.5 rounded-xl border border-border shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5">
         {/* مربع البحث النصي الأساسي */}
         <div className="relative flex-1 min-w-[220px]">
-          <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             dir="rtl"
             placeholder="ابحث برقم الفاتورة، الطاولة، العميل..."
@@ -770,7 +771,15 @@ function InvoicesTab() {
                       .replace(",", " ||")}
                   </td>
                   <td className="p-3 text-xs">
-                    {inv.type === "delivery" ? (
+                    {inv.orderCategory === "talabat" ? (
+                      <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-100 text-amber-900 font-semibold text-sm border border-amber-300">
+                        <TalabatIcon size={16} color="#FF5E00" /> طلبات
+                      </span>
+                    ) : inv.orderCategory === "fast" ? (
+                      <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-100 text-amber-900 font-semibold text-sm border border-amber-300">
+                        <FastIcon size={16} color="#FF5E00" /> فاست
+                      </span>
+                    ) : inv.type === "delivery" ? (
                       <span className="px-2 py-1 rounded bg-amber-100 text-amber-800 font-medium">
                         توصيل 🛵
                       </span>

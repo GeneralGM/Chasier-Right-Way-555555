@@ -711,24 +711,24 @@ function InvoicesTab() {
         <table className="w-full text-sm">
           <thead className="bg-secondary/60 text-xs">
             <tr>
-              <th className="text-right p-3">رقم الفاتورة</th>
-              <th className="text-right p-3">التاريخ والوقت</th>
-              <th className="text-right p-3">نوع الطلب</th>
-              <th className="text-right p-3">البيان (الطاولة / العميل)</th>
-              <th className="text-right p-3">الكاشير</th>
-              <th className="text-right p-3">الأصناف</th>
-              <th className="text-right p-3">المجموع الأصلي</th>
-              <th className="text-right p-3">الخصم</th>
-              <th className="text-right p-3 text-purple-600 font-bold">
-                الضريبة
+              <th className="text-center p-3">رقم الفاتورة</th>
+              <th className="text-center p-3">التاريخ والوقت</th>
+              <th className="text-center p-3">نوع الطلب</th>
+              <th className="text-center p-3">الطاولة</th>
+              <th className="text-center p-3">الكاشير</th>
+              <th className="text-center p-3">الأصناف</th>
+              <th className="text-center p-3">المجموع</th>
+              <th className="text-center p-3">الخصم</th>
+              <th className="text-center p-3 text-purple-600 font-bold">
+                الضريبة / المنصة
               </th>
-              <th className="text-right p-3 text-blue-600 font-bold">
+              <th className="text-center p-3 text-blue-600 font-bold">
                 الكابتن / التوصيل
               </th>
-              <th className="text-right p-3 text-emerald-600 font-bold">
+              <th className="text-center p-3 text-emerald-600 font-bold">
                 الإجمالي النهائي
               </th>
-              <th className="text-right p-3">طباعة</th>
+              <th className="text-center p-3">طباعة</th>
             </tr>
           </thead>
           <tbody>
@@ -756,10 +756,10 @@ function InvoicesTab() {
                   key={inv.id}
                   className="border-t border-border hover:bg-secondary/30 transition-colors"
                 >
-                  <td className="p-3 font-mono text-xs font-bold">
+                  <td className="p-3 font-mono text-center text-xs font-bold">
                     {inv.invoiceNumber || "-"}
                   </td>
-                  <td className="p-3 font-mono text-xs" dir="ltr">
+                  <td className="p-3 font-mono text-center text-xs" dir="ltr">
                     {new Date(inv.createdAt)
                       .toLocaleString("en-GB", {
                         hour: "2-digit",
@@ -770,7 +770,7 @@ function InvoicesTab() {
                       })
                       .replace(",", " ||")}
                   </td>
-                  <td className="p-3 text-xs">
+                  <td className="p-3 text-right text-xs">
                     {inv.orderCategory === "talabat" ? (
                       <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-100 text-amber-900 font-semibold text-sm border border-amber-300">
                         <TalabatIcon size={16} color="#FF5E00" /> طلبات
@@ -801,7 +801,7 @@ function InvoicesTab() {
                       </span>
                     )}
                   </td>
-                  <td className="p-3">
+                  <td className="p-3 text-center">
                     {inv.type === "takeaway" || inv.type === "delivery" ? (
                       <div>
                         <div className="font-medium">
@@ -819,10 +819,10 @@ function InvoicesTab() {
                       </span>
                     )}
                   </td>
-                  <td className="p-3 text-muted-foreground text-xs font-medium">
+                  <td className="p-3 text-center text-muted-foreground text-xs font-medium">
                     {inv.cashierName || "—"}
                   </td>
-                  <td className="p-3 font-bold text-center">
+                  <td className="p-3 text-center font-bold text-center">
                     {(typeof inv.items === "string"
                       ? JSON.parse(inv.items)
                       : inv.items || []
@@ -831,8 +831,8 @@ function InvoicesTab() {
                       0,
                     )}
                   </td>
-                  <td className="p-3 font-medium">{fmt2(inv.subtotal)}</td>
-                  <td className="p-3 text-xs">
+                  <td className="p-3 text-center font-medium">{fmt2(inv.subtotal)}</td>
+                  <td className="p-3 text-center text-xs">
                     {Math.floor(
                       +fmt2(inv.discountPct || (inv as any).discount_pct || 0),
                     )}
@@ -843,10 +843,18 @@ function InvoicesTab() {
                       )}
                     </span>
                   </td>
-                  <td className="p-3 text-purple-600 font-medium">
-                    {fmt2(inv.taxValue || (inv as any).tax_value || 0)}
+                  <td className="p-3 text-center">
+                    {inv.commissionValue ? (
+                      <span className="text-purple-600 font-bold text-sm">
+                        {fmt2(inv.commissionValue)}
+                      </span>
+                    ) : (
+                      <span className="text-blue-600 font-medium text-sm">
+                        {fmt2(inv.taxValue || (inv as any).tax_value || 0)}
+                      </span>
+                    )}
                   </td>
-                  <td className="p-3 font-bold text-xs">
+                  <td className="p-3 text-center font-bold text-xs">
                     {inv.type === "delivery" || inv.type === "takeaway" ? (
                       <span className="text-amber-600">
                         {inv.deliveryPrice && inv.deliveryPrice > 0
@@ -862,10 +870,10 @@ function InvoicesTab() {
                       </span>
                     )}
                   </td>
-                  <td className="p-3 font-black text-emerald-600 text-base">
+                  <td className="p-3 text-center font-black text-emerald-600 text-base">
                     {fmt2(inv.total)}
                   </td>
-                  <td className="p-3">
+                  <td className="p-3 text-center">
                     <Button
                       variant="outline"
                       size="sm"

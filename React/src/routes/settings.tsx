@@ -1285,7 +1285,7 @@ function ShiftsTab() {
             <tr><td colspan="2" class="table-header">المجموع النهائي</td></tr>
             <tr><td>إجمالي الضريبة</td><td class="bold">${totalTax.toFixed(2)}</td></tr>
             <tr><td>إجمالي الخصم</td><td class="bold">${totalDiscount.toFixed(2)}</td></tr>
-            <tr><td>إجمالي الخصم</td><td class="bold">${talabatCommission.toFixed(2)}</td></tr>
+            <tr><td>نسبة طالبات</td><td class="bold">${talabatCommission.toFixed(2)}</td></tr>
             <tr style="background:#eee;"><td>الإيرادات الصافية (شاملة النسبة)</td><td class="bold">${finalNetSales.toFixed(2)}</td></tr>
           </table>
 

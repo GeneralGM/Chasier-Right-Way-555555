@@ -312,6 +312,7 @@ export function usePosDB() {
 
     save(cur);
   }, []);
+  
 
   return {
     db,

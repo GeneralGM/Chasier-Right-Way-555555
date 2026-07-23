@@ -1594,8 +1594,87 @@ app.post("/api/printers/bulk", async (req, res) => {
   } finally {
     client.release();
   }
+});// أضف هذه الاستدعاءات في أعلى ملف server.js
+import { exec } from "child_process";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import multer from "multer";
+
+// إعداد مسار مؤقت لاستقبال ملفات الـ Backup
+const upload = multer({ dest: os.tmpdir() });
+
+// ==========================================
+// 📦 مسارات النسخ الاحتياطي والاستعادة بصيغة SQL
+// ==========================================
+
+// مسار PostgreSQL من بيئة العمل (إن وُجد)
+const getPgToolPath = (toolName) => {
+  return process.env.PG_BIN_PATH 
+    ? `"${path.join(process.env.PG_BIN_PATH, toolName)}"` 
+    : toolName; // لو مش موجود في .env هيحاول يشغله افتراضياً
+};
+
+// 1️⃣ مسار إنشاء وحفظ نسخة احتياطية (Save Backup / Download)
+app.get("/api/backup/download", (req, res) => {
+  const dbUser = process.env.DB_USER || "postgres";
+  const dbHost = process.env.DB_HOST || "localhost";
+  const dbName = process.env.DB_NAME || "mall_erp";
+  const dbPass = process.env.DB_PASSWORD || "123456";
+  const dbPort = process.env.DB_PORT || 5432;
+
+  const fileName = `backup_${dbName}_${new Date().toISOString().slice(0, 10)}.sql`;
+  const filePath = path.join(os.tmpdir(), fileName);
+
+  // تحديد أداة pg_dump ديناميكياً
+  const pgDump = getPgToolPath('pg_dump');
+  const dumpCmd = `${pgDump} -U ${dbUser} -h ${dbHost} -p ${dbPort} -d ${dbName} --clean --if-exists -f "${filePath}"`;
+
+  exec(dumpCmd, { env: { ...process.env, PGPASSWORD: dbPass } }, (error, stdout, stderr) => {
+    if (error) {
+      console.error("❌ خطأ أثناء إنشاء النسخة الاحتياطية (التفاصيل):", stderr || error.message);
+      return res.status(500).json({ error: "فشل إنشاء النسخة الاحتياطية من قاعدة البيانات. تأكد من مسار PG_BIN_PATH في ملف .env" });
+    }
+
+    res.download(filePath, fileName, (err) => {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    });
+  });
 });
 
+// 2️⃣ مسار استعادة النسخة الاحتياطية (Restore Backup)
+app.post("/api/backup/restore", upload.single("backupFile"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "لم يتم رفع أي ملف، يرجى المحاولة مرة أخرى." });
+  }
+
+  const filePath = req.file.path;
+  
+  const dbUser = process.env.DB_USER || "postgres";
+  const dbHost = process.env.DB_HOST || "localhost";
+  const dbName = process.env.DB_NAME || "mall_erp";
+  const dbPass = process.env.DB_PASSWORD || "123456";
+  const dbPort = process.env.DB_PORT || 5432;
+
+  // تحديد أداة psql ديناميكياً
+  const psqlTool = getPgToolPath('psql');
+  const restoreCmd = `${psqlTool} -U ${dbUser} -h ${dbHost} -p ${dbPort} -d ${dbName} -f "${filePath}"`;
+
+  exec(restoreCmd, { env: { ...process.env, PGPASSWORD: dbPass } }, (error, stdout, stderr) => {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    if (error) {
+      console.error("❌ خطأ في عملية الاستعادة (التفاصيل):", stderr || error.message);
+      return res.status(500).json({ error: "فشلت عملية استعادة البيانات. تأكد من مسار PG_BIN_PATH وصلاحيات الملف." });
+    }
+
+    res.json({ success: true, message: "تمت استعادة النسخة الاحتياطية بنجاح 100%!" });
+  });
+});
 //////////////////////////////////////////////////////////////////////////////////////
 const PORT = 5000;
 app.listen(PORT, "0.0.0.0", () => {

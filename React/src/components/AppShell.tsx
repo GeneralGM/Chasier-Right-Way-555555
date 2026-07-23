@@ -17,6 +17,7 @@ import {
   UserPen,
   type LucideIcon,
   ShieldAlert,
+  Database,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import ActionGate from "@/components/ui/ActionGate";
@@ -66,7 +67,14 @@ const primaryNav: NavItem[] = [
     icon: Settings,
     showFor: ["main", "sec_cashier"],
   },
-  // 🌟 2. إضافة تابة الـ IPs والطابعات (للكاشير الرئيسي فقط + حماية المالك)
+  // 🌟 التابة الجديدة الخاصة بالنسخ الاحتياطي (للجهاز الرئيسي / المالك)
+  {
+    to: "/backup",
+    label: "النسخ الاحتياطي",
+    icon: Database,
+    showFor: ["main"],
+    requiredRole: "مالك", // حماية إضافية ببصمة المالك
+  },
   {
     to: "/printers-settings", // مسار شاشة إعدادات الـ IPs بالطابعات (تقدر تغيره لو مسميه اسم تاني عندك)
     label: "IPs",
